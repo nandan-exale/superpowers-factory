@@ -110,6 +110,8 @@ class InstalledProject:
             target = self.root / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(VENDOR / rel, target)
+        subprocess.run([sys.executable, str(PLUGIN / "bin" / "factory-manifest"), str(self.root)],
+                       check=True, capture_output=True)
         self.write("factory/checks.sh", CHECKS_SH, executable=True)
         self.write(".gitignore", "/factory/jobs/\n/.worktrees/\n")
         self.write(".claude/settings.json", json.dumps(SETTINGS, indent=2) + "\n")

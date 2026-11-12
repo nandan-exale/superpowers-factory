@@ -48,6 +48,21 @@ security reviewers. Models are aliases listed in `model_aliases`; efforts come
 from `effort_levels`. To see what a role will run on:
 `factory/bin/job agent <job> <role>`.
 
+## Automatic setup and updates
+
+With the plugin enabled, a session in any GitHub project starts with a
+check:
+
+- no factory: Claude offers `/factory-install` once (decline, and it stops
+  asking in that clone; `bin/factory-state reset` brings the offer back);
+- factory older than the plugin: Claude offers `/factory-update`, which
+  copies what you haven't changed, merges `config.json` keys, keeps your
+  `checks.sh`, and walks you through files changed on both sides;
+- factory current: when writing-plans asks how to execute a plan, the
+  factory is option 3, which files it with `/factory-handoff`.
+
+Nothing is installed, updated or committed without your yes.
+
 ## Hands-off running
 
 On macOS, `factory/bin/runner` runs `/factory run` every 15 minutes while

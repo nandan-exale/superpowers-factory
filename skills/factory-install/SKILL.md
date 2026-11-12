@@ -38,6 +38,12 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
     factory/bin/stop-hook factory/bin/doctor factory/bin/runner
   ```
 
+- **Step 1 (Copy), manifest:** right after copying, before adapting any file,
+  run `"<skill base>/../../bin/factory-manifest" .`. It records each copied
+  file's pristine hash in `factory/manifest.json` (commit it with the
+  install), so `/factory-update` can tell your adaptations from upstream
+  changes later.
+
 - **Step 2 (Adapt), labels:** also create the planned label:
 
   ```bash

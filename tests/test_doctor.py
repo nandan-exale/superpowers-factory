@@ -35,6 +35,10 @@ class DoctorTest(unittest.TestCase):
         self.edit("factory/config.json", change)
         self.assertFails("config", "budgets.daily_usd must be a positive number or null")
 
+    def test_missing_manifest_fails(self):
+        (self.p.root / "factory/manifest.json").unlink()
+        self.assertFails("files", "factory/manifest.json missing")
+
     def test_missing_budgets_fails(self):
         def change(text):
             cfg = json.loads(text)
