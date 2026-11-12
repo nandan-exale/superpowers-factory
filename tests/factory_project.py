@@ -36,6 +36,7 @@ class FactoryProject:
         self.origin = root / "origin.git"
         self.repo = root / "project"
         git(root, "init", "-q", "--bare", "-b", "main", str(self.origin))
+        git(self.origin, "config", "receive.autogc", "false")
         git(root, "clone", "-q", str(self.origin), str(self.repo))
         git(self.repo, "config", "user.email", "test@example.com")
         git(self.repo, "config", "user.name", "Test")

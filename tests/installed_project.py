@@ -87,6 +87,9 @@ def clean_env():
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_CONFIG_NOSYSTEM"] = "1"
+    # No background gc or maintenance: a detached git still writing would race the tempdir cleanup.
+    env.update(GIT_CONFIG_COUNT="2", GIT_CONFIG_KEY_0="gc.auto", GIT_CONFIG_VALUE_0="0",
+               GIT_CONFIG_KEY_1="maintenance.auto", GIT_CONFIG_VALUE_1="false")
     return env
 
 

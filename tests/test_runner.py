@@ -91,6 +91,7 @@ class RunnerCase(unittest.TestCase):
     def add_origin(self):
         origin = self.tmp / "origin.git"
         git(self.tmp, "init", "-q", "--bare", "-b", "main", str(origin))
+        git(origin, "config", "receive.autogc", "false")
         git(self.p.root, "branch", "-M", "main")
         git(self.p.root, "remote", "add", "origin", str(origin))
         git(self.p.root, "push", "-q", "-u", "origin", "main")
