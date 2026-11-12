@@ -18,6 +18,7 @@ Usage:
   job agent <job> <role>         print model=<alias> effort=<level> for intake, spec-writer, builder, approver or reviewer-<r>
   job planned <job>              factory:planned issue → intake.md, spec.md, plan.md, routed, in build
   job sync <job>                 refresh reviews, gate and cost from the job's files
+  job evidence <job>             write evidence.md; make it the PR body if there is a PR
   job summary [<job>...]         table of jobs: issue, stage, PR, cost, time
 
 <job> is a job id (004-dark-mode) or an issue number (12).
@@ -628,6 +629,57 @@ def next_round(job):
     job["feedback_pending"] = []
 
 
+# ---- Evidence --------------------------------------------------------------
+
+EVIDENCE_TAIL = 15
+
+
+def evidence_md(job):
+    """The PR body: why the factory thinks this job is done, or why it stopped."""
+    d = job_dir(job["id"])
+    b = budgets()
+    build = d / "build.md"
+
+    def build_section(heading):
+        return (section(build, heading) if build.exists() else None) or "none recorded"
+
+    files = ""
+    if Path(job["worktree"]).is_dir():
+        files = git(job, "diff", "--stat", f"origin/{BASE}...HEAD", check=False).stdout.strip()
+    checks = "not run"
+    if job["round"] and (round_dir(job) / "checks.md").exists():
+        lines = (round_dir(job) / "checks.md").read_text().splitlines()
+        checks = "\n".join([lines[0] if lines else "", "", "```", *lines[-EVIDENCE_TAIL:], "```"])
+    planned = (f"{build_section('Plan tasks')}\n\nDeviations:\n{build_section('Deviations')}"
+               if job.get("planned") else "not a planned job")
+    reviews = "\n".join(f"- {r} — {v}" for r, v in sorted((job.get("reviews") or {}).items()))
+    hours = (datetime.now(timezone.utc) - parse_time(job["started"])).total_seconds() / 3600
+    usd_limit = f"${b['job_usd']:.2f}" if b["job_usd"] is not None else "no limit"
+    hours_limit = f"{b['job_hours']:g} h" if b["job_hours"] is not None else "no limit"
+    return "\n".join([
+        "<!-- factory evidence -->",
+        f"## Factory evidence — {job['id']}, round {job['round']}",
+        "", "### Files changed", files or "none",
+        "", "### Checks", checks,
+        "", "### Acceptance criteria", build_section("Acceptance criteria"),
+        "", "### Plan tasks and deviations", planned,
+        "", "### Reviews", reviews or "none",
+        "", "### Budget",
+        f"Rounds {job['round']} of {job['round_limit']} · cost ${job['cost_usd']:.2f} of {usd_limit}"
+        f" · time {hours:.1f} h of {hours_limit}",
+        "", f"Closes #{job['issue']}", "",
+    ])
+
+
+def publish_evidence(job):
+    """Write evidence.md and, if the job has a PR, make it the PR body."""
+    path = job_dir(job["id"]) / "evidence.md"
+    path.write_text(evidence_md(job))
+    if job["pr"]:
+        gh("pr", "edit", str(job["pr"]), "--body-file", str(path))
+    return path
+
+
 def notify_needs_human(job):
     """Post decision.md's reason where the human will look, and label the issue."""
     d = job_dir(job["id"])
@@ -648,6 +700,8 @@ def stop_for_budget(job, reason):
     notify_needs_human(job)
     job["stage"] = "needs-human"
     job["ended"] = now()
+    if job["pr"]:
+        publish_evidence(job)
     return job
 
 
@@ -802,6 +856,8 @@ def advance(job, stage):
 
     job["stage"] = stage
     job["ended"] = now() if stage in TERMINAL | WAITING else None
+    if stage in {"approve", "needs-human"} and job["pr"]:
+        publish_evidence(job)
     return job
 
 
@@ -1109,6 +1165,8 @@ def main(argv):
             save(job)
             reviews = " ".join(f"{k}:{v}" for k, v in job["reviews"].items())
             print(f"{job['id']}: {job['stage']} round {job['round']} gate {job['gate'] or '-'} {reviews}".rstrip())
+        elif cmd == "evidence" and len(args) == 1:
+            print(publish_evidence(sync(resolve(args[0]))))
         elif cmd == "summary":
             cmd_summary(args)
         else:
