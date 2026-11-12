@@ -114,7 +114,7 @@ def check_frontmatter(root, opts):
 
 def check_compile(root, opts):
     problems = []
-    for name in ("job", "gate", "route"):
+    for name in ("job", "gate", "route", "stop-hook", "doctor"):
         path = root / FACTORY / "bin" / name
         try:
             compile(path.read_text(encoding="utf-8"), str(path), "exec")

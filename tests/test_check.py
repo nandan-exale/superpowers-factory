@@ -73,6 +73,10 @@ class CheckTest(RepoCopyTest):
         self.assertNotIn("FAIL", out)
         self.assertIn("PASS license", out)
 
+    def test_syntax_error_in_stop_hook_fails(self):
+        self.edit("vendor/factory/factory/bin/stop-hook", lambda text: text + "\ndef broken(:\n")
+        self.assertFails("compile", "bin/stop-hook:")
+
     def test_missing_notice_fails(self):
         (self.root / "vendor/factory/NOTICE").unlink()
         self.assertFails("license", "vendor/factory/NOTICE is missing or empty")
