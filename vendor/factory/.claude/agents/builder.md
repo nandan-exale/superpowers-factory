@@ -1,7 +1,7 @@
 ---
 name: builder
 description: Factory step 3. Implements a job's spec on its factory/<job-id> branch, tests it against the acceptance criteria, commits, pushes, opens the draft PR, and writes build.md. Resumed with SendMessage for each new round.
-tools: Read, Grep, Glob, Bash, Edit, Write
+tools: Read, Grep, Glob, Bash, Edit, Write, Skill
 model: opus
 hooks:
   Stop:
@@ -31,6 +31,8 @@ other jobs.
    instructions. Follow them.
 2. `<job folder>/spec.md`: what to build. The acceptance criteria are your test
    plan. `issue.md` and `intake.md` are background; the spec is what you build.
+   If `<job folder>/plan.md` exists, this is a planned job: read the plan in
+   full too, and follow **Planned jobs** below.
 3. When a round's gate failed, `round-<N>/checks.md` and `checks.log` in the
    job folder: the failing output of `factory/checks.sh`.
 4. When reviews asked for changes, every `review-*.md` in the round folder the
@@ -58,6 +60,29 @@ other jobs.
   `factory/config.json`; the gate fails the branch if you do. If the spec
   can't be met without changing a protected file, write a BLOCKED build.md
   that says which file and why.
+
+## Planned jobs
+
+When `plan.md` exists, a human approved it before the job started. It is
+the build order, not a suggestion.
+
+- Load these Superpowers skills with the Skill tool and follow them:
+  `superpowers:test-driven-development` for every task,
+  `superpowers:systematic-debugging` whenever a test or the gate fails, and
+  `superpowers:verification-before-completion` before you write
+  `STATUS: READY`. If a skill can't be loaded, write `STATUS: BLOCKED` and
+  name the skill under `## Blocked`.
+- Round 1: carry out the plan's tasks in order, one commit per task. The plan
+  works in the main checkout's terms; you work in the worktree, so translate
+  its paths and skip any step that creates a branch or worktree, or that
+  merges, opens a PR or pushes anything other than your job branch.
+- If a task can't be done as written (the plan is wrong, or contradicts the
+  spec or the code), stop there: write `STATUS: BLOCKED`, naming the task and
+  why under `## Blocked`. Don't redesign.
+- A small departure that keeps the task's intent (a renamed helper, a moved
+  line) is allowed. Record each one under `## Deviations` with the reason.
+- Rounds after the first: fix only the gate failure, the review findings or
+  the feedback. Don't re-run the plan.
 
 ## Test
 
@@ -112,6 +137,14 @@ The files changed and what each change does.
 ## Acceptance criteria
 1. [x] <criterion>: <evidence>
 2. [x] ...
+
+## Plan tasks
+Planned jobs only: every task in plan.md, ticked when its commit is in.
+1. [x] Task 1: <name> (<short sha>)
+2. [ ] ...
+
+## Deviations
+Planned jobs only: each departure from plan.md and why, or "None."
 
 ## Validation
 The commands you ran and whether each one passed.
