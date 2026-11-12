@@ -12,6 +12,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 FACTORY = Path("vendor/factory/factory")
 JSON_FILES = (
+    ".claude/settings.json",
     ".claude-plugin/plugin.json",
     ".claude-plugin/marketplace.json",
     "vendor/factory/factory/config.json",

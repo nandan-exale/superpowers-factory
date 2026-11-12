@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Claude Code Stop hook: block stopping while the tree has changes and scripts/check fails.
+
+Exits 0 on a clean tree, on passing checks, and on the second stop attempt
+(stop_hook_active), so it can't loop. Set CHECK_HOOK_FAST=1 to pass --fast.
+"""
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+CHECK = Path(__file__).resolve().with_name("check")
+
+
+def git(cwd, *args):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+
+
+def main():
+    try:
+        payload = json.load(sys.stdin)
+    except ValueError:
+        payload = {}
+    cwd = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    try:
+        status = git(cwd, "status", "--porcelain")
+    except FileNotFoundError:
+        print("check-hook: git not found; skipping checks", file=sys.stderr)
+        return 0
+    if status.returncode != 0:
+        print("check-hook: not a git repository; skipping checks", file=sys.stderr)
+        return 0
+    if not status.stdout.strip():
+        return 0
+    root = git(cwd, "rev-parse", "--show-toplevel").stdout.strip()
+    cmd = [sys.executable, str(CHECK), "--root", root]
+    if os.environ.get("CHECK_HOOK_FAST") == "1":
+        cmd.append("--fast")
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode == 0:
+        return 0
+    failures = [line for line in res.stdout.splitlines() if line.startswith("FAIL ")]
+    print("scripts/check failed:\n" + "\n".join(failures), file=sys.stderr)
+    if payload.get("stop_hook_active"):
+        print("Not blocking again; fix these before you finish.", file=sys.stderr)
+        return 0
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

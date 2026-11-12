@@ -1,6 +1,7 @@
 """Tests for scripts/check and scripts/check-hook, run on copies of this repo."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -10,6 +11,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 CHECK = REPO / "scripts" / "check"
+HOOK = REPO / "scripts" / "check-hook"
 CONFIG = "vendor/factory/factory/config.json"
 
 
@@ -153,6 +155,46 @@ class CheckTest(RepoCopyTest):
         self.assertEqual(code, 1, out)
         self.assertIn("agents/intake.md: unreadable", out)
         self.assertIn("agents/builder.md: sets model", out)
+
+
+class CheckHookTest(RepoCopyTest):
+    def run_hook(self, payload=None, cwd=None):
+        env = {**os.environ, "CHECK_HOOK_FAST": "1", "CLAUDE_PROJECT_DIR": str(cwd or self.root)}
+        res = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(payload or {}),
+                             capture_output=True, text=True, env=env)
+        return res.returncode, res.stderr
+
+    def test_clean_tree_skips(self):
+        (self.root / "vendor/factory/NOTICE").write_text("")
+        git(self.root, "-c", "user.email=t@e.com", "-c", "user.name=t",
+            "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
+            "commit", "-qam", "empty notice")
+        code, err = self.run_hook()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(err, "")
+
+    def test_dirty_passing_tree_allows_stop(self):
+        self.edit("README.md", lambda text: text + "\nmore\n")
+        code, err = self.run_hook()
+        self.assertEqual(code, 0, err)
+
+    def test_dirty_failing_tree_blocks(self):
+        (self.root / "vendor/factory/NOTICE").unlink()
+        code, err = self.run_hook()
+        self.assertEqual(code, 2)
+        self.assertIn("FAIL license: vendor/factory/NOTICE is missing or empty", err)
+
+    def test_second_stop_does_not_block_again(self):
+        (self.root / "vendor/factory/NOTICE").unlink()
+        code, err = self.run_hook({"stop_hook_active": True})
+        self.assertEqual(code, 0)
+        self.assertIn("FAIL license", err)
+
+    def test_outside_git_repo_does_not_block(self):
+        with tempfile.TemporaryDirectory() as outside:
+            code, err = self.run_hook(cwd=outside)
+        self.assertEqual(code, 0)
+        self.assertIn("not a git repository", err)
 
 
 if __name__ == "__main__":
