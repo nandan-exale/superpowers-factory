@@ -588,6 +588,7 @@ def sync(job):
                 m = re.fullmatch(r"VERDICT:\s*(PASS|CHANGES)", line or "")
                 job["reviews"][r] = m.group(1) if m else ("pending" if line is None else "invalid")
     job["cost_usd"] = cost_usd(job)
+    job["job_usd"] = budgets()["job_usd"]
     return job
 
 
@@ -1113,13 +1114,18 @@ def elapsed(job):
     return f"{minutes // 60}h{minutes % 60:02d}m" if minutes >= 60 else f"{minutes}m"
 
 
+def cost_cell(job):
+    limit = budgets()["job_usd"]
+    return f"${job['cost_usd']:.2f}/${limit:.2f}" if limit is not None else f"${job['cost_usd']:.2f}"
+
+
 def cmd_summary(args):
     jobs = [resolve(a) for a in args] if args else all_jobs()
     rows = [("job", "issue", "stage", "round", "pr", "cost", "time")]
     for j in jobs:
         sync(j)  # for display only; the orchestrator owns the saved state
         rows.append((j["id"], f"#{j['issue']}", j["stage"], str(j["round"]),
-                     f"#{j['pr']}" if j["pr"] else "-", f"${j['cost_usd']:.2f}", elapsed(j)))
+                     f"#{j['pr']}" if j["pr"] else "-", cost_cell(j), elapsed(j)))
     widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
     for r in rows:
         print("  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip())

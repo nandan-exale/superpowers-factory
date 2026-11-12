@@ -176,6 +176,13 @@ files (new or pending), treat the round as CHANGES and add
 A job is finished for this run when it reaches `merged`, `rejected`,
 `needs-info` or `needs-human`.
 
+**Budgets.** `factory/bin/job advance` may print
+`BUDGET: <id> → needs-human (<reason>)` instead of the move you asked for:
+the job went over `budgets.job_usd` or `budgets.job_hours` and is finished
+for this run. Report the line. If it refuses with `daily budget: …`, the
+factory has spent `budgets.daily_usd` in the last 24 h: start nothing else,
+let running agents finish, then end the run with the summary.
+
 A person can merge a job's PR by hand at any stage. `factory/bin/job queue`
 then moves the job to `merged`; stop any agents still running for it.
 
@@ -188,7 +195,7 @@ then moves the job to `merged`; stop any agents still running for it.
    `new` and replied `needs-info` lines as there are free slots come out as
    `new` or `resume`; the rest are `hold`. `job create` and the
    `needs-info → intake` move refuse when no slot is free. A failing `gh`
-   call stops `job queue`; fix it and run again.
+   call stops `job queue`; fix it and run again. `wait` lines whose note starts with `daily budget` mean the daily cap is reached: start nothing.
 2. Start every `resume` and `new` line, nothing else. Don't judge issues
    yourself: every new issue goes to intake, which decides whether it gets
    built. For a new issue, `factory/bin/job create <n>` prints the job id;

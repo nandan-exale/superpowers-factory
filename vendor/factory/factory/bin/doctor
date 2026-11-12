@@ -59,6 +59,14 @@ def check_config():
             problems.append(fail(f"{where}: model {entry.get('model')!r} not in model_aliases"))
         if entry.get("effort") not in efforts:
             problems.append(fail(f"{where}: effort {entry.get('effort')!r} not in effort_levels"))
+    budget = cfg.get("budgets")
+    if not isinstance(budget, dict):
+        problems.append(fail("budgets missing; expected job_usd, job_hours and daily_usd"))
+    else:
+        for key in ("job_usd", "job_hours", "daily_usd"):
+            v = budget.get(key, "missing")
+            if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0):
+                problems.append(fail(f"budgets.{key} must be a positive number or null, not {v!r}"))
     return problems
 
 

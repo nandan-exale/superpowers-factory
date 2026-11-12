@@ -27,6 +27,22 @@ class DoctorTest(unittest.TestCase):
         path = self.p.root / rel
         path.write_text(change(path.read_text(encoding="utf-8")), encoding="utf-8")
 
+    def test_invalid_budget_fails(self):
+        def change(text):
+            cfg = json.loads(text)
+            cfg["budgets"]["daily_usd"] = -1
+            return json.dumps(cfg)
+        self.edit("factory/config.json", change)
+        self.assertFails("config", "budgets.daily_usd must be a positive number or null")
+
+    def test_missing_budgets_fails(self):
+        def change(text):
+            cfg = json.loads(text)
+            del cfg["budgets"]
+            return json.dumps(cfg)
+        self.edit("factory/config.json", change)
+        self.assertFails("config", "budgets missing")
+
     def test_healthy_install_passes(self):
         res = self.doctor("--fast")
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)

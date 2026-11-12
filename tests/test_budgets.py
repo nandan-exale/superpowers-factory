@@ -117,5 +117,14 @@ class EnforcementTest(BudgetCase):
         self.assertIn("daily budget", actions["8"][1])
 
 
+class SummaryTest(BudgetCase):
+    def test_summary_shows_cost_against_limit(self):
+        self.cost = 3.0
+        self.assertIn("$3.00/$25.00", self.run_main("summary"))
+
+    def test_sync_records_limit_for_dashboard(self):
+        self.assertEqual(self.current()["job_usd"], 25)
+
+
 if __name__ == "__main__":
     unittest.main()
