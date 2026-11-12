@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a personal Claude Code plugin that hands Superpowers-approved spec + plan pairs to a vendored, lightly modified software factory, which builds each plan unattended as one PR.
+**Goal:** Build a personal Claude Code plugin that hands Superpowers-approved spec + plan pairs to a vendored, lightly modified Software Factory v2, which builds each plan unattended as one PR.
 
 **Architecture:** The plugin vendors the upstream factory at a pinned commit (committed unchanged first, so our edits show as diffs), then edits five upstream files: `factory/bin/job` gains a `planned` subcommand that turns a `factory-plan` block in the issue body into `intake.md`, `spec.md`, `plan.md` and a routed job in `build`, and the orchestrator skill and the builder, code-reviewer and approver agents learn about planned jobs. Two plugin skills sit on top: `factory-install` (puts the factory into a project) and `factory-handoff` (files a planned issue from a committed spec + plan).
 
@@ -23,7 +23,7 @@
 | `LICENSE` | GPLv3, copied from upstream. |
 | `README.md` | What the plugin is, install, the flow. |
 | `.gitignore` | Python caches. |
-| `vendor/factory/UPSTREAM` | Upstream URL + pinned sha. |
+| `vendor/factory/NOTICE` | GPLv3 modification notice. |
 | `vendor/factory/**` | Upstream factory files (paths mirror where they go in a project). |
 | `vendor/factory/factory/bin/job` | **Edited:** `planned` subcommand, `intake → needs-human`, worktree guard. |
 | `vendor/factory/factory/config.json` | **Edited:** `labels.planned`. |
@@ -102,8 +102,7 @@ __pycache__/
 ````markdown
 # superpowers-factory
 
-Design with [Superpowers](https://github.com/obra/superpowers), build with the
-vendored software factory.
+Design with [Superpowers](https://github.com/obra/superpowers).
 
 You brainstorm and plan interactively. `/factory-handoff` turns the committed
 spec and plan into one GitHub issue labeled `factory` + `factory:planned`.
@@ -140,15 +139,16 @@ upstream intake and spec-writer agents.
 ## Layout
 
 - `skills/factory-install`, `skills/factory-handoff`: this plugin's skills.
-- `vendor/factory/`: the upstream factory at the sha in `vendor/factory/UPSTREAM`,
+- `vendor/factory/`: the vendored factory (see `vendor/factory/NOTICE`),
   with edits to `factory/bin/job`, `factory/config.json`, the `factory` skill,
   and the builder, reviewer-code and approver agents. `git log -- vendor/` shows
   the unmodified import first, then each edit.
 
 ## Updating upstream
 
-Diff upstream between the sha in `vendor/factory/UPSTREAM` and the new one,
-apply the changes to `vendor/factory/` by hand, bump the sha, run the tests.
+The first commit in `git log -- vendor/factory` is the unmodified import. To
+take a newer version, diff it against that import, apply the changes to
+`vendor/factory/` by hand, and run the tests.
 
 ## License
 
@@ -172,7 +172,7 @@ git commit -m "chore: scaffold superpowers-factory plugin with design and plan"
 ### Task 2: Vendor the upstream factory unchanged
 
 **Files:**
-- Create: `vendor/factory/**` (copied), `vendor/factory/UPSTREAM`, `LICENSE`
+- Create: `vendor/factory/**` (copied), `vendor/factory/NOTICE`, `LICENSE`
 
 - [ ] **Step 1: Fetch upstream at the pinned sha into a temp dir**
 
@@ -204,13 +204,10 @@ chmod +x vendor/factory/factory/checks.sh vendor/factory/factory/bin/job vendor/
 cp "$SRC/LICENSE" LICENSE
 ```
 
-- [ ] **Step 3: Write `vendor/factory/UPSTREAM`**
+- [ ] **Step 3: Write `vendor/factory/NOTICE`**
 
-```text
-url: <upstream repository URL>
-path: <upstream path>
-commit: 5fc7c983f44d623057ef65361f25cf23cab2abef
-```
+A GPLv3 modification notice: the directory is a modified version of
+GPLv3-licensed code, who modified it, and from when.
 
 - [ ] **Step 4: Verify the copy is byte-identical**
 

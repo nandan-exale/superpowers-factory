@@ -59,16 +59,17 @@ counts only if a trusted person made it.
 ## Layout
 
 - `skills/factory-install`, `skills/factory-handoff`: this plugin's skills.
-- `vendor/factory/`: the upstream factory at the sha in `vendor/factory/UPSTREAM`,
+- `vendor/factory/`: the vendored factory (see `vendor/factory/NOTICE`),
   with edits to `factory/bin/job`, `factory/config.json`, the `factory` skill,
   and the builder, reviewer-code and approver agents. `git log -- vendor/` shows
   the unmodified import first, then each edit.
 
-## Updating upstream
+## Updating the vendored factory
 
-Diff upstream between the sha in `vendor/factory/UPSTREAM` and the new one,
-apply the changes to `vendor/factory/` by hand, bump the sha, run the tests.
+The first commit in `git log -- vendor/factory` is the unmodified import. To
+take a newer version, diff it against that import, apply the changes to
+`vendor/factory/` by hand, and run the tests.
 
 ## License
 
-GPLv3, because `vendor/factory/` is a modified copy of the GPLv3 upstream.
+GPLv3, because `vendor/factory/` is a modified copy of GPLv3-licensed code.

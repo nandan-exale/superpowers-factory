@@ -4,8 +4,7 @@ You are a coding agent installing this factory into the user's project. Copy
 what's generic, adapt what's repo-specific, verify it, and report. Work in the
 project's root. Don't clone this repository.
 
-The source is the folder the user pointed you at. On GitHub, read files from
-`<upstream raw URL>/<path>`.
+The source is the folder the user pointed you at.
 
 ## 0. Check the project
 
@@ -44,9 +43,9 @@ factory/dashboard.html
 ```
 
 ```bash
-SRC=<upstream raw URL>
+SRC=<the folder the user pointed you at>
 for f in <the paths above>; do
-  mkdir -p "$(dirname "$f")" && curl -fsSL "$SRC/$f" -o "$f"
+  mkdir -p "$(dirname "$f")" && cp "$SRC/$f" "$f"
 done
 chmod +x factory/checks.sh factory/bin/job factory/bin/gate factory/bin/route
 ```

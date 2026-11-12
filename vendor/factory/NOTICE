@@ -1,0 +1,7 @@
+This directory is a modified version of software licensed under the GNU
+General Public License, version 3 (see ../../LICENSE). It is distributed under
+the same license.
+
+Modified by Nandan Thakur, starting 2026-11-12. The first commit in
+`git log -- vendor/factory` is the unmodified import; every later commit
+touching this directory is a modification.

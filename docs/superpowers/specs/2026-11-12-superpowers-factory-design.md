@@ -5,13 +5,12 @@ Status: approved design, pending implementation plan
 
 ## Goal
 
-Use Superpowers for design and a vendored software factory for
-unattended execution. You brainstorm and plan interactively with Superpowers;
+Use Superpowers for design and a vendored, GPLv3-licensed software factory
+for unattended execution. You brainstorm and plan interactively with Superpowers;
 each approved plan becomes one GitHub issue that the factory builds, gates,
 reviews, and merges (or escalates) as one PR.
 
-Upstream factory: <<upstream repository URL>>,
-pinned at commit `5fc7c983f44d623057ef65361f25cf23cab2abef`.
+The factory is vendored unmodified first, then edited.
 
 ## Decisions
 
@@ -30,8 +29,8 @@ superpowers-factory/
   skills/
     factory-install/SKILL.md     install the factory into the current project
     factory-handoff/SKILL.md     committed spec + plan → one factory:planned issue
-  vendor/factory/                upstream v2 files at the pinned commit, with our edits
-    UPSTREAM                     upstream URL + pinned sha
+  vendor/factory/                the vendored factory files, with our edits
+    NOTICE                       GPLv3 modification notice
     .claude/skills/factory/SKILL.md      edited
     .claude/agents/*.md                  builder, reviewer-code, approver edited; rest unchanged
     factory/bin/job                      edited: `planned` subcommand, one new transition
@@ -165,7 +164,7 @@ The issue pins the commit sha, so later edits to the plan have no effect on a ru
 
 ## Upstream updates
 
-`vendor/factory/UPSTREAM` records the pinned sha. To update: diff upstream between the pinned sha and the new one, apply the changes to the vendored files by hand, and run the tests. No patch tooling.
+The first commit in `git log -- vendor/factory` is the unmodified import. To update: diff the newer version against that import, apply the changes to the vendored files by hand, and run the tests. No patch tooling.
 
 ## Testing
 
