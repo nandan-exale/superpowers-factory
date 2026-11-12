@@ -53,7 +53,8 @@ body from the operator (the `gh` account running it) and the logins in
 `factory/config.json` `pr_feedback.allowed`; bots and everyone else are
 ignored. An escalated job resumes on the next `/factory run`; a running job
 gets them in its next round; and the factory won't merge while a trusted
-comment is unhandled. Merging the PR on GitHub stays the approval.
+comment is unhandled. Merging the PR on GitHub stays the approval. An edit
+counts only if a trusted person made it.
 
 ## Layout
 

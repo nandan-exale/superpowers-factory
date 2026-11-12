@@ -87,6 +87,11 @@ def gh_json(*args):
     return json.loads(gh(*args))
 
 
+def gh_api_list(path):
+    """Every item of a REST list endpoint, across all its pages."""
+    return [json.loads(line) for line in gh("api", "--paginate", "--jq", ".[]", path).splitlines() if line.strip()]
+
+
 _operator = None
 
 
@@ -359,9 +364,16 @@ def pr_feedback_allowed():
     return {operator(), *allowed}
 
 
+def last_editor(c):
+    """Login of whoever last edited a PR comment or review, or None."""
+    node = gh_json("api", "graphql", "-f", "query=query($id:ID!){node(id:$id){... on Comment{editor{login}}}}",
+                   "-f", f"id={c['node_id']}")["data"]["node"]
+    return ((node or {}).get("editor") or {}).get("login")
+
+
 def pr_comments(job):
     """Trusted human comments on the job's PR that no round has handled, oldest first.
-    Reads the newest 100 of each kind."""
+    Reads every page of each kind."""
     base = f"repos/{{owner}}/{{repo}}"
     kinds = (("comment", f"{base}/issues/{job['pr']}/comments"),
              ("inline", f"{base}/pulls/{job['pr']}/comments"),
@@ -370,12 +382,20 @@ def pr_comments(job):
     seen = set(job.get("pr_feedback_seen", []))
     found = []
     for kind, path in kinds:
-        for c in gh_json("api", f"{path}?per_page=100"):
-            key, body = f"{kind}-{c['id']}", (c.get("body") or "").strip()
-            if (key in seen or not body or body.startswith(MARKER) or c.get("state") == "PENDING"
+        for c in gh_api_list(f"{path}?per_page=100"):
+            # The edit time is in the key, so a trusted edit after pickup counts as new.
+            key = f"{kind}-{c['id']}@{c.get('updated_at') or c.get('submitted_at') or c.get('created_at')}"
+            body = (c.get("body") or "").strip()
+            # Merging is the approval, so APPROVED reviews don't count; nor do DISMISSED or PENDING ones.
+            if (key in seen or not body or body.startswith(MARKER)
+                    or (kind == "review" and c.get("state") not in {"COMMENTED", "CHANGES_REQUESTED"})
                     or c["user"]["type"] == "Bot" or c["user"]["login"] not in trusted):
                 continue
-            where = f"{c['path']}:{c.get('line') or c.get('original_line')}" if kind == "inline" else None
+            # Collaborators can edit others' comments, including removing MARKER from the operator's.
+            if c.get("updated_at") and c["updated_at"] != c.get("created_at") and last_editor(c) not in trusted:
+                continue
+            line = c.get("line") or c.get("original_line")
+            where = (f"{c['path']}:{line}" if line else c["path"]) if kind == "inline" else None
             found.append({"key": key, "kind": kind, "author": c["user"]["login"], "body": body,
                           "url": c["html_url"], "where": where,
                           "at": c.get("created_at") or c.get("submitted_at") or ""})
@@ -514,8 +534,8 @@ def next_round(job):
     round_dir(job).mkdir(exist_ok=True)
     job["gate"] = None
     job["reviews"] = {}
-    # This round's builder is told to read any PR feedback recorded so far.
-    job["feedback_pending"] = False
+    # This round's builder is told to read every PR feedback file recorded so far.
+    job["feedback_pending"] = []
 
 
 def advance(job, stage):
@@ -630,7 +650,7 @@ def advance(job, stage):
                     f"round {job['round']} of {job['round_limit']}: go to {'needs-human' if last else 'build'}")
             if last:
                 outstanding = [f"CHANGES in round-{job['round']}/ from: {', '.join(changes)}"] if changes else []
-                outstanding += ["PR feedback the builder hasn't had a round for"] if pending else []
+                outstanding += [f"PR feedback the builder hasn't had a round for: {', '.join(pending)}"] if pending else []
                 escalate(job, f"Review rounds exhausted. Outstanding: {'; '.join(outstanding)}.")
             else:
                 next_round(job)
@@ -775,9 +795,10 @@ def cmd_merge(job):
         save(advance(sync(job), "needs-human"))
         print(f"{job['id']}: needs-human: {why.splitlines()[0]}")
 
+    unhandled = ("New PR comments arrived after the reviews. "
+                 "The next `/factory run` sends them to the builder.")
     if job.get("feedback_pending") or pr_comments(job):
-        return fail("New PR comments arrived after the reviews. "
-                    "The next `/factory run` sends them to the builder.")
+        return fail(unhandled)
     git(job, "fetch", "origin", BASE)
     merged = git(job, "merge", "--no-edit", f"origin/{BASE}", check=False)
     if merged.returncode != 0:
@@ -791,9 +812,14 @@ def cmd_merge(job):
         git(job, "push", "origin", job["branch"])
         if gh_json("pr", "view", str(job["pr"]), "--json", "isDraft")["isDraft"]:
             gh("pr", "ready", str(job["pr"]))
-        gh("pr", "merge", str(job["pr"]), f"--{CONFIG['merge_method']}")
+        # Syncing and the gate take minutes; a comment may have landed meanwhile.
+        late = pr_comments(job)
+        if not late:
+            gh("pr", "merge", str(job["pr"]), f"--{CONFIG['merge_method']}")
     except Refused as e:
         return fail(f"The merge failed:\n\n```\n{e}\n```")
+    if late:
+        return fail(unhandled)
     # GitHub may already have deleted the branch on merge.
     run(["git", "push", "origin", "--delete", job["branch"]], check=False)
     save(advance(sync(job), "merged"))
@@ -808,8 +834,10 @@ def cmd_feedback(job, text):
     d = job_dir(job["id"])
     k = len(list(d.glob("feedback-*.md"))) + 1
     (d / f"feedback-{k}.md").write_text(f"# Feedback {k}\n\nFrom @{operator()} after the job escalated.\n\n{text.strip()}\n")
+    # advance clears the pending list, and this round's builder must still read those files.
+    pending = list(job.get("feedback_pending") or [])
     save(advance(sync(job), "build"))
-    print(f"{job['id']}: feedback-{k}.md, round {job['round']}")
+    print(f"{job['id']}: {' '.join([f'feedback-{k}.md', *pending])}, round {job['round']}")
 
 
 def cmd_pr_feedback(job):
@@ -817,20 +845,21 @@ def cmd_pr_feedback(job):
         print("PR-FEEDBACK: none")
         return
     comments = pr_comments(job)
-    latest = len(list(job_dir(job["id"]).glob("feedback-*.md")))
     if comments:
-        latest = write_pr_feedback(job, comments)
+        k = write_pr_feedback(job, comments)
         job["pr_feedback_seen"] = [*job.get("pr_feedback_seen", []), *(c["key"] for c in comments)]
-        job["feedback_pending"] = True
+        job["feedback_pending"] = [*(job.get("feedback_pending") or []), f"feedback-{k}.md"]
+        # Saved before any gh call, so a failure there can't write the same comments twice.
+        save(job)
         comment("pr", job["pr"], f"### Factory: picked up {len(comments)} PR comment(s)\n\n"
                                  "The builder reads them in its next round.")
-    if job["stage"] == "needs-human" and job.get("feedback_pending"):
+    # advance clears the pending list, and the coming round's builder must still read those files.
+    pending = list(job.get("feedback_pending") or [])
+    if job["stage"] == "needs-human" and pending:
         job = advance(sync(job), "build")
     save(sync(job))
-    if comments:
-        print(f"PR-FEEDBACK: feedback-{latest}.md ({len(comments)} comments)")
-    elif job.get("feedback_pending"):
-        print(f"PR-FEEDBACK: pending feedback-{latest}.md")
+    if pending:
+        print(f"PR-FEEDBACK: {' '.join(pending)} ({len(comments)} new comments)")
     else:
         print("PR-FEEDBACK: none")
 

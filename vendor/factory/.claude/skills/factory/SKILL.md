@@ -61,7 +61,7 @@ through the scripts. `factory/jobs/` is gitignored runtime state.
 <repo>/factory/jobs/<job-id>/round-<N>/checks.md        the gate's verdict for round N
 <repo>/factory/jobs/<job-id>/round-<N>/review-<r>.md    one per routed reviewer
 <repo>/factory/jobs/<job-id>/decision.md                APPROVE or ESCALATE
-<repo>/factory/jobs/<job-id>/feedback-<k>.md            the user's feedback on an escalated job
+<repo>/factory/jobs/<job-id>/feedback-<k>.md            the user's feedback on an escalated job, or trusted PR comments
 <repo>/.worktrees/<job-id>/                    the job's worktree, on factory/<job-id>
 ```
 
@@ -128,8 +128,8 @@ decision:
 
 **build.** Spawn or resume `builder-<id>` with
 `<header> Build round <N>. Port: <port>.` plus what this round is for: the
-gate's `round-<N-1>/checks.md`, the reviews in `round-<N-1>/`, or
-`feedback-<k>.md`. When it returns, read `build.md`'s first line:
+gate's `round-<N-1>/checks.md`, the reviews in `round-<N-1>/`, or every
+file `pr-feedback` (or `job feedback`) printed. When it returns, read `build.md`'s first line:
 
 - `STATUS: READY`: `factory/bin/job advance <id> gate`, then go to **gate**. If
   `advance` refuses (nothing pushed, no PR, a dirty tree), resume the builder
@@ -139,13 +139,15 @@ gate's `round-<N-1>/checks.md`, the reviews in `round-<N-1>/`, or
 **gate.** Run `factory/bin/gate <id>`. It prints `GATE: PASS` or `GATE: FAIL`.
 
 - PASS: `factory/bin/job advance <id> review` and go to **review**.
-- FAIL: `factory/bin/job advance <id> build`. If it refuses because this was the
-  last round, `factory/bin/job advance <id> needs-human` instead. Otherwise
-  resume the builder for the next round with
+- FAIL: first run `factory/bin/job pr-feedback <id>` and keep the files it
+  prints. Only then run `factory/bin/job advance <id> build`, which clears the
+  pending list. If it refuses because this was the last round,
+  `factory/bin/job advance <id> needs-human` instead. Otherwise resume the
+  builder for the next round with
   `The gate failed: read round-<N-1>/checks.md and checks.log, fix it, push, and update build.md.`
-  No reviewer runs on a failing build. Before advancing, run
-  `factory/bin/job pr-feedback <id>`; if it names a `feedback-<k>.md`, add
-  `Also address PR comments in feedback-<k>.md.` to that message.
+  and, if `pr-feedback` printed any files, add
+  `Also address PR comments in <every file pr-feedback printed>.` No reviewer
+  runs on a failing build.
 
 **review.** Spawn every reviewer in `job.json` `agents.reviewers` **in one
 message**, so they run in parallel: `subagent_type` `reviewer-<r>`, `model`
@@ -153,9 +155,9 @@ and `effort` from `factory/bin/job agent <id> reviewer-<r>`, prompt
 `<header> Review round <N>.` plus the port for `ux` and
 `ui`. **WAIT FOR ALL.** Each time one finishes, run
 `factory/bin/job sync <id>` so the dashboard fills in. When every reviewer has
-finished, run `factory/bin/job pr-feedback <id>` first. If it names a
-`feedback-<k>.md` (new or pending), treat the round as CHANGES and add
-`Also address PR comments in feedback-<k>.md.` to the builder's message.
+finished, run `factory/bin/job pr-feedback <id>` first. If it prints any
+files (new or pending), treat the round as CHANGES and add
+`Also address PR comments in <every file pr-feedback printed>.` to the builder's message.
 
 - all PASS and no PR feedback: `factory/bin/job advance <id> approve`, then spawn `approver` with
   `<header> PR: #<pr>. Final round: <N>.`
@@ -185,7 +187,8 @@ then moves the job to `merged`; stop any agents still running for it.
    `concurrency`: every job in a running stage holds a slot, and only as many
    `new` and replied `needs-info` lines as there are free slots come out as
    `new` or `resume`; the rest are `hold`. `job create` and the
-   `needs-info → intake` move refuse when no slot is free.
+   `needs-info → intake` move refuse when no slot is free. A failing `gh`
+   call stops `job queue`; fix it and run again.
 2. Start every `resume` and `new` line, nothing else. Don't judge issues
    yourself: every new issue goes to intake, which decides whether it gets
    built. For a new issue, `factory/bin/job create <n>` prints the job id;
@@ -209,7 +212,7 @@ the current round; `approve` respawns the approver; `merging` runs
 as `resume`: run `factory/bin/job advance <id> intake` and go to **intake**.
 A `needs-human` job with `PR feedback` shows as `resume`: run
 `factory/bin/job pr-feedback <id>`, which moves it to `build`, and go to
-**build** with `PR comments arrived: read feedback-<k>.md and address it, push, and update build.md for round <N>.`
+**build** with `PR comments arrived: read <every file pr-feedback printed> and address them, push, and update build.md for round <N>.`
 `job merge` refuses to merge past unhandled PR comments: it moves the job to
 `needs-human`, and the next `job queue` shows it as `resume`.
 
@@ -240,9 +243,10 @@ new feature, ask.
   EOF
   ```
 
-  It saves `feedback-<k>.md` and starts the next round with a fresh round
-  budget. Go to **build** with
-  `The user gave feedback: read feedback-<k>.md and address it, push, and update build.md for round <N>.`
+  It saves `feedback-<k>.md`, prints it with any PR feedback files still
+  pending, and starts the next round with a fresh round budget. Go to
+  **build** with
+  `The user gave feedback: read <every file it printed> and address them, push, and update build.md for round <N>.`
   and continue like any job.
 - **Rejecting or benching a `needs-info` or `needs-human` job**: pass their
   reason verbatim on stdin:
