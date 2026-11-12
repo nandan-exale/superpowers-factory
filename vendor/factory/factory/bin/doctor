@@ -8,6 +8,7 @@ running factory/checks.sh.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -173,6 +174,13 @@ RUNNER_ALLOW = ("Bash(factory/bin/job *)", "Bash(factory/bin/gate *)", "Bash(fac
                 "Bash(git *)", "Bash(gh *)", "Bash(bash factory/checks.sh)")
 
 
+def launchd_label():
+    """Must match label() in factory/bin/runner (a test keeps them equal)."""
+    slug = re.sub(r"[^a-z0-9]+", "-", str(REPO).lower()).strip("-")
+    digest = hashlib.sha256(str(REPO).encode()).hexdigest()[:8]
+    return f"com.superpowers-factory.{slug}-{digest}"
+
+
 def check_branch_protection(base):
     """WARN unless GitHub says the base branch refuses force pushes and deletion."""
     gh = shutil.which("gh")
@@ -222,9 +230,7 @@ def check_runner():
                              f"security add-generic-password -s {service} -a \"$USER\" -w"))
     problems += check_branch_protection(cfg.get("base_branch"))
     if sys.platform == "darwin" and shutil.which("launchctl"):
-        slug = re.sub(r"[^a-z0-9]+", "-", str(REPO).lower()).strip("-")
-        label = f"com.superpowers-factory.{slug}"
-        if subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{label}"],
+        if subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{launchd_label()}"],
                           capture_output=True, text=True).returncode != 0:
             problems.append(warn("runner LaunchAgent not loaded; run factory/bin/runner install"))
     return problems

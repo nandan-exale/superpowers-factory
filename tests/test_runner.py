@@ -1,10 +1,14 @@
 import json
 import os
 import plistlib
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -18,6 +22,9 @@ with open(os.environ["FAKE_RECORD"], "a") as f:
         "has_api_key": "ANTHROPIC_API_KEY" in os.environ,
         "has_base_url": "ANTHROPIC_BASE_URL" in os.environ,
         "scrub": os.environ.get("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB")}}) + "\\n")
+if os.environ.get("FAKE_CLAUDE_GRANDCHILD"):
+    import subprocess
+    subprocess.Popen(["sleep", "20"], start_new_session=True)
 time.sleep(float(os.environ.get("FAKE_CLAUDE_SLEEP", "0")))
 print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
                   "total_cost_usd": 1.25, "result": "done"}}))
@@ -28,9 +35,37 @@ sys.exit(int(os.environ.get("FAKE_CLAUDE_EXIT", "0")))
 FAKE_GH_QUEUE = """#!{python}
 import os, sys
 if sys.argv[1:3] == ["issue", "list"]:
+    if os.environ.get("FAKE_GH_EXIT"):
+        sys.stderr.write("gh: boom\\n")
+        sys.exit(int(os.environ["FAKE_GH_EXIT"]))
     sys.stdout.write(open(os.environ["FAKE_ISSUES"]).read())
 else:
     sys.stdout.write("[]")
+"""
+
+
+# Records calls; `print` reports loaded for the first $FAKE_LAUNCHCTL_PRINT_LOADED_TIMES calls and
+# `bootstrap` fails for the first $FAKE_LAUNCHCTL_BOOTSTRAP_FAIL_TIMES calls (counters live in
+# $FAKE_LAUNCHCTL_DIR).
+FAKE_LAUNCHCTL = """#!{python}
+import json, os, sys
+def bump(name):
+    path = os.path.join(os.environ["FAKE_LAUNCHCTL_DIR"], name)
+    n = int(open(path).read()) if os.path.exists(path) else 0
+    open(path, "w").write(str(n + 1))
+    return n
+with open(os.environ["FAKE_RECORD"], "a") as f:
+    f.write(json.dumps({{"tool": "launchctl", "argv": sys.argv[1:]}}) + "\\n")
+cmd = sys.argv[1]
+if cmd == "print":
+    loaded = int(os.environ.get("FAKE_LAUNCHCTL_PRINT_LOADED_TIMES", "0"))
+    sys.exit(0 if bump("print") < loaded else 113)
+if cmd == "bootstrap":
+    fails = int(os.environ.get("FAKE_LAUNCHCTL_BOOTSTRAP_FAIL_TIMES", "0"))
+    if bump("bootstrap") < fails:
+        sys.stderr.write("Bootstrap failed: 5\\n")
+        sys.exit(5)
+sys.exit(0)
 """
 
 
@@ -45,7 +80,8 @@ class RunnerCase(unittest.TestCase):
         self.home = self.tmp / "home"
         self.home.mkdir()
         self.set_issues([])
-        for name, text in (("claude", FAKE_CLAUDE), ("gh", FAKE_GH_QUEUE)):
+        (self.tmp / "lc").mkdir()
+        for name, text in (("claude", FAKE_CLAUDE), ("gh", FAKE_GH_QUEUE), ("launchctl", FAKE_LAUNCHCTL)):
             path = self.p.fakebin / name
             path.write_text(text.format(python=sys.executable))
             path.chmod(0o755)
@@ -61,14 +97,18 @@ class RunnerCase(unittest.TestCase):
     def set_issues(self, issues):
         self.issues.write_text(json.dumps(issues))
 
-    def runner(self, *args, **env):
+    def runner_env(self, **env):
         full = self.p.env()
         full.update({"FAKE_RECORD": str(self.record), "FAKE_ISSUES": str(self.issues),
+                     "FAKE_LAUNCHCTL_DIR": str(self.tmp / "lc"),
                      "HOME": str(self.home), "FAKE_SECURITY_OUT": "tok-123\n",
                      "ANTHROPIC_API_KEY": "must-be-removed", "ANTHROPIC_BASE_URL": "http://x"})
         full.update(env)
+        return full
+
+    def runner(self, *args, **env):
         return subprocess.run([sys.executable, str(self.p.root / "factory/bin/runner"), *args],
-                              capture_output=True, text=True, cwd=self.p.root, env=full)
+                              capture_output=True, text=True, cwd=self.p.root, env=self.runner_env(**env))
 
     def calls(self, tool):
         if not self.record.exists():
@@ -94,12 +134,27 @@ class ConfigTest(RunnerCase):
         res = self.runner("tick")
         self.assertEqual(res.returncode, 1)
         self.assertIn("runner.interval_minutes", res.stderr)
+        self.assertRegex(self.log_lines()[-1], r" error: config: .*runner\.interval_minutes")
 
     def test_missing_runner_config_exits(self):
         self.edit_config(lambda c: c.pop("runner"))
         res = self.runner("tick")
         self.assertEqual(res.returncode, 1)
         self.assertIn("no runner object", res.stderr)
+        self.assertRegex(self.log_lines()[-1], r" error: config: .*no runner object")
+
+    def test_unreadable_config_is_logged_too(self):
+        self.edit_config(lambda c: None)
+        (self.p.root / "factory/config.json").write_text("{not json")
+        res = self.runner("tick")
+        self.assertEqual(res.returncode, 1)
+        self.assertRegex(self.log_lines()[-1], r" error: config: ")
+
+    def test_bad_config_for_install_still_exits_with_the_message(self):
+        self.edit_config(lambda c: c["runner"].update(max_minutes="x"))
+        res = self.runner("install", "--dry-run")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("runner.max_minutes", res.stderr)
 
     def test_bad_arguments_print_usage(self):
         res = self.runner("frobnicate")
@@ -327,6 +382,147 @@ class SecurityTest(RunnerCase):
         self.runner("tick")
         [call] = self.calls("claude")
         self.assertEqual(call["scrub"], "1")
+
+
+class SpecGapTest(RunnerCase):
+    WORK = [{"number": 7, "title": "Build the widget"}]
+
+    def test_daily_budget_wait_counts_as_idle(self):
+        self.set_issues(self.WORK)
+        old = self.p.root / "factory/jobs/earlier"
+        old.mkdir(parents=True)
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        (old / "log.jsonl").write_text(json.dumps(
+            {"t": now, "stage": "build", "cost_usd": 500, "delta_usd": 500}) + "\n")
+        res = self.runner("tick")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(self.calls("claude"), [])
+        self.assertTrue(self.log_lines()[-1].endswith(" idle"))
+
+    def test_queue_failure_is_an_error(self):
+        res = self.runner("tick", FAKE_GH_EXIT="1")
+        self.assertEqual(res.returncode, 1)
+        self.assertRegex(self.log_lines()[-1], r" error: queue: ")
+
+    def test_pull_failure_is_skipped(self):
+        git(self.p.root, "remote", "remove", "origin")
+        res = self.runner("tick")
+        self.assertEqual(res.returncode, 0)
+        self.assertRegex(self.log_lines()[-1], r" skipped: pull failed: ")
+        self.assertEqual(self.calls("claude"), [])
+
+
+class RobustnessTest(RunnerCase):
+    WORK = [{"number": 7, "title": "Build the widget"}]
+
+    def test_grandchild_holding_stdout_does_not_hang_the_tick(self):
+        self.set_issues(self.WORK)
+        start = time.monotonic()
+        res = self.runner("tick", FAKE_CLAUDE_GRANDCHILD="1")
+        self.assertLess(time.monotonic() - start, 10)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn(" ran exit=0 ", self.log_lines()[-1])
+
+    def test_output_goes_to_files_in_runs(self):
+        self.set_issues(self.WORK)
+        self.runner("tick")
+        runs = self.p.root / "factory/jobs/runs"
+        [out] = list(runs.glob("*.json"))
+        [err] = list(runs.glob("*.stderr.log"))
+        self.assertEqual(json.loads(out.read_text())["result"], "done")
+        self.assertEqual(err.name, out.name.removesuffix(".json") + ".stderr.log")
+
+    def test_timeout_still_kills_with_output_in_files(self):
+        self.set_issues(self.WORK)
+        start = time.monotonic()
+        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="1", FAKE_CLAUDE_SLEEP="10",
+                          FAKE_CLAUDE_GRANDCHILD="1")
+        self.assertLess(time.monotonic() - start, 8)
+        self.assertEqual(res.returncode, 1)
+        self.assertRegex(self.log_lines()[-1], r" timeout after \d+s$")
+
+    def test_sigterm_kills_claude_and_logs_stopped(self):
+        self.set_issues(self.WORK)
+        proc = subprocess.Popen([sys.executable, str(self.p.root / "factory/bin/runner"), "tick"],
+                                cwd=self.p.root, env=self.runner_env(FAKE_CLAUDE_SLEEP="30"),
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(proc.kill)
+        deadline = time.monotonic() + 15
+        while not self.calls("claude") and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertTrue(self.calls("claude"), "claude never started")
+        proc.send_signal(signal.SIGTERM)
+        proc.communicate(timeout=10)
+        self.assertEqual(proc.returncode, 1)
+        self.assertTrue(self.log_lines()[-1].endswith(" stopped"))
+
+    def test_missing_claude_is_logged(self):
+        self.set_issues(self.WORK)
+        bin2 = self.tmp / "bin2"
+        bin2.mkdir()
+        for name in ("gh", "security"):
+            shutil.copy2(self.p.fakebin / name, bin2 / name)
+        res = self.runner("tick", PATH=f"{bin2}{os.pathsep}/usr/bin{os.pathsep}/bin")
+        self.assertEqual(res.returncode, 1)
+        self.assertTrue(self.log_lines()[-1].endswith(" error: claude not found on PATH"))
+
+    def test_only_the_newest_fifty_runs_are_kept(self):
+        self.set_issues(self.WORK)
+        runs = self.p.root / "factory/jobs/runs"
+        runs.mkdir(parents=True)
+        for n in range(55):
+            (runs / f"2020-01-01T0000{n:02d}Z.json").write_text("{}")
+            (runs / f"2020-01-01T0000{n:02d}Z.stderr.log").write_text("")
+        self.runner("tick")
+        names = sorted(f.name for f in runs.iterdir())
+        self.assertEqual(len(names), 100)
+        self.assertNotIn("2020-01-01T000000Z.json", names)
+        self.assertNotIn("2020-01-01T000004Z.stderr.log", names)
+        self.assertIn("2020-01-01T000054Z.json", names)
+        self.assertTrue(any(not n.startswith("2020") for n in names))
+
+
+@unittest.skipUnless(sys.platform == "darwin", "launchd only")
+class InstallRaceTest(RunnerCase):
+    def launchctl_calls(self):
+        return [c["argv"] for c in self.calls("launchctl")]
+
+    def test_install_waits_for_the_old_agent_to_unload(self):
+        res = self.runner("install", FAKE_LAUNCHCTL_PRINT_LOADED_TIMES="3")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        cmds = [argv[0] for argv in self.launchctl_calls()]
+        self.assertEqual(cmds, ["bootout", "print", "print", "print", "print", "bootstrap"])
+
+    def test_bootstrap_is_retried(self):
+        res = self.runner("install", FAKE_LAUNCHCTL_BOOTSTRAP_FAIL_TIMES="2")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual([a[0] for a in self.launchctl_calls()].count("bootstrap"), 3)
+
+    def test_bootstrap_gives_up_after_three_tries(self):
+        res = self.runner("install", FAKE_LAUNCHCTL_BOOTSTRAP_FAIL_TIMES="9")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("launchctl bootstrap failed", res.stderr)
+        self.assertEqual([a[0] for a in self.launchctl_calls()].count("bootstrap"), 3)
+
+
+class LabelTest(RunnerCase):
+    def modules(self, path):
+        runner = load_script("runner_label", VENDOR / "factory/bin/runner")
+        doctor = load_script("doctor_label", VENDOR / "factory/bin/doctor")
+        runner.REPO = doctor.REPO = Path(path)
+        return runner, doctor
+
+    def test_runner_and_doctor_agree_on_the_label(self):
+        for path in ("/Users/me/projects/app", "/tmp/a b/C_d"):
+            runner, doctor = self.modules(path)
+            self.assertEqual(runner.label(), doctor.launchd_label())
+            self.assertRegex(runner.label(), r"^com\.superpowers-factory\.[a-z0-9-]+-[0-9a-f]{8}$")
+
+    def test_paths_with_the_same_slug_get_different_labels(self):
+        first, _ = self.modules("/a/b-c")
+        label_one = first.label()
+        second, _ = self.modules("/a-b/c")
+        self.assertNotEqual(label_one, second.label())
 
 
 if __name__ == "__main__":

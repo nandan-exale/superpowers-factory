@@ -14,6 +14,7 @@ claude only through its environment, never in arguments, files or logs.
 """
 
 import fcntl
+import hashlib
 import json
 import os
 import platform
@@ -31,8 +32,10 @@ FACTORY = REPO / "factory"
 JOBS = FACTORY / "jobs"
 LOG = JOBS / "runner.log"
 RUNS = JOBS / "runs"
+KEEP_RUNS = 50
 SETTINGS = FACTORY / "runner-settings.json"
 PROMPT = "/factory run"
+CHILD = None  # the running claude process, for the SIGTERM handler
 STRIPPED_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN")
 
 
@@ -42,30 +45,38 @@ def die(message):
 
 
 def load_config():
-    """(base branch, validated runner config)."""
-    cfg = json.loads((FACTORY / "config.json").read_text(encoding="utf-8"))
-    runner = cfg.get("runner")
+    """(base branch, validated runner config); ValueError names the bad key."""
+    try:
+        cfg = json.loads((FACTORY / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"factory/config.json unreadable: {exc}")
+    runner = cfg.get("runner") if isinstance(cfg, dict) else None
     if not isinstance(runner, dict):
-        die("factory/config.json has no runner object (interval_minutes, max_minutes, keychain_service)")
+        raise ValueError("factory/config.json has no runner object (interval_minutes, max_minutes, keychain_service)")
     for key in ("interval_minutes", "max_minutes"):
         value = runner.get(key)
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            die(f"factory/config.json runner.{key} must be a positive integer, not {value!r}")
+            raise ValueError(f"factory/config.json runner.{key} must be a positive integer, not {value!r}")
     service = runner.get("keychain_service")
     if not isinstance(service, str) or not service.strip():
-        die("factory/config.json runner.keychain_service must be a non-empty string")
+        raise ValueError("factory/config.json runner.keychain_service must be a non-empty string")
+    if not isinstance(cfg.get("base_branch"), str) or not cfg["base_branch"]:
+        raise ValueError("factory/config.json base_branch must be a non-empty string")
     return cfg["base_branch"], runner
 
 
 def main(argv):
-    if argv == ["tick"]:
-        return cmd_tick()
-    if argv in (["install"], ["install", "--dry-run"]):
-        return cmd_install(dry_run=len(argv) == 2)
-    if argv == ["uninstall"]:
-        return cmd_uninstall()
-    if argv == ["status"]:
-        return cmd_status()
+    try:
+        if argv == ["tick"]:
+            return cmd_tick()
+        if argv in (["install"], ["install", "--dry-run"]):
+            return cmd_install(dry_run=len(argv) == 2)
+        if argv == ["uninstall"]:
+            return cmd_uninstall()
+        if argv == ["status"]:
+            return cmd_status()
+    except ValueError as exc:
+        die(str(exc))
     print(__doc__.strip(), file=sys.stderr)
     return 1
 
@@ -132,8 +143,17 @@ def read_token(service):
     return token if res.returncode == 0 and token else None
 
 
-def run_claude(token, max_seconds):
-    """((exit code, stdout) or None on timeout, elapsed seconds)."""
+def kill_group(proc):
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def run_claude(token, max_seconds, out_path, err_path):
+    """(exit code or None on timeout, elapsed seconds). Output goes to files, never pipes, so a
+    process that outlives claude with the output open can't keep this call waiting."""
+    global CHILD
     env = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}
     env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "1"  # keep the token out of hooks and tests claude starts
@@ -141,32 +161,60 @@ def run_claude(token, max_seconds):
     cmd = ["claude", "-p", PROMPT, "--output-format", "json",
            "--permission-mode", "dontAsk", "--settings", str(SETTINGS)]
     start = time.monotonic()
-    proc = subprocess.Popen(cmd, cwd=REPO, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            text=True, start_new_session=True)
-    try:
-        out, _ = proc.communicate(timeout=max_seconds)
-    except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
-        proc.communicate()
-        return None, int(time.monotonic() - start)
-    return (proc.returncode, out), int(time.monotonic() - start)
+    with out_path.open("w") as out, err_path.open("w") as err:
+        proc = subprocess.Popen(cmd, cwd=REPO, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                                start_new_session=True)
+        CHILD = proc
+        try:
+            proc.wait(timeout=max_seconds)
+            code = proc.returncode
+        except subprocess.TimeoutExpired:
+            code = None
+        finally:
+            kill_group(proc)
+            proc.wait()
+            CHILD = None
+    return code, int(time.monotonic() - start)
 
 
-def cost_of(output):
+def on_sigterm(signum, frame):
+    if CHILD is not None:
+        kill_group(CHILD)
+    log("stopped")
+    sys.exit(1)
+
+
+def prune_runs():
+    """Keep the newest KEEP_RUNS runs (a run is its .json plus .stderr.log)."""
+    stems = {}
+    for f in RUNS.iterdir():
+        stems.setdefault(f.name.removesuffix(".stderr.log").removesuffix(".json"), []).append(f)
+    for stem in sorted(stems)[:-KEEP_RUNS]:
+        for f in stems[stem]:
+            f.unlink(missing_ok=True)
+
+
+def cost_of(path):
     try:
-        return f"${json.loads(output)['total_cost_usd']:.2f}"
-    except (ValueError, KeyError, TypeError):
+        return f"${json.loads(path.read_text())['total_cost_usd']:.2f}"
+    except (OSError, ValueError, KeyError, TypeError):
         return "?"
 
 
 def cmd_tick():
-    base, runner = load_config()
+    try:
+        base, runner = load_config()
+    except ValueError as exc:
+        print(f"runner: {exc}", file=sys.stderr)
+        log(f"error: config: {exc}")
+        return 1
     lock = open(git_path("factory-runner.lock"), "w")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         log("busy")
         return 0
+    signal.signal(signal.SIGTERM, on_sigterm)
     if hooks_or_fsmonitor_configured():
         log("error: git hooks or fsmonitor configured in this clone; remove them")
         return 1
@@ -195,20 +243,29 @@ def cmd_tick():
             "run claude setup-token and store it")
         return 1
     max_seconds = int(os.environ.get("FACTORY_RUNNER_MAX_SECONDS") or runner["max_minutes"] * 60)
-    result, seconds = run_claude(token, max_seconds)
-    if result is None:
+    RUNS.mkdir(parents=True, exist_ok=True)
+    out_path = RUNS / f"{stamp().replace(':', '')}.json"
+    err_path = out_path.with_name(out_path.name.removesuffix(".json") + ".stderr.log")
+    try:
+        code, seconds = run_claude(token, max_seconds, out_path, err_path)
+    except FileNotFoundError:
+        log("error: claude not found on PATH")
+        return 1
+    except OSError as exc:
+        log(f"error: could not start claude: {exc}")
+        return 1
+    prune_runs()
+    if code is None:
         log(f"timeout after {seconds}s")
         return 1
-    code, out = result
-    RUNS.mkdir(parents=True, exist_ok=True)
-    (RUNS / f"{stamp().replace(':', '')}.json").write_text(out)
-    log(f"ran exit={code} {seconds}s cost={cost_of(out)}")
+    log(f"ran exit={code} {seconds}s cost={cost_of(out_path)}")
     return 0 if code == 0 else 1
 
 
 def label():
     slug = re.sub(r"[^a-z0-9]+", "-", str(REPO).lower()).strip("-")
-    return f"com.superpowers-factory.{slug}"
+    digest = hashlib.sha256(str(REPO).encode()).hexdigest()[:8]
+    return f"com.superpowers-factory.{slug}-{digest}"
 
 
 def plist_path():
@@ -252,11 +309,19 @@ def cmd_install(dry_run):
     path = plist_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     JOBS.mkdir(parents=True, exist_ok=True)
-    launchctl("bootout", f"{domain()}/{label()}")
+    target = f"{domain()}/{label()}"
+    launchctl("bootout", target)
+    deadline = time.monotonic() + 3  # bootout returns before the old agent has finished unloading
+    while launchctl("print", target).returncode == 0 and time.monotonic() < deadline:
+        time.sleep(0.1)
     path.write_bytes(data)
-    res = launchctl("bootstrap", domain(), str(path))
-    if res.returncode != 0:
-        die(f"launchctl bootstrap failed: {first_line(res.stderr)}")
+    for attempt in range(3):
+        res = launchctl("bootstrap", domain(), str(path))
+        if res.returncode == 0:
+            break
+        if attempt == 2:
+            die(f"launchctl bootstrap failed: {first_line(res.stderr)}")
+        time.sleep(0.5)
     print(f"installed {path}; runs every {runner['interval_minutes']} min")
     return 0
 
