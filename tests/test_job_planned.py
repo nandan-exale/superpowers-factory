@@ -56,7 +56,14 @@ class PlannedSuccessTest(PlannedTestCase):
         self.assertEqual(job["stage"], "build")
         self.assertEqual(job["round"], 1)
         self.assertTrue(job["planned"])
-        self.assertEqual(job["agents"], {"reviewers": {"code": "sonnet", "ux": "sonnet", "ui": "haiku"}})
+        self.assertEqual(job["agents"], {
+            "spec-writer": {"model": "opus", "effort": "high"},
+            "builder": {"model": "opus", "effort": "high"},
+            "approver": {"model": "opus", "effort": "high"},
+            "reviewers": {"code": {"model": "sonnet", "effort": "high"},
+                          "ux": {"model": "sonnet", "effort": "medium"},
+                          "ui": {"model": "haiku", "effort": "medium"}},
+        })
         self.assertEqual(job["intake"]["decision"], "ACCEPT")
         self.assertEqual(job["intake"]["risk"], "medium")
         self.assertEqual(job["intake"]["surfaces"], ["ui"])
@@ -77,7 +84,8 @@ class PlannedSuccessTest(PlannedTestCase):
     def test_low_risk_no_surfaces_routes_one_reviewer(self):
         self.project.set_issue(plan_body(self.project.sha, risk="low", surfaces="[]"))
         self.job.cmd_planned(self.load())
-        self.assertEqual(self.load()["agents"], {"reviewers": {"code": "haiku"}})
+        self.assertEqual(self.load()["agents"]["reviewers"], {"code": {"model": "haiku", "effort": "medium"}})
+        self.assertEqual(self.load()["agents"]["builder"], {"model": "opus", "effort": "medium"})
 
 
 class PlannedRefusalTest(PlannedTestCase):

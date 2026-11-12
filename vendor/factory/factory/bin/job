@@ -13,7 +13,8 @@ Usage:
   job merge <job>                APPROVE → sync with the base branch, gate, merge the PR
   job feedback <job>             needs-human → build, with your feedback (stdin) as feedback-<k>.md
   job reject <job>               needs-info or needs-human → rejected, with your reason (stdin) as rejection.md
-  job agents <job> <json>        record the routed agent set (called by factory/bin/route)
+  job route <job>                ACCEPTed intake → every later agent's model and effort from config.json
+  job agent <job> <role>         print model=<alias> effort=<level> for intake, spec-writer, builder, approver or reviewer-<r>
   job planned <job>              factory:planned issue → intake.md, spec.md, plan.md, routed, in build
   job sync <job>                 refresh reviews, gate and cost from the job's files
   job summary [<job>...]         table of jobs: issue, stage, PR, cost, time
@@ -228,13 +229,37 @@ def check_plan_commit(plan):
         require(exists.returncode == 0, f"{plan[key]} doesn't exist at {plan['commit'][:7]}")
 
 
+AGENT_ROLES = ("spec-writer", "builder", "approver")
+
+
+def agent_setting(where, setting):
+    """A config `{model, effort}` entry, checked against model_aliases and effort_levels."""
+    require(isinstance(setting, dict) and set(setting) == {"model", "effort"},
+            f"{where} must be {{model, effort}}, got {setting!r}")
+    aliases, levels = CONFIG["model_aliases"], CONFIG["effort_levels"]
+    require(setting["model"] in aliases,
+            f"{where}.model {setting['model']!r} isn't in model_aliases ({', '.join(aliases)})")
+    require(setting["effort"] in levels,
+            f"{where}.effort {setting['effort']!r} isn't in effort_levels ({', '.join(levels)})")
+    return dict(setting)
+
+
 def route_agents(risk, surfaces):
-    """factory/bin/route's lookup, in-process: route shells out to `job agents`,
-    which would wait forever on the job lock `job planned` already holds."""
-    reviewers = dict(CONFIG["routing"][risk])
+    """Model and effort for every agent after intake, from config.json `routing`
+    and `surface_reviewers`. `job route` and `job planned` both call it."""
+    table = CONFIG["routing"].get(risk)
+    require(table is not None, f"risk {risk!r} isn't in config.json routing ({', '.join(CONFIG['routing'])})")
+    missing = [r for r in (*AGENT_ROLES, "code") if r not in table]
+    require(not missing, f"routing.{risk} is missing: {', '.join(missing)}")
+    settings = {name: agent_setting(f"routing.{risk}.{name}", s) for name, s in table.items()}
+    reviewers = {name: s for name, s in settings.items() if name not in AGENT_ROLES}
     for surface in surfaces:
-        reviewers.update(CONFIG["surface_reviewers"][surface])
-    return {"reviewers": reviewers}
+        extra = CONFIG["surface_reviewers"].get(surface)
+        require(extra is not None, f"surface {surface!r} isn't in config.json surface_reviewers "
+                                   f"({', '.join(CONFIG['surface_reviewers'])})")
+        reviewers.update({name: agent_setting(f"surface_reviewers.{surface}.{name}", s)
+                          for name, s in extra.items()})
+    return {**{r: settings[r] for r in AGENT_ROLES}, "reviewers": reviewers}
 
 
 def planned_intake_md(issue_number, plan):
@@ -742,11 +767,29 @@ def cmd_reject(job, text):
     print(f"{job['id']}: rejected")
 
 
-def cmd_agents(job, spec):
+def cmd_route(job):
     if job["stage"] != "intake" or (job["intake"] or {}).get("decision") != "ACCEPT":
         die(f"{job['id']}: route only an intake job that intake ACCEPTed")
-    job["agents"] = json.loads(spec)
+    job["agents"] = route_agents(job["intake"]["risk"], job["intake"]["surfaces"])
     save(job)
+    settings = {**{r: job["agents"][r] for r in AGENT_ROLES}, **job["agents"]["reviewers"]}
+    print(f"{job['id']}: " + ", ".join(f"{name} {s['model']}/{s['effort']}" for name, s in settings.items()))
+
+
+def cmd_agent(job, role):
+    """Print the model and effort the orchestrator passes when it spawns `role`."""
+    if role == "intake":
+        setting = agent_setting("agents.intake", CONFIG.get("agents", {}).get("intake"))
+    elif not job["agents"]:
+        die(f"{job['id']} isn't routed yet: run factory/bin/route {job['id']}")
+    elif role in AGENT_ROLES:
+        setting = job["agents"][role]
+    elif role.removeprefix("reviewer-") in job["agents"]["reviewers"] and role.startswith("reviewer-"):
+        setting = job["agents"]["reviewers"][role.removeprefix("reviewer-")]
+    else:
+        die(f"{job['id']} has no agent {role!r}; routed: "
+            + ", ".join([*AGENT_ROLES, *(f"reviewer-{r}" for r in job["agents"]["reviewers"])]))
+    print(f"model={setting['model']} effort={setting['effort']}")
 
 
 def cmd_planned(job):
@@ -822,8 +865,10 @@ def main(argv):
             cmd_feedback(resolve(args[0]), sys.stdin.read())
         elif cmd == "reject" and len(args) == 1:
             cmd_reject(resolve(args[0]), sys.stdin.read())
-        elif cmd == "agents" and len(args) == 2:
-            cmd_agents(sync(resolve(args[0])), args[1])
+        elif cmd == "route" and len(args) == 1:
+            cmd_route(sync(resolve(args[0])))
+        elif cmd == "agent" and len(args) == 2:
+            cmd_agent(sync(resolve(args[0])), args[1])
         elif cmd == "planned" and len(args) == 1:
             cmd_planned(sync(resolve(args[0])))
         elif cmd == "sync" and len(args) == 1:

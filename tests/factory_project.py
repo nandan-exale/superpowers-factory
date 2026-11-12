@@ -40,7 +40,8 @@ class FactoryProject:
         git(self.repo, "config", "user.email", "test@example.com")
         git(self.repo, "config", "user.name", "Test")
         (self.repo / "factory" / "bin").mkdir(parents=True)
-        shutil.copy(VENDOR / "factory" / "bin" / "job", self.repo / "factory" / "bin" / "job")
+        for script in ("job", "route"):
+            shutil.copy(VENDOR / "factory" / "bin" / script, self.repo / "factory" / "bin" / script)
         shutil.copy(VENDOR / "factory" / "config.json", self.repo / "factory" / "config.json")
         for path, text in ((SPEC_PATH, SPEC_TEXT), (PLAN_PATH, PLAN_TEXT)):
             target = self.repo / path

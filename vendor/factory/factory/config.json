@@ -9,14 +9,39 @@
     "needs_human": "factory:needs-human",
     "planned": "factory:planned"
   },
+  "model_aliases": ["fable", "opus", "sonnet", "haiku"],
+  "effort_levels": ["low", "medium", "high", "xhigh", "max"],
+  "agents": {
+    "intake": { "model": "fable", "effort": "high" }
+  },
   "routing": {
-    "low":    { "code": "haiku" },
-    "medium": { "code": "sonnet" },
-    "high":   { "code": "sonnet" }
+    "low": {
+      "spec-writer": { "model": "opus",   "effort": "medium" },
+      "builder":     { "model": "opus",   "effort": "medium" },
+      "approver":    { "model": "opus",   "effort": "medium" },
+      "code":        { "model": "haiku",  "effort": "medium" }
+    },
+    "medium": {
+      "spec-writer": { "model": "opus",   "effort": "high" },
+      "builder":     { "model": "opus",   "effort": "high" },
+      "approver":    { "model": "opus",   "effort": "high" },
+      "code":        { "model": "sonnet", "effort": "high" }
+    },
+    "high": {
+      "spec-writer": { "model": "opus",   "effort": "high" },
+      "builder":     { "model": "opus",   "effort": "high" },
+      "approver":    { "model": "opus",   "effort": "high" },
+      "code":        { "model": "sonnet", "effort": "high" }
+    }
   },
   "surface_reviewers": {
-    "ui": { "ux": "sonnet", "ui": "haiku" },
-    "security": { "security": "opus" }
+    "ui": {
+      "ux": { "model": "sonnet", "effort": "medium" },
+      "ui": { "model": "haiku",  "effort": "medium" }
+    },
+    "security": {
+      "security": { "model": "opus", "effort": "high" }
+    }
   },
   "protected_paths": [
     "factory/checks.sh",
