@@ -1,6 +1,8 @@
+import contextlib
+import io
 import unittest
 
-from budget_case import BudgetCase
+from budget_case import AGENTS, BudgetCase
 
 
 class LogTest(BudgetCase):
@@ -28,11 +30,43 @@ class LogTest(BudgetCase):
         self.spend_elsewhere(50.0, hours_ago=30)
         self.assertAlmostEqual(self.job.daily_spend(), 10.0)
 
-    def test_bad_log_line_dies(self):
+    def test_bad_log_line_is_skipped_with_a_warning(self):
+        self.spend_elsewhere(10.0)
+        other = self.job.JOBS / "099-other" / "log.jsonl"
+        with other.open("a") as f:
+            f.write("not json\n" + '{"t": "2026-01-01T00:00:00Z"}\n')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertAlmostEqual(self.job.daily_spend(), 10.0)
+        self.assertIn(f"job: {other}: skipping bad line 2", err.getvalue())
+        self.assertIn(f"job: {other}: skipping bad line 3", err.getvalue())
+
+    def test_partial_last_line_is_skipped_silently_and_appends_recover(self):
+        self.spend_elsewhere(10.0)
+        other = self.job.JOBS / "099-other" / "log.jsonl"
+        with other.open("a") as f:
+            f.write('{"t": "2026-11-1')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertAlmostEqual(self.job.daily_spend(), 10.0)
+        self.assertEqual(err.getvalue(), "")
         with (self.d / "log.jsonl").open("a") as f:
-            f.write("not json\n")
-        with self.assertRaises(SystemExit):
-            self.job.daily_spend()
+            f.write('{"t": "2026-11-1')
+        self.cost = 1.0
+        self.job.save(self.current())
+        with contextlib.redirect_stderr(io.StringIO()):
+            entries = self.job.read_log(self.d / "log.jsonl")
+        self.assertEqual(entries[-1]["cost_usd"], 1.0)
+
+    def test_cost_never_decreases(self):
+        self.cost = 5.0
+        self.job.save(self.current())
+        self.cost = 2.0
+        job = self.current()
+        self.assertEqual(job["cost_usd"], 5.0)
+        self.job.save(job)
+        self.assertTrue(all(e["delta_usd"] >= 0 for e in self.log()))
+        self.assertAlmostEqual(self.job.daily_spend(), 5.0)
 
 
 class BudgetConfigTest(BudgetCase):
@@ -91,6 +125,39 @@ class EnforcementTest(BudgetCase):
         self.assertEqual(job["budget_base_usd"], 30.0)
         self.assertIsNone(self.job.budget_problem(job))
         self.assertNotIn("budget_stopped", job)
+
+    def test_after_feedback_the_job_can_advance_again_at_the_same_cost(self):
+        self.in_review()
+        self.cost = 30.0
+        self.advance("approve")
+        self.job.cmd_feedback(self.job.load(self.job_id), "carry on")
+        job = self.job.load(self.job_id)
+        job["stage"] = "review"
+        self.job.save(job)
+        (self.d / f"round-{job['round']}" / "review-code.md").write_text("VERDICT: PASS\n")
+        job = self.advance("approve")
+        self.assertEqual(job["stage"], "approve")
+        self.assertEqual(job["cost_usd"], 30.0)
+
+    def test_time_budget_starts_at_build(self):
+        job = self.job.load(self.job_id)
+        job.update({"stage": "spec", "agents": AGENTS, "started": "2026-01-01T00:00:00Z"})
+        self.job.save(job)
+        (self.d / "spec.md").write_text("spec\n")
+        job = self.advance("build")
+        self.assertEqual(job["stage"], "build")
+        self.assertIsNone(self.job.budget_problem(job))
+
+    def test_budget_stop_at_build_finds_the_pr_first(self):
+        self.in_review(stage="build", pr=None, pr_url=None)
+        self.cost = 30.0
+        self.prs = [{"number": 13, "url": "https://github.com/o/r/pull/13"}]
+        job = self.advance("gate")
+        self.assertEqual(job["stage"], "needs-human")
+        self.assertEqual(job["pr"], 13)
+        self.assertEqual(len(self.gh_calls("pr", "comment", "13")), 1)
+        self.assertEqual(self.gh_calls("issue", "comment"), [])
+        self.assertEqual(len(self.gh_calls("pr", "edit", "13")), 1)
 
     def test_daily_cap_refuses_and_keeps_stage(self):
         self.in_review()

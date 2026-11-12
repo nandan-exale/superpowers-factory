@@ -205,15 +205,31 @@ def parse_time(stamp):
 def read_log(path):
     if not path.exists():
         return []
+    text = path.read_text()
+    lines = text.split("\n")
+    partial = lines.pop() if lines else ""  # after the last newline: empty, or a write cut short
     entries = []
-    for n, line in enumerate(path.read_text().splitlines(), 1):
+    for n, line in enumerate(lines + [partial], 1):
         if not line.strip():
             continue
-        try:
-            entries.append(json.loads(line))
-        except ValueError:
-            die(f"{path}: line {n} is not JSON")
+        entry = parse_log_line(line)
+        if entry:
+            entries.append(entry)
+        elif line is not partial:
+            print(f"job: {path}: skipping bad line {n}", file=sys.stderr)
     return entries
+
+
+def parse_log_line(line):
+    try:
+        entry = json.loads(line)
+        parse_time(entry["t"])
+        entry["stage"]
+        float(entry["cost_usd"])
+        float(entry["delta_usd"])
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return None
+    return entry
 
 
 def append_log(job):
@@ -224,10 +240,12 @@ def append_log(job):
     cost = round(job["cost_usd"], 6)
     if last and last["stage"] == job["stage"] and last["cost_usd"] == cost:
         return
+    delta = max(0.0, round(cost - (last["cost_usd"] if last else 0.0), 6))
     entry = {"t": now(), "event": EVENT, "stage": job["stage"], "round": job["round"],
-             "cost_usd": cost, "delta_usd": round(cost - (last["cost_usd"] if last else 0.0), 6)}
+             "cost_usd": cost, "delta_usd": delta}
+    cut_short = path.exists() and path.stat().st_size and not path.read_bytes().endswith(b"\n")
     with path.open("a") as f:
-        f.write(json.dumps(entry) + "\n")
+        f.write(("\n" if cut_short else "") + json.dumps(entry) + "\n")
 
 
 def daily_spend():
@@ -252,14 +270,19 @@ def daily_problem():
     return None
 
 
+def allowance_used(job):
+    """(usd, hours) the job has used since its last allowance."""
+    since = parse_time(job.get("budget_base_time") or job["started"])
+    hours = (datetime.now(timezone.utc) - since).total_seconds() / 3600
+    return job["cost_usd"] - job.get("budget_base_usd", 0.0), hours
+
+
 def budget_problem(job):
     """Why the job is over its own budget since its last allowance, or None."""
     b = budgets()
-    spent = job["cost_usd"] - job.get("budget_base_usd", 0.0)
+    spent, hours = allowance_used(job)
     if b["job_usd"] is not None and spent > b["job_usd"]:
         return f"budget: ${spent:.2f} of ${b['job_usd']:.2f} used"
-    since = parse_time(job.get("budget_base_time") or job["started"])
-    hours = (datetime.now(timezone.utc) - since).total_seconds() / 3600
     if b["job_hours"] is not None and hours > b["job_hours"]:
         return f"budget: {hours:.1f} h of {b['job_hours']:g} h used"
     return None
@@ -587,7 +610,7 @@ def sync(job):
                 line = first_line(rd / f"review-{r}.md")
                 m = re.fullmatch(r"VERDICT:\s*(PASS|CHANGES)", line or "")
                 job["reviews"][r] = m.group(1) if m else ("pending" if line is None else "invalid")
-    job["cost_usd"] = cost_usd(job)
+    job["cost_usd"] = max(job.get("cost_usd", 0.0), cost_usd(job))
     job["job_usd"] = budgets()["job_usd"]
     return job
 
@@ -633,51 +656,92 @@ def next_round(job):
 # ---- Evidence --------------------------------------------------------------
 
 EVIDENCE_TAIL = 15
+EVIDENCE_SECTION_LIMIT = 8_000
+EVIDENCE_BLOCK_LIMIT = 60_000
+EVIDENCE_START = "<!-- factory evidence -->"
+EVIDENCE_END = "<!-- /factory evidence -->"
+CLOSING = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s*(?:[\w.-]+/[\w.-]+)?#\d+", re.I)
 
 
-def evidence_md(job):
-    """The PR body: why the factory thinks this job is done, or why it stopped."""
+def defuse(text):
+    """Agent-written text goes into a PR body: no issue closing, no pings, no fake markers."""
+    text = CLOSING.sub(lambda m: f"`{m.group(0)}`", text)
+    return text.replace("@", "@\u200b").replace("<!--", "&lt;!--")
+
+
+def evidence_md(job, full=False):
+    """The PR body block: why the factory thinks this job is done, or why it stopped.
+    `full` keeps every character (for evidence.md); otherwise sections and the block are capped."""
     d = job_dir(job["id"])
     b = budgets()
     build = d / "build.md"
+    note = f"(truncated; full text in factory/jobs/{job['id']}/evidence.md)"
+
+    def clip(text, limit=EVIDENCE_SECTION_LIMIT):
+        return text if full or len(text) <= limit else f"{text[:limit]}\n{note}"
 
     def build_section(heading):
-        return (section(build, heading) if build.exists() else None) or "none recorded"
+        return clip(defuse((section(build, heading) if build.exists() else None) or "none recorded"))
 
     files = ""
     if Path(job["worktree"]).is_dir():
-        files = git(job, "diff", "--stat", f"origin/{BASE}...HEAD", check=False).stdout.strip()
+        files = git(job, "diff", "--stat=120", "--stat-count=50", f"origin/{BASE}...HEAD", check=False).stdout.strip()
     checks = "not run"
     if job["round"] and (round_dir(job) / "checks.md").exists():
         lines = (round_dir(job) / "checks.md").read_text().splitlines()
-        checks = "\n".join([lines[0] if lines else "", "", "```", *lines[-EVIDENCE_TAIL:], "```"])
+        tail = clip(defuse("\n".join(lines[-EVIDENCE_TAIL:])))
+        fence = "`" * max(3, max((len(r) for r in re.findall(r"`+", tail)), default=0) + 1)
+        checks = "\n".join([defuse(lines[0]) if lines else "", "", fence, tail, fence])
     planned = (f"{build_section('Plan tasks')}\n\nDeviations:\n{build_section('Deviations')}"
                if job.get("planned") else "not a planned job")
     reviews = "\n".join(f"- {r} — {v}" for r, v in sorted((job.get("reviews") or {}).items()))
-    hours = (datetime.now(timezone.utc) - parse_time(job["started"])).total_seconds() / 3600
+    spent, hours = allowance_used(job)
     usd_limit = f"${b['job_usd']:.2f}" if b["job_usd"] is not None else "no limit"
     hours_limit = f"{b['job_hours']:g} h" if b["job_hours"] is not None else "no limit"
-    return "\n".join([
-        "<!-- factory evidence -->",
-        f"## Factory evidence — {job['id']}, round {job['round']}",
-        "", "### Files changed", files or "none",
+    sections = [
+        "", "### Files changed", clip(files) or "none",
         "", "### Checks", checks,
         "", "### Acceptance criteria", build_section("Acceptance criteria"),
         "", "### Plan tasks and deviations", planned,
         "", "### Reviews", reviews or "none",
         "", "### Budget",
-        f"Rounds {job['round']} of {job['round_limit']} · cost ${job['cost_usd']:.2f} of {usd_limit}"
-        f" · time {hours:.1f} h of {hours_limit}",
-        "", f"Closes #{job['issue']}", "",
-    ])
+        f"Rounds {job['round']} of {job['round_limit']}"
+        f" · cost ${spent:.2f} of {usd_limit} since the last allowance (${job['cost_usd']:.2f} total)"
+        f" · time {hours:.1f} h of {hours_limit} since the last allowance",
+    ]
+    head = f"{EVIDENCE_START}\n## Factory evidence — {job['id']}, round {job['round']}"
+    tail = f"\nCloses #{job['issue']}\n{EVIDENCE_END}\n"
+    body = "\n".join([head, *sections])
+    room = EVIDENCE_BLOCK_LIMIT - len(tail) - len(note) - 2
+    if not full and len(body) > room:
+        body = f"{body[:room]}\n{note}"
+    return f"{body}\n{tail}"
+
+
+def merge_body(old, block):
+    """The block replaces a previous one in `old`, or goes first with `old` kept below it."""
+    start = old.find(EVIDENCE_START)
+    end = old.find(EVIDENCE_END, start) if start >= 0 else -1
+    if end >= 0:
+        return old[:start] + block.rstrip("\n") + old[end + len(EVIDENCE_END):]
+    return f"{block}\n{old.strip()}\n" if old.strip() else block
 
 
 def publish_evidence(job):
-    """Write evidence.md and, if the job has a PR, make it the PR body."""
-    path = job_dir(job["id"]) / "evidence.md"
-    path.write_text(evidence_md(job))
+    """Write evidence.md and, if the job has a PR, put it in the PR body. Best effort:
+    a failed edit is recorded in the job and never blocks a transition."""
+    d = job_dir(job["id"])
+    path = d / "evidence.md"
+    path.write_text(evidence_md(job, full=True))
     if job["pr"]:
-        gh("pr", "edit", str(job["pr"]), "--body-file", str(path))
+        try:
+            old = gh_json("pr", "view", str(job["pr"]), "--json", "body").get("body") or ""
+            (d / "pr-body.md").write_text(merge_body(old, evidence_md(job)))
+            gh("pr", "edit", str(job["pr"]), "--body-file", str(d / "pr-body.md"))
+            job.pop("evidence_error", None)
+        except Refused as e:
+            job["evidence_error"] = str(e)
+            print(f"job: evidence not published: {e}", file=sys.stderr)
     return path
 
 
@@ -694,8 +758,21 @@ def notify_needs_human(job):
     label("issue", job["issue"], add=LABELS["needs_human"])
 
 
+def find_pr(job):
+    """Record the job's PR if its branch has exactly one open; returns the open PRs."""
+    prs = gh_json("pr", "list", "--head", job["branch"], "--state", "open", "--json", "number,url")
+    if len(prs) == 1:
+        job["pr"], job["pr_url"] = prs[0]["number"], prs[0]["url"]
+    return prs
+
+
 def stop_for_budget(job, reason):
     """Send the job to needs-human instead of the move it asked for."""
+    if not job["pr"]:
+        try:
+            find_pr(job)
+        except Refused:
+            pass  # post to the issue rather than strand the job
     escalate(job, reason + BUDGET_HINT)
     job["budget_stopped"] = reason
     notify_needs_human(job)
@@ -767,6 +844,7 @@ def advance(job, stage):
 
     elif old == "spec":
         require((d / "spec.md").exists(), "spec.md doesn't exist")
+        job["budget_base_time"] = now()  # the time budget covers building, not waiting in the queue
         next_round(job)
 
     elif old == "build" and stage == "gate":
@@ -781,9 +859,8 @@ def advance(job, stage):
         remote = res.stdout.strip() if res.returncode == 0 else ""
         require(head == remote, f"{job['branch']} isn't pushed: local {head[:7]}, origin {remote[:7] or 'missing'}")
         if not job["pr"]:
-            prs = gh_json("pr", "list", "--head", job["branch"], "--state", "open", "--json", "number,url")
+            prs = find_pr(job)
             require(len(prs) == 1, f"expected one open PR from {job['branch']}, found {len(prs)}")
-            job["pr"], job["pr_url"] = prs[0]["number"], prs[0]["url"]
 
     elif old == "build":  # → needs-human
         status = first_line(d / "build.md")
@@ -1172,7 +1249,9 @@ def main(argv):
             reviews = " ".join(f"{k}:{v}" for k, v in job["reviews"].items())
             print(f"{job['id']}: {job['stage']} round {job['round']} gate {job['gate'] or '-'} {reviews}".rstrip())
         elif cmd == "evidence" and len(args) == 1:
-            print(publish_evidence(sync(resolve(args[0]))))
+            job = sync(resolve(args[0]))
+            print(publish_evidence(job))
+            save(job)
         elif cmd == "summary":
             cmd_summary(args)
         else:

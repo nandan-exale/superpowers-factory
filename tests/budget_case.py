@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -23,21 +24,36 @@ class BudgetCase(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        os.environ["CLAUDE_CONFIG_DIR"] = tmp.name
-        self.addCleanup(os.environ.pop, "CLAUDE_CONFIG_DIR", None)
+        patcher = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tmp.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.project = FactoryProject(tmp.name)
         self.project.set_issue("Build the widget.", labels=("factory",))
         self.job = self.project.load_job()
         self.cost = 0.0
         self.job.cost_usd = lambda job: self.cost
         self.issues = []
+        self.prs = []
+        self.pr_body = ""
+        self.edit_error = None
         self.job.gh_json = self.fake_gh_json
+        fake_gh = self.job.gh
+        self.job.gh = lambda *args: self.fake_gh(fake_gh, *args)
         self.job_id = self.project.create_job(self.job)
         self.d = self.job.job_dir(self.job_id)
 
+    def fake_gh(self, recorder, *args):
+        if args[:2] == ("pr", "edit"):
+            if self.edit_error:
+                raise self.job.Refused(self.edit_error)
+            self.pr_body = Path(args[-1]).read_text()
+        return recorder(*args)
+
     def fake_gh_json(self, *args):
         if args[:2] == ("pr", "view"):
-            return {"state": "OPEN", "isDraft": False}
+            return {"state": "OPEN", "isDraft": False, "body": self.pr_body}
+        if args[:2] == ("pr", "list"):
+            return list(self.prs)
         if args[:2] == ("issue", "list"):
             return list(self.issues)
         raise AssertionError(f"unexpected gh_json{args}")
