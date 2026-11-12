@@ -78,6 +78,18 @@ class CheckTest(RepoCopyTest):
         self.edit(CONFIG, lambda text: text + "}")
         self.assertFails("json", "vendor/factory/factory/config.json")
 
+    def test_unknown_model_alias_fails(self):
+        self.edit_config(lambda cfg: cfg["routing"]["low"]["builder"].update(model="gpt"))
+        self.assertFails("config", "routing.low.builder: model 'gpt' not in model_aliases")
+
+    def test_unknown_effort_fails(self):
+        self.edit_config(lambda cfg: cfg["surface_reviewers"]["ui"]["ux"].update(effort="huge"))
+        self.assertFails("config", "surface_reviewers.ui.ux: effort 'huge' not in effort_levels")
+
+    def test_intake_entry_checked(self):
+        self.edit_config(lambda cfg: cfg["agents"].update(intake="fable"))
+        self.assertFails("config", "agents.intake: expected an object with model and effort")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -34,9 +34,38 @@ def check_json(root, opts):
     return problems
 
 
+def model_entries(cfg):
+    """Yield (where, entry) for every {model, effort} the factory spawns with."""
+    for role, entry in cfg.get("agents", {}).items():
+        yield f"agents.{role}", entry
+    for risk, roles in cfg.get("routing", {}).items():
+        for role, entry in roles.items():
+            yield f"routing.{risk}.{role}", entry
+    for surface, roles in cfg.get("surface_reviewers", {}).items():
+        for role, entry in roles.items():
+            yield f"surface_reviewers.{surface}.{role}", entry
+
+
+def check_config(root, opts):
+    cfg = json.loads((root / FACTORY / "config.json").read_text(encoding="utf-8"))
+    aliases = set(cfg.get("model_aliases", []))
+    efforts = set(cfg.get("effort_levels", []))
+    problems = []
+    for where, entry in model_entries(cfg):
+        if not isinstance(entry, dict):
+            problems.append(f"{where}: expected an object with model and effort")
+            continue
+        if entry.get("model") not in aliases:
+            problems.append(f"{where}: model {entry.get('model')!r} not in model_aliases")
+        if entry.get("effort") not in efforts:
+            problems.append(f"{where}: effort {entry.get('effort')!r} not in effort_levels")
+    return problems
+
+
 CHECKS = [
     ("license", check_license),
     ("json", check_json),
+    ("config", check_config),
 ]
 
 
