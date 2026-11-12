@@ -148,6 +148,14 @@ def check_branding(root, opts):
     return problems
 
 
+def check_tests(root, opts):
+    res = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"],
+                         cwd=root, capture_output=True, text=True)
+    if res.returncode == 0:
+        return []
+    return ["unit tests failed; last lines of output:"] + res.stderr.strip().splitlines()[-15:]
+
+
 CHECKS = [
     ("license", check_license),
     ("json", check_json),
@@ -155,6 +163,7 @@ CHECKS = [
     ("frontmatter", check_frontmatter),
     ("compile", check_compile),
     ("branding", check_branding),
+    ("tests", check_tests),
 ]
 
 
