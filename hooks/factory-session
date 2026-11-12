@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN / "bin"))
@@ -36,19 +37,28 @@ def git(cwd, *args):
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
 
 
+def github_host(url):
+    """Host of a git remote URL (https, ssh:// or scp-style), lowercased; None for a local path."""
+    if "://" in url:
+        return urlparse(url).hostname
+    if ":" in url:
+        return url.split(":", 1)[0].rsplit("@", 1)[-1].lower()
+    return None
+
+
 def context(start):
     from factory_files import MANIFEST, vendor_hash
 
     if git(start, "rev-parse", "--is-inside-work-tree").stdout.strip() != "true":
         return None
     top = Path(git(start, "rev-parse", "--show-toplevel").stdout.strip())
-    if "github.com" not in git(top, "remote", "get-url", "origin").stdout:
+    if github_host(git(top, "remote", "get-url", "origin").stdout.strip()) != "github.com":
         return None
     if not (top / "factory" / "bin" / "job").is_file():
-        declined = top / git(top, "rev-parse", "--git-path", "factory-declined").stdout.strip()
-        return None if declined.exists() else INSTALL
+        common = top / git(top, "rev-parse", "--git-common-dir").stdout.strip()
+        return None if (common / "factory-declined").exists() else INSTALL
     try:
-        installed = json.loads((top / MANIFEST).read_text()).get("vendor_hash")
+        installed = json.loads((top / MANIFEST).read_text(encoding="utf-8")).get("vendor_hash")
     except (OSError, ValueError, AttributeError):
         installed = None
     current = vendor_hash()
@@ -57,6 +67,8 @@ def context(start):
 
 def main():
     sys.stdin.read()
+    if os.environ.get("FACTORY_RUNNER"):  # unattended runner sessions never get offers
+        return 0
     try:
         text = context(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
     except Exception:  # a broken plugin hook must never disturb the user's session

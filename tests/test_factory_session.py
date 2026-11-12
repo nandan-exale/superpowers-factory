@@ -45,8 +45,9 @@ class SessionHookTest(unittest.TestCase):
             (self.root / ff.MANIFEST).write_text(json.dumps(ff.manifest_data()))
 
     def hook(self, **env):
+        env.setdefault("CLAUDE_PROJECT_DIR", str(self.root))
         res = subprocess.run([sys.executable, str(HOOK)], input="{}", capture_output=True, text=True,
-                             env=clean_env(CLAUDE_PROJECT_DIR=str(self.root), **env))
+                             env=clean_env(**env))
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual(res.stderr, "")
         if not res.stdout.strip():
@@ -106,6 +107,37 @@ class SessionHookTest(unittest.TestCase):
         self.install(manifest=False)
         (self.root / ff.MANIFEST).mkdir()
         self.assertIn("/factory-update", self.hook())
+
+    def test_runner_session_is_silent(self):
+        self.assertIsNone(self.hook(FACTORY_RUNNER="1"))
+        self.install(manifest=False)
+        self.assertIsNone(self.hook(FACTORY_RUNNER="1"))
+
+    def test_decline_is_shared_with_linked_worktrees(self):
+        git(self.root, "-c", "user.email=t@example.com", "-c", "user.name=t", "-c", "commit.gpgsign=false",
+            "commit", "-q", "--allow-empty", "-m", "init")
+        linked = self.root.parent / "linked"
+        git(self.root, "worktree", "add", "-q", str(linked))
+        self.assertIn("/factory-install", self.hook(CLAUDE_PROJECT_DIR=str(linked)))
+        subprocess.run([sys.executable, str(STATE), "decline"], cwd=self.root, env=clean_env(), check=True,
+                       capture_output=True)
+        self.assertIsNone(self.hook(CLAUDE_PROJECT_DIR=str(linked)))
+        subprocess.run([sys.executable, str(STATE), "reset"], cwd=linked, env=clean_env(), check=True,
+                       capture_output=True)
+        self.assertIn("/factory-install", self.hook())
+
+    def test_only_the_github_host_counts(self):
+        for url in ("https://notgithub.com/o/r.git", "https://github.com.evil.example/o/r.git",
+                    "git@evilgithub.com:o/r.git", "https://evil.example/github.com/r.git",
+                    "/srv/git/github.com/r.git"):
+            git(self.root, "remote", "set-url", "origin", url)
+            self.assertIsNone(self.hook(), url)
+
+    def test_github_url_forms_are_recognised(self):
+        for url in ("git@github.com:o/r.git", "ssh://git@github.com/o/r.git",
+                    "ssh://git@github.com:22/o/r.git", "https://user@GitHub.com/o/r.git"):
+            git(self.root, "remote", "set-url", "origin", url)
+            self.assertIn("/factory-install", self.hook(), url)
 
     def test_internal_error_prints_nothing(self):
         self.install()

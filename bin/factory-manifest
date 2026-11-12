@@ -4,18 +4,17 @@
 Usage: factory-manifest <project>
 """
 
-import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from factory_files import MANIFEST, manifest_data  # noqa: E402
+from factory_files import MANIFEST, manifest_data, write_json  # noqa: E402
 
 
 def write_manifest(project):
     path = Path(project) / MANIFEST
-    path.write_text(json.dumps(manifest_data(), indent=2, sort_keys=True) + "\n")
+    write_json(path, manifest_data(), sort_keys=True)
     return path
 
 

@@ -40,6 +40,15 @@ class ManifestTest(unittest.TestCase):
             want = hashlib.sha256((ff.VENDOR / rel).read_bytes()).hexdigest()
             self.assertEqual(data["files"][rel], want)
 
+    def test_settings_core_ignores_only_the_network_domains(self):
+        settings = json.loads((ff.VENDOR / ff.SETTINGS).read_text())
+        core = ff.settings_core(settings)
+        self.assertEqual(ff.manifest_data()["settings_core"], core)
+        settings["sandbox"]["network"]["allowedDomains"].append("registry.npmjs.org")
+        self.assertEqual(ff.settings_core(settings), core)
+        settings["permissions"]["deny"].append("Bash(sudo *)")
+        self.assertNotEqual(ff.settings_core(settings), core)
+
     def test_script_writes_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "factory").mkdir()

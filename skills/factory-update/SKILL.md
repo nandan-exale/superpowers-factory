@@ -16,7 +16,8 @@ Announce: "I'm using factory-update to update the software factory here."
    - `config`: new keys in `factory/config.json` will be added, existing
      values kept;
    - `settings`: `factory/runner-settings.json` will be replaced with the
-     plugin's, keeping this project's extra network domains;
+     plugin's, keeping this project's extra network domains (if the project
+     changed it beyond domains and upstream changed it too, it is a `merge`);
    - `merge`: changed both here and upstream, decided one by one below;
    - `owned`, `unchanged`: left alone.
 2. Ask your human partner to go ahead. On yes, run
@@ -26,7 +27,10 @@ Announce: "I'm using factory-update to update the software factory here."
    one line what upstream changed and what the project changed, and ask:
    keep the project's version, take upstream's, or merge both. For "merge
    both", edit the project file to carry upstream's change into the
-   project's version, then show the result.
+   project's version, then show the result. Once the file is settled (any of
+   the three answers), run `"$BIN/factory-update-plan" . --resolved <path>`
+   so the update stops being offered for it. Don't skip this: until every
+   merge is resolved, the next session offers the update again.
 4. Run `factory/bin/doctor --fast` and report any FAIL or WARN.
 5. Show `git status` and `git diff --stat`, suggest the message
    `chore: update software factory`, and stop. Don't commit or push.

@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """Show, and optionally apply, how a project's factory differs from the plugin's.
 
-Usage: factory-update-plan <project> [--apply-safe]
+Usage: factory-update-plan <project> [--apply-safe | --resolved <path>]
 
 Prints `<group>\t<path>` per vendored file. Groups: new, unchanged, safe,
 merge, owned (factory/checks.sh, never touched), config (factory/config.json:
 missing keys added, values kept), settings (factory/runner-settings.json:
-upstream file, keeping the project's extra network domains).
+upstream file, keeping the project's extra network domains; a settings file
+the project changed beyond domains is a merge, or unchanged if upstream didn't
+change it either).
 --apply-safe copies new and safe files, merges config and settings, and
-rewrites factory/manifest.json. merge files are left for the user.
+rewrites factory/manifest.json. merge files are left for the user and keep
+their old manifest entry and the old vendor_hash, so the update stays pending.
+--resolved <path> records that the user settled a merge file; once no merge
+is left the manifest's vendor_hash becomes current.
 """
 
 import json
@@ -18,11 +23,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from factory_files import FILES, MANIFEST, manifest_data, sha256_file, vendor_dir  # noqa: E402
+from factory_files import (FILES, MANIFEST, SETTINGS, manifest_data, settings_core, sha256_file,  # noqa: E402
+                           vendor_dir, write_json)
 
 OWNED = {"factory/checks.sh"}
 CONFIG = "factory/config.json"
-SETTINGS = "factory/runner-settings.json"
 
 
 def fail(message):
@@ -38,13 +43,27 @@ def load_json(path):
 
 
 def load_manifest(project):
+    """The project's manifest as a dict, or None when missing or unreadable."""
     try:
-        return json.loads((project / MANIFEST).read_text()).get("files", {})
-    except (OSError, ValueError, AttributeError):
+        data = json.loads((project / MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return None
+    return data if isinstance(data, dict) and isinstance(data.get("files"), dict) else None
 
 
-def classify(project, vendor, base):
+def classify_settings(project, vendor, manifest):
+    mine, theirs = settings_core(load_json(project / SETTINGS)), settings_core(load_json(vendor / SETTINGS))
+    base = (manifest or {}).get("settings_core")
+    if mine == theirs or mine == base:
+        return "settings"
+    if base is None:
+        return "merge"
+    # The project customized the file: nothing to do unless upstream changed it too.
+    return "unchanged" if theirs == base else "merge"
+
+
+def classify(project, vendor, manifest):
+    base = (manifest or {}).get("files")
     rows = []
     for rel in FILES:
         if rel in OWNED:
@@ -54,12 +73,14 @@ def classify(project, vendor, base):
         elif rel == CONFIG:
             rows.append(("config", rel))
         elif rel == SETTINGS:
-            rows.append(("settings", rel))
+            rows.append((classify_settings(project, vendor, manifest), rel))
         else:
             upstream, mine = sha256_file(vendor / rel), sha256_file(project / rel)
             was = (base or {}).get(rel)
-            if was is None:
-                rows.append(("unchanged" if mine == upstream else "merge", rel))
+            if mine == upstream:
+                rows.append(("unchanged", rel))
+            elif was is None:
+                rows.append(("merge", rel))
             elif upstream == was:
                 rows.append(("unchanged", rel))
             elif mine == was:
@@ -79,21 +100,54 @@ def add_missing(mine, upstream):
     return mine
 
 
+def allowed_domains(data, where):
+    """sandbox.network.allowedDomains of a settings file, [] when absent; refuses odd shapes."""
+    sandbox = data.get("sandbox", {}) if isinstance(data, dict) else None
+    network = sandbox.get("network", {}) if isinstance(sandbox, dict) else None
+    domains = network.get("allowedDomains", []) if isinstance(network, dict) else None
+    if not isinstance(domains, list) or not all(isinstance(d, str) for d in domains):
+        fail(f"{where}: sandbox and sandbox.network must be objects and "
+             "sandbox.network.allowedDomains a list of strings")
+    return domains
+
+
 def merged_settings(mine, upstream):
+    extra = allowed_domains(mine, SETTINGS)
+    allowed_domains(upstream, f"{SETTINGS} (plugin copy)")
     domains = upstream.setdefault("sandbox", {}).setdefault("network", {}).setdefault("allowedDomains", [])
-    extra = ((mine.get("sandbox") or {}).get("network") or {}).get("allowedDomains") or []
     domains.extend(d for d in extra if d not in domains)
     return upstream
 
 
-def write_json(path, data):
-    Path(path).write_text(json.dumps(data, indent=2) + "\n")
+def new_manifest(vendor, rows, old):
+    """The manifest after an update. A `merge` file keeps its old entry (none if it had none) and
+    any merge keeps the old vendor_hash, so the pending merge is still offered next session."""
+    data = manifest_data(vendor)
+    merges = {rel for group, rel in rows if group == "merge"}
+    old = old or {}
+    for rel in merges:
+        if rel in old.get("files", {}):
+            data["files"][rel] = old["files"][rel]
+        else:
+            del data["files"][rel]
+    if SETTINGS in merges:
+        if "settings_core" in old:
+            data["settings_core"] = old["settings_core"]
+        else:
+            del data["settings_core"]
+    if merges:
+        old_hash = old.get("vendor_hash")
+        data["vendor_hash"] = old_hash if old_hash and old_hash != data["vendor_hash"] else "pending"
+    return data
 
 
-def apply_safe(project, vendor, rows):
+def apply_safe(project, vendor, rows, old):
     groups = dict((rel, group) for group, rel in rows)
     # Parse everything first, so a bad file applies nothing.
     config = settings = None
+    if (project / SETTINGS).exists():
+        allowed_domains(load_json(project / SETTINGS), SETTINGS)
+        allowed_domains(load_json(vendor / SETTINGS), f"{SETTINGS} (plugin copy)")
     if groups.get(CONFIG) == "config":
         config = add_missing(load_json(project / CONFIG), load_json(vendor / CONFIG))
     if groups.get(SETTINGS) == "settings":
@@ -109,21 +163,47 @@ def apply_safe(project, vendor, rows):
         write_json(project / CONFIG, config)
     if settings is not None and settings != load_json(project / SETTINGS):
         write_json(project / SETTINGS, settings)
-    write_json(project / MANIFEST, manifest_data(vendor))
+    write_json(project / MANIFEST, new_manifest(vendor, rows, old))
+
+
+def resolve(project, vendor, rel):
+    """Record that the project's copy of `rel` is settled against the plugin's current one."""
+    if rel not in FILES:
+        fail(f"{rel} is not a vendored factory file")
+    data = dict(load_manifest(project) or {})
+    data["files"] = dict(data.get("files", {}))
+    data["files"][rel] = sha256_file(vendor / rel)
+    if rel == SETTINGS:
+        data["settings_core"] = settings_core(load_json(vendor / SETTINGS))
+    remaining = [r for group, r in classify(project, vendor, data) if group == "merge"]
+    current = manifest_data(vendor)["vendor_hash"]
+    if not remaining:
+        data["vendor_hash"] = current
+    elif data.get("vendor_hash") in (None, current):
+        data["vendor_hash"] = "pending"
+    write_json(project / MANIFEST, data)
+    return remaining
 
 
 def main(argv):
-    if not argv or len(argv) > 2 or (len(argv) == 2 and argv[1] != "--apply-safe"):
+    ok = (len(argv) == 2 and argv[1] == "--apply-safe") or len(argv) == 1 \
+        or (len(argv) == 3 and argv[1] == "--resolved")
+    if not ok:
         print(__doc__.strip(), file=sys.stderr)
         return 1
     project, vendor = Path(argv[0]).resolve(), vendor_dir()
     if not (project / "factory" / "bin" / "job").is_file():
         fail(f"{project} has no factory installed; run /factory-install first")
-    rows = classify(project, vendor, load_manifest(project))
+    if len(argv) == 3:
+        remaining = resolve(project, vendor, argv[2])
+        print(f"resolved: {argv[2]}; merges left: {len(remaining)}")
+        return 0
+    old = load_manifest(project)
+    rows = classify(project, vendor, old)
     for group, rel in rows:
         print(f"{group}\t{rel}")
     if len(argv) == 2:
-        apply_safe(project, vendor, rows)
+        apply_safe(project, vendor, rows, old)
         print(f"applied: new and safe files copied, config and settings merged, {MANIFEST} rewritten")
     return 0
 

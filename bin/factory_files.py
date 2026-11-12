@@ -1,12 +1,15 @@
 """The vendored factory files /factory-install copies, and hashes over them."""
 
+import copy
 import hashlib
+import json
 import os
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1]
 VENDOR = PLUGIN / "vendor" / "factory"
 MANIFEST = "factory/manifest.json"
+SETTINGS = "factory/runner-settings.json"
 AGENTS = ("intake", "spec-writer", "builder", "reviewer-code",
           "reviewer-security", "reviewer-ux", "reviewer-ui", "approver")
 FILES = (
@@ -43,7 +46,25 @@ def vendor_hash(vendor=None):
     return digest.hexdigest()
 
 
+def write_json(path, data, sort_keys=False):
+    Path(path).write_text(json.dumps(data, indent=2, sort_keys=sort_keys, ensure_ascii=False) + "\n",
+                          encoding="utf-8")
+
+
+def settings_core(data):
+    """Hash of runner-settings.json without the network domains a project is expected to add."""
+    core = copy.deepcopy(data)
+    sandbox = core.get("sandbox") if isinstance(core, dict) else None
+    network = sandbox.get("network") if isinstance(sandbox, dict) else None
+    if isinstance(network, dict):
+        network.pop("allowedDomains", None)
+    canonical = json.dumps(core, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def manifest_data(vendor=None):
     vendor = Path(vendor or vendor_dir())
+    settings = json.loads((vendor / SETTINGS).read_text(encoding="utf-8"))
     return {"vendor_hash": vendor_hash(vendor),
-            "files": {rel: sha256_file(vendor / rel) for rel in FILES}}
+            "files": {rel: sha256_file(vendor / rel) for rel in FILES},
+            "settings_core": settings_core(settings)}
