@@ -1,6 +1,71 @@
 #!/usr/bin/env python3
-"""SessionStart hook. Implemented in the next task; prints nothing."""
+"""SessionStart hook: tell Claude whether to offer the factory, an update, or the factory handoff.
 
+Prints one hook JSON object with additionalContext, or nothing. Never writes files.
+"""
+
+import json
+import os
+import subprocess
 import sys
+from pathlib import Path
 
-sys.exit(0)
+PLUGIN = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PLUGIN / "bin"))
+
+STATE = PLUGIN / "bin" / "factory-state"
+INSTALL = (
+    "superpowers-factory: this GitHub project doesn't have the software factory installed. "
+    "Once, early in this session and only if you haven't asked already, ask the user whether to run "
+    "/factory-install (it sets up an unattended build pipeline for GitHub issues). If they decline, run "
+    f'"{STATE}" decline so you stop asking in this clone.'
+)
+UPDATE = (
+    "superpowers-factory: the software factory installed in this project is older than the plugin. "
+    "Once in this session, offer to run /factory-update (it shows every change and never commits)."
+)
+HANDOFF = (
+    "superpowers-factory: this project has the software factory. When superpowers:writing-plans "
+    "offers its execution choice, add a third option: \"3. Factory — file this plan as a "
+    "factory:planned issue and let the factory build it unattended (/factory-handoff)\". If the user "
+    "picks it, invoke the factory-handoff skill. factory/bin/doctor checks the install."
+)
+
+
+def git(cwd, *args):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+
+
+def context(start):
+    from factory_files import MANIFEST, vendor_hash
+
+    if git(start, "rev-parse", "--is-inside-work-tree").stdout.strip() != "true":
+        return None
+    top = Path(git(start, "rev-parse", "--show-toplevel").stdout.strip())
+    if "github.com" not in git(top, "remote", "get-url", "origin").stdout:
+        return None
+    if not (top / "factory" / "bin" / "job").is_file():
+        declined = top / git(top, "rev-parse", "--git-path", "factory-declined").stdout.strip()
+        return None if declined.exists() else INSTALL
+    try:
+        installed = json.loads((top / MANIFEST).read_text()).get("vendor_hash")
+    except (OSError, ValueError, AttributeError):
+        installed = None
+    current = vendor_hash()
+    return HANDOFF if installed == current else f"{UPDATE}\n\n{HANDOFF}"
+
+
+def main():
+    sys.stdin.read()
+    try:
+        text = context(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    except Exception:  # a broken plugin hook must never disturb the user's session
+        return 0
+    if text:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                                 "additionalContext": text}}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

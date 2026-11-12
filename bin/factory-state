@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Stop or restart the plugin's offer to install the factory in this clone.
+
+Usage (inside the project):
+  factory-state decline   stop offering /factory-install here
+  factory-state reset     offer it again
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+
+def marker():
+    res = subprocess.run(["git", "rev-parse", "--git-path", "factory-declined"],
+                         capture_output=True, text=True)
+    if res.returncode != 0:
+        print("factory-state: not inside a git repository", file=sys.stderr)
+        sys.exit(1)
+    return Path(res.stdout.strip()).resolve()
+
+
+def main(argv):
+    if argv == ["decline"]:
+        marker().write_text("declined\n")
+        print("factory-state: won't offer /factory-install in this clone again")
+        return 0
+    if argv == ["reset"]:
+        marker().unlink(missing_ok=True)
+        print("factory-state: /factory-install will be offered again")
+        return 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
