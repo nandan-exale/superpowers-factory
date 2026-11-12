@@ -1,7 +1,6 @@
 # superpowers-factory
 
-Design with [Superpowers](https://github.com/obra/superpowers), build with the
-vendored software factory.
+Design with [Superpowers](https://github.com/obra/superpowers).
 
 You brainstorm and plan interactively. `/factory-handoff` turns the committed
 spec and plan into one GitHub issue labeled `factory` + `factory:planned`.
