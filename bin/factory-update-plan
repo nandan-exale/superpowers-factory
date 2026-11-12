@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+"""Show, and optionally apply, how a project's factory differs from the plugin's.
+
+Usage: factory-update-plan <project> [--apply-safe]
+
+Prints `<group>\t<path>` per vendored file. Groups: new, unchanged, safe,
+merge, owned (factory/checks.sh, never touched), config (factory/config.json:
+missing keys added, values kept), settings (factory/runner-settings.json:
+upstream file, keeping the project's extra network domains).
+--apply-safe copies new and safe files, merges config and settings, and
+rewrites factory/manifest.json. merge files are left for the user.
+"""
+
+import json
+import shutil
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from factory_files import FILES, MANIFEST, manifest_data, sha256_file, vendor_dir  # noqa: E402
+
+OWNED = {"factory/checks.sh"}
+CONFIG = "factory/config.json"
+SETTINGS = "factory/runner-settings.json"
+
+
+def fail(message):
+    print(f"factory-update-plan: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def load_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        fail(f"{path}: {exc}")
+
+
+def load_manifest(project):
+    try:
+        return json.loads((project / MANIFEST).read_text()).get("files", {})
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def classify(project, vendor, base):
+    rows = []
+    for rel in FILES:
+        if rel in OWNED:
+            rows.append(("owned", rel))
+        elif not (project / rel).exists():
+            rows.append(("new", rel))
+        elif rel == CONFIG:
+            rows.append(("config", rel))
+        elif rel == SETTINGS:
+            rows.append(("settings", rel))
+        else:
+            upstream, mine = sha256_file(vendor / rel), sha256_file(project / rel)
+            was = (base or {}).get(rel)
+            if was is None:
+                rows.append(("unchanged" if mine == upstream else "merge", rel))
+            elif upstream == was:
+                rows.append(("unchanged", rel))
+            elif mine == was:
+                rows.append(("safe", rel))
+            else:
+                rows.append(("merge", rel))
+    return rows
+
+
+def add_missing(mine, upstream):
+    """Add upstream keys the project lacks, recursively; never change a project value."""
+    for key, value in upstream.items():
+        if key not in mine:
+            mine[key] = value
+        elif isinstance(mine[key], dict) and isinstance(value, dict):
+            add_missing(mine[key], value)
+    return mine
+
+
+def merged_settings(mine, upstream):
+    domains = upstream.setdefault("sandbox", {}).setdefault("network", {}).setdefault("allowedDomains", [])
+    extra = ((mine.get("sandbox") or {}).get("network") or {}).get("allowedDomains") or []
+    domains.extend(d for d in extra if d not in domains)
+    return upstream
+
+
+def write_json(path, data):
+    Path(path).write_text(json.dumps(data, indent=2) + "\n")
+
+
+def apply_safe(project, vendor, rows):
+    groups = dict((rel, group) for group, rel in rows)
+    # Parse everything first, so a bad file applies nothing.
+    config = settings = None
+    if groups.get(CONFIG) == "config":
+        config = add_missing(load_json(project / CONFIG), load_json(vendor / CONFIG))
+    if groups.get(SETTINGS) == "settings":
+        settings = merged_settings(load_json(project / SETTINGS), load_json(vendor / SETTINGS))
+    for group, rel in rows:
+        src, dst = vendor / rel, project / rel
+        if group in ("new", "safe"):
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            if rel.startswith("factory/bin/"):
+                dst.chmod(0o755)
+    if config is not None and config != load_json(project / CONFIG):
+        write_json(project / CONFIG, config)
+    if settings is not None and settings != load_json(project / SETTINGS):
+        write_json(project / SETTINGS, settings)
+    write_json(project / MANIFEST, manifest_data(vendor))
+
+
+def main(argv):
+    if not argv or len(argv) > 2 or (len(argv) == 2 and argv[1] != "--apply-safe"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 1
+    project, vendor = Path(argv[0]).resolve(), vendor_dir()
+    if not (project / "factory" / "bin" / "job").is_file():
+        fail(f"{project} has no factory installed; run /factory-install first")
+    rows = classify(project, vendor, load_manifest(project))
+    for group, rel in rows:
+        print(f"{group}\t{rel}")
+    if len(argv) == 2:
+        apply_safe(project, vendor, rows)
+        print(f"applied: new and safe files copied, config and settings merged, {MANIFEST} rewritten")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
