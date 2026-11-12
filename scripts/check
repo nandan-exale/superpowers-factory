@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -62,10 +63,53 @@ def check_config(root, opts):
     return problems
 
 
+FRONTMATTER_GLOBS = (
+    "skills/*/SKILL.md",
+    "vendor/factory/.claude/skills/*/SKILL.md",
+    "vendor/factory/.claude/agents/*.md",
+)
+TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):(.*)$")
+
+
+def frontmatter_keys(text):
+    """Top-level keys of a leading --- block, or None if there is no closed block."""
+    lines = text.splitlines()
+    if not lines or lines[0] != "---":
+        return None
+    keys = {}
+    for line in lines[1:]:
+        if line == "---":
+            return keys
+        match = TOP_LEVEL_KEY.match(line)
+        if match:
+            keys[match.group(1)] = match.group(2).strip()
+    return None
+
+
+def check_frontmatter(root, opts):
+    paths = sorted(path for pattern in FRONTMATTER_GLOBS for path in root.glob(pattern))
+    if not paths:
+        return ["no skill or agent files found"]
+    problems = []
+    for path in paths:
+        rel = path.relative_to(root)
+        keys = frontmatter_keys(path.read_text(encoding="utf-8"))
+        if keys is None:
+            problems.append(f"{rel}: no --- frontmatter block")
+            continue
+        for required in ("name", "description"):
+            if not keys.get(required):
+                problems.append(f"{rel}: missing {required}")
+        if "model" in keys:
+            problems.append(f"{rel}: sets model; models come from factory/config.json")
+    return problems
+
+
 CHECKS = [
     ("license", check_license),
     ("json", check_json),
     ("config", check_config),
+    ("frontmatter", check_frontmatter),
 ]
 
 

@@ -90,6 +90,26 @@ class CheckTest(RepoCopyTest):
         self.edit_config(lambda cfg: cfg["agents"].update(intake="fable"))
         self.assertFails("config", "agents.intake: expected an object with model and effort")
 
+    def test_agent_with_model_fails(self):
+        self.edit("vendor/factory/.claude/agents/builder.md",
+                  lambda text: text.replace("name: builder\n", "name: builder\nmodel: opus\n", 1))
+        self.assertFails("frontmatter", "vendor/factory/.claude/agents/builder.md: sets model")
+
+    def test_skill_missing_description_fails(self):
+        self.edit("skills/factory-install/SKILL.md",
+                  lambda text: "\n".join(l for l in text.splitlines() if not l.startswith("description:")) + "\n")
+        self.assertFails("frontmatter", "skills/factory-install/SKILL.md: missing description")
+
+    def test_file_without_frontmatter_fails(self):
+        self.edit("vendor/factory/.claude/agents/intake.md", lambda text: "no frontmatter\n" + text)
+        self.assertFails("frontmatter", "vendor/factory/.claude/agents/intake.md: no --- frontmatter block")
+
+    def test_nested_model_key_is_ignored(self):
+        self.edit("vendor/factory/.claude/agents/approver.md",
+                  lambda text: text.replace("tools:", "extra:\n  model: nested\ntools:", 1))
+        code, out = self.run_check()
+        self.assertEqual(code, 0, out)
+
 
 if __name__ == "__main__":
     unittest.main()
