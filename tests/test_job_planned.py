@@ -112,6 +112,15 @@ class PlannedRefusalTest(PlannedTestCase):
         self.project.issue["author"] = {"login": "mallory"}
         self.assert_refused("not @mallory")
 
+    def test_reject_removes_planned_label(self):
+        self.project.set_issue("Just build it.")
+        self.job.cmd_planned(self.load())
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.job.cmd_reject(self.load(), "plan was wrong")
+        self.assertEqual(self.load()["stage"], "rejected")
+        self.assertIn(("issue", "edit", "7", "--remove-label", "factory,factory:needs-human,factory:planned"),
+                      self.project.gh_calls)
+
 
 class PlannedFetchFailureTest(PlannedTestCase):
     def test_fetch_failure_leaves_job_in_intake(self):

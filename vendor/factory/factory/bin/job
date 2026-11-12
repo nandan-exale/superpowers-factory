@@ -465,7 +465,8 @@ def advance(job, stage):
         reason = (d / "rejection.md").read_text().split("\n", 1)[1].strip()
         comment("issue", job["issue"], f"### Factory: rejected\n\n{reason}")
         waiting = LABELS["needs_info"] if old == "needs-info" else LABELS["needs_human"]
-        label("issue", job["issue"], remove=f"{LABELS['queue']},{waiting}")
+        planned = [LABELS["planned"]] if job.get("planned") else []
+        label("issue", job["issue"], remove=",".join([LABELS["queue"], waiting, *planned]))
         if job["pr"]:
             gh("pr", "close", str(job["pr"]))
             run(["git", "push", "origin", "--delete", job["branch"]], check=False)
@@ -754,6 +755,8 @@ def cmd_planned(job):
     issue = fetch_issue(job["issue"])
     if LABELS["planned"] not in {l["name"] for l in issue["labels"]}:
         die(f"issue #{job['issue']} isn't labeled {LABELS['planned']}")
+    # Marked before validating, so rejecting a refused job also removes the label.
+    job["planned"] = True
     d = job_dir(job["id"])
     run(["git", "fetch", "origin", BASE])
     me = operator()

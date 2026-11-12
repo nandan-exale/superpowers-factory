@@ -105,8 +105,9 @@ short line per transition, e.g. `004-dark-mode #12: gate PASS → reviewing (cod
 `factory:planned`, don't spawn `intake`: run `factory/bin/job planned <id>`.
 It prints `PLANNED: <id> → build (<reviewers>)`: go to **build**. Or it prints
 `PLANNED: REFUSED <reason>`: the job is in `needs-human` and finished for this
-run. Reject it (`factory/bin/job reject`) and close the issue
-(`gh issue close <issue>`); the fix is a new handoff.
+run. Tell the user the fix is a new handoff. When they ask to reject it, use
+**Rejecting** under `/factory <anything>` (`factory/bin/job reject <id>`, their
+reason on stdin), then close the issue (`gh issue close <issue>`).
 If it exits non-zero without a `PLANNED:` line, stop this job and show the user the error; don't retry it.
 
 Otherwise spawn `intake` with `<header>`. When it returns, read its

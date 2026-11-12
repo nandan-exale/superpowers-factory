@@ -61,5 +61,7 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
 
 - Design with `superpowers:brainstorming`, plan with `superpowers:writing-plans`,
   then run `/factory-handoff` instead of executing the plan here.
-- Run `/factory run` in a fresh session to build what's queued.
+- Start a fresh Claude Code session in this project before the first
+  `/factory run`: the factory's agents (`builder`, `reviewer-code`, …) only
+  load at session start, so this session can't spawn them.
 - Ordinary `factory` issues still work as upstream, through intake.

@@ -20,7 +20,8 @@ debugging and verification skills.
 
 ## Use it in a project
 
-1. In the project, run `/factory-install` once and commit what it adds.
+1. In the project, run `/factory-install` once and commit what it adds. Then
+   start a fresh session: the factory's agents only load at session start.
 2. `superpowers:brainstorming` → spec, `superpowers:writing-plans` → plan.
    When writing-plans offers an execution choice, run `/factory-handoff` instead.
 3. In a fresh session, run `/factory run`.
