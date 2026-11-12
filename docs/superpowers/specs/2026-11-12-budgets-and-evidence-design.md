@@ -48,6 +48,12 @@ start (`die`) if `budgets` is missing or a value is neither. `doctor`'s
 - **Daily spend** = sum of `delta_usd` over every job's lines with `t` in the
   last 24 h.
 - The log is never rewritten. A missing log reads as empty.
+- Reading is tolerant: an unterminated final line (a write cut short) is
+  skipped silently; any other line that isn't JSON or lacks `t`, `stage`,
+  `cost_usd` or `delta_usd` prints `job: <path>: skipping bad line <n>` to
+  stderr and is skipped. A later append starts on a fresh line.
+- Cost never decreases: `sync` keeps `max(previous cost_usd, measured cost)`,
+  and `delta_usd` is clamped at 0 or more.
 
 ## Enforcement
 
@@ -70,6 +76,16 @@ A helper `budget_problem(job)` returns `None` or a reason string, after
    print `BUDGET: <job> → needs-human (<reason>)`. The requested move does
    not happen.
 
+**Time base:** `budget_base_time` is also set on `spec → build` (which
+`job planned` passes through), so time spent queued or in intake and spec does
+not count against the job. The cost base is unchanged.
+
+**PR lookup:** before a budget stop at `build → gate` (no PR recorded yet),
+`find_pr(job)` records the branch's PR if exactly one is open, so the stop is
+posted on the PR and the evidence goes in its body. A lookup failure or zero
+or several open PRs leaves `pr` unset and the stop posts on the issue. The
+normal `build → gate` path uses the same helper and still requires exactly one.
+
 **Fresh allowance:** `needs-human → build` (via `job feedback` or
 `job pr-feedback`) sets `budget_base_usd = cost_usd` and
 `budget_base_time = now`, alongside the existing fresh round budget.
@@ -80,9 +96,10 @@ and `new` row into `wait … daily budget: $X of $Y in the last 24 h`.
 ## Evidence
 
 `job evidence <job>` writes `factory/jobs/<id>/evidence.md` and, if the job
-has a PR, replaces the PR body with it (`gh pr edit <pr> --body-file`). It is
-also called by `advance` whenever a job with a PR enters `approve` or
-`needs-human`. Sections, each always present:
+has a PR, puts it in the PR body. It is also called by `advance` whenever a
+job with a PR enters `approve` or `needs-human` (including a budget stop).
+The block is wrapped in `<!-- factory evidence -->` … `<!-- /factory evidence -->`
+markers. Sections, each always present:
 
 ```markdown
 <!-- factory evidence -->
@@ -104,13 +121,34 @@ also called by `advance` whenever a job with a PR enters `approve` or
 <one line per reviewer: name — PASS / CHANGES / pending>
 
 ### Budget
-Rounds <n> of <round_limit> · cost $<cost> of $<job_usd> · time <h> h of <job_hours> h
+Rounds <n> of <round_limit> · cost $<spent> of $<job_usd> since the last allowance ($<total> total) · time <h> h of <job_hours> h since the last allowance
 
 Closes #<issue>
+<!-- /factory evidence -->
 ```
 
-Text taken from agent-written files is copied verbatim; it is not parsed for
-instructions.
+**Body.** The PR body is read first. If it holds a previous evidence block
+(between the markers), that block is replaced in place; otherwise the new
+block goes first and the old body follows after a blank line. Human text is
+never lost, and publishing twice never duplicates the block.
+
+**Size.** Each section body is cut at 8,000 characters and the whole block at
+60,000, with the line `(truncated; full text in factory/jobs/<id>/evidence.md)`.
+`evidence.md` on disk keeps the full text. Files changed uses
+`git diff --stat=120 --stat-count=50`.
+
+**Defusing.** Text copied from `build.md` and `checks.md` is data, not
+instructions: GitHub closing keywords followed by an issue reference
+(`close/closes/closed`, `fix/fixes/fixed`, `resolve/resolves/resolved`, an
+optional colon, `#N` or `owner/repo#N`) are wrapped in backticks, `@` gets a
+zero-width space after it, and `<!--` is escaped so agent text can't forge the
+markers. The checks output sits in a code fence longer than any backtick run in
+it. Only the factory's own `Closes #<issue>` line closes the issue.
+
+**Best effort.** Evidence never blocks a transition. If `gh` refuses the
+body read or edit, `job` prints `job: evidence not published: <reason>` to
+stderr, records `evidence_error` in `job.json`, and the transition completes
+and is saved. A later successful publish clears `evidence_error`.
 
 ## Orchestrator and dashboard
 
@@ -125,8 +163,9 @@ instructions.
 | Where | Failure | Outcome |
 |---|---|---|
 | config | `budgets` missing or invalid | `job` dies with the key named; doctor FAILs `config`. |
-| evidence | worktree missing, gh edit fails | evidence.md still written; the gh error propagates as a `job` error. |
-| log | unreadable line | `job` dies naming the file and line (no silent skip). |
+| evidence | worktree missing | `Files changed` says `none`; evidence.md still written. |
+| evidence | gh body read or edit fails | evidence.md still written; `evidence_error` recorded, warning on stderr, transition completes. |
+| log | bad or partial line | Partial final line skipped silently; any other bad line skipped with a stderr warning naming file and line. |
 
 ## Testing
 
