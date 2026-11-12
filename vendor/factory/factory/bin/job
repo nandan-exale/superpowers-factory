@@ -39,7 +39,7 @@ BASE = CONFIG["base_branch"]
 MARKER = "<!-- factory -->"
 
 TRANSITIONS = {
-    "intake": {"needs-info", "rejected", "spec"},
+    "intake": {"needs-info", "rejected", "spec", "needs-human"},
     "needs-info": {"intake", "rejected"},
     "spec": {"build"},
     "build": {"gate", "needs-human"},
@@ -425,6 +425,9 @@ def advance(job, stage):
             gh("pr", "close", str(job["pr"]))
             run(["git", "push", "origin", "--delete", job["branch"]], check=False)
 
+    elif old == "intake" and stage == "needs-human":
+        require((d / "decision.md").exists(), "only `job planned` sends an intake job to needs-human")
+
     elif old == "intake":
         want = {"needs-info": "NEEDS-INFO", "rejected": "REJECT", "spec": "ACCEPT"}[stage]
         require(decision == want, f"intake.md says DECISION: {decision}, not {want}")
@@ -518,6 +521,8 @@ def advance(job, stage):
         require(line == want, f"decision.md starts with {line!r}, not {want}")
 
     elif old == "needs-human":
+        require(Path(job["worktree"]).exists(),
+                f"{job['id']} never reached build; reject it and hand off a fixed plan instead")
         feedback = sorted(d.glob("feedback-*.md"))
         require(feedback and feedback[-1].stat().st_mtime > (d / "decision.md").stat().st_mtime,
                 "use `job feedback` to send a job back to the builder")
