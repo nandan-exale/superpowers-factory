@@ -29,7 +29,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -129,6 +129,7 @@ def save(job):
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(job, indent=2) + "\n")
     tmp.replace(path)
+    append_log(job)
 
 
 def all_jobs():
@@ -176,6 +177,66 @@ def section(path, heading):
     """Body of a `## heading` section, or None."""
     m = re.search(rf"^## {re.escape(heading)}\n(.*?)(?=^## |\Z)", path.read_text(), re.M | re.S)
     return m.group(1).strip() if m else None
+
+
+# ---- Budgets and the spend log ---------------------------------------------
+
+BUDGET_KEYS = ("job_usd", "job_hours", "daily_usd")
+EVENT = "job"  # the subcommand being run, recorded in each log line
+
+
+def budgets():
+    """config.json `budgets`, validated: each value a positive number or null."""
+    b = CONFIG.get("budgets")
+    if not isinstance(b, dict):
+        die("factory/config.json has no budgets object (job_usd, job_hours, daily_usd)")
+    for key in BUDGET_KEYS:
+        v = b.get(key, "missing")
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0):
+            die(f"factory/config.json budgets.{key} must be a positive number or null, not {v!r}")
+    return b
+
+
+def parse_time(stamp):
+    return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+
+
+def read_log(path):
+    if not path.exists():
+        return []
+    entries = []
+    for n, line in enumerate(path.read_text().splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            entries.append(json.loads(line))
+        except ValueError:
+            die(f"{path}: line {n} is not JSON")
+    return entries
+
+
+def append_log(job):
+    """One line per change of stage or cost; delta_usd is the cost added since the last line."""
+    path = job_dir(job["id"]) / "log.jsonl"
+    entries = read_log(path)
+    last = entries[-1] if entries else None
+    cost = round(job["cost_usd"], 6)
+    if last and last["stage"] == job["stage"] and last["cost_usd"] == cost:
+        return
+    entry = {"t": now(), "event": EVENT, "stage": job["stage"], "round": job["round"],
+             "cost_usd": cost, "delta_usd": round(cost - (last["cost_usd"] if last else 0.0), 6)}
+    with path.open("a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def daily_spend():
+    """Cost added by every job in the last 24 hours, from their logs."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    total = 0.0
+    if JOBS.exists():
+        for path in sorted(JOBS.glob("*/log.jsonl")):
+            total += sum(e["delta_usd"] for e in read_log(path) if parse_time(e["t"]) >= cutoff)
+    return total
 
 
 def round_dir(job, n=None):
@@ -956,7 +1017,10 @@ def main(argv):
     if not argv or argv[0] in {"-h", "--help"}:
         print(__doc__.strip())
         return
+    global EVENT
     cmd, args = argv[0], argv[1:]
+    EVENT = cmd
+    budgets()
     try:
         if cmd == "queue" and not args:
             cmd_queue()

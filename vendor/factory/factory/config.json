@@ -1,6 +1,7 @@
 {
   "concurrency": 3,
   "max_rounds": 3,
+  "budgets": { "job_usd": 25, "job_hours": 6, "daily_usd": 100 },
   "base_branch": "main",
   "merge_method": "merge",
   "labels": {
