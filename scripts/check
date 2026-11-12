@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""Check this repo's rules. Prints PASS/FAIL per check and exits 1 on any failure."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+FACTORY = Path("vendor/factory/factory")
+JSON_FILES = (
+    ".claude-plugin/plugin.json",
+    ".claude-plugin/marketplace.json",
+    "vendor/factory/factory/config.json",
+)
+
+
+def check_license(root, opts):
+    problems = []
+    for rel in ("LICENSE", "vendor/factory/NOTICE"):
+        path = root / rel
+        if not path.is_file() or not path.read_text(encoding="utf-8").strip():
+            problems.append(f"{rel} is missing or empty")
+    return problems
+
+
+def check_json(root, opts):
+    problems = []
+    for rel in JSON_FILES:
+        try:
+            json.loads((root / rel).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            problems.append(f"{rel}: {exc}")
+    return problems
+
+
+CHECKS = [
+    ("license", check_license),
+    ("json", check_json),
+]
+
+
+def run(root, opts):
+    failed = False
+    for name, check in CHECKS:
+        if opts.fast and name == "tests":
+            continue
+        try:
+            problems = check(root, opts)
+        except Exception as exc:  # reported as a FAIL so one broken check can't hide the rest
+            problems = [f"{type(exc).__name__}: {exc}"]
+        if problems:
+            failed = True
+            for problem in problems:
+                print(f"FAIL {name}: {problem}")
+        else:
+            print(f"PASS {name}")
+    return 1 if failed else 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=REPO, help="repo to check (default: this repo)")
+    parser.add_argument("--fast", action="store_true", help="skip the unit tests")
+    parser.add_argument("--extra-forbidden-hash", action="append", default=[], metavar="SHA256",
+                        help="add a SHA-256 to the branding check's forbidden set (for tests)")
+    opts = parser.parse_args(argv)
+    return run(opts.root.resolve(), opts)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
