@@ -288,6 +288,62 @@ class UpdatePlanTest(unittest.TestCase):
         self.assertIn("not a pending merge", res.stderr)
         self.assertEqual((self.project / ff.MANIFEST).read_text(), before)
 
+    def test_resolved_after_taking_upstream_for_a_file(self):
+        self.pending_merge()
+        self.run_plan("--apply-safe")
+        shutil.copy2(self.vendor / "factory/bin/gate", self.project / "factory/bin/gate")
+        res, _ = self.run_plan("--resolved", "factory/bin/gate")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        manifest = json.loads((self.project / ff.MANIFEST).read_text())
+        self.assertEqual(manifest["vendor_hash"], ff.vendor_hash(self.vendor))
+        self.assertNotIn("/factory-update", self.hook_text())
+
+    def change_upstream_core_and_domains(self):
+        theirs = self.settings_json(self.vendor)
+        theirs["permissions"]["deny"].append("Bash(su *)")
+        self.dropped = theirs["sandbox"]["network"]["allowedDomains"].pop(0)
+        (self.vendor / "factory/runner-settings.json").write_text(json.dumps(theirs))
+        self.make_git_project()
+
+    def test_resolved_after_taking_upstream_for_settings(self):
+        self.change_upstream_core_and_domains()
+        shutil.copy2(self.vendor / "factory/runner-settings.json", self.project / "factory/runner-settings.json")
+        res, _ = self.run_plan("--resolved", "factory/runner-settings.json")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        manifest = json.loads((self.project / ff.MANIFEST).read_text())
+        self.assertEqual(manifest["vendor_hash"], ff.vendor_hash(self.vendor))
+        self.assertEqual(manifest["settings_core"], ff.manifest_data(self.vendor)["settings_core"])
+
+    def test_resolved_settings_keep_mine_syncs_upstream_domains(self):
+        self.customize_settings()
+        self.change_upstream_core_and_domains()
+        _, groups = self.run_plan()
+        self.assertEqual(groups["factory/runner-settings.json"], "merge")
+        res, _ = self.run_plan("--resolved", "factory/runner-settings.json")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        mine = self.settings_json(self.project)
+        domains = mine["sandbox"]["network"]["allowedDomains"]
+        self.assertNotIn(self.dropped, domains)
+        self.assertIn("registry.npmjs.org", domains)
+        self.assertIn("Bash(sudo *)", mine["permissions"]["deny"])
+        self.assertNotIn("Bash(su *)", mine["permissions"]["deny"])
+        manifest = json.loads((self.project / ff.MANIFEST).read_text())
+        self.assertEqual(manifest["settings_core"], ff.manifest_data(self.vendor)["settings_core"])
+        _, groups = self.run_plan()
+        self.assertEqual(groups["factory/runner-settings.json"], "unchanged")
+
+    def test_resolved_refuses_a_file_with_an_unapplied_update(self):
+        self.upstream("factory/bin/route", "# upstream route\n")
+        before = (self.project / ff.MANIFEST).read_text()
+        res, _ = self.run_plan("--resolved", "factory/bin/route")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("--apply-safe", res.stderr)
+        (self.project / "factory/dashboard.html").unlink()
+        self.upstream("factory/dashboard.html", "<!-- new upstream -->\n")
+        res, _ = self.run_plan("--resolved", "factory/dashboard.html")
+        self.assertEqual(res.returncode, 1)
+        self.assertEqual((self.project / ff.MANIFEST).read_text(), before)
+
     def test_settings_without_manifest_core_differing_is_a_merge(self):
         (self.project / ff.MANIFEST).unlink()
         mine = self.settings_json(self.project)

@@ -6,7 +6,8 @@ Usage: factory-update-plan <project> [--apply-safe | --resolved <path>]
 Prints `<group>\t<path>` per vendored file. Groups: new, unchanged, safe,
 merge, owned (factory/checks.sh, never touched), config (factory/config.json:
 missing keys added, values kept), settings (factory/runner-settings.json:
-upstream file, keeping the project's extra network domains; a settings file
+upstream file, keeping the domains the project added; upstream's own domains are
+always kept in sync with upstream, so one the project removed comes back; a settings file
 the project changed beyond domains is a merge, or unchanged if upstream didn't
 change it either).
 --apply-safe copies new and safe files, merges config and settings, and
@@ -179,18 +180,33 @@ def apply_safe(project, vendor, rows, old):
     write_json(project / MANIFEST, new_manifest(vendor, rows, old))
 
 
+def pending(rel, manifest, vendor):
+    """True when the manifest hasn't yet recorded the plugin's current version of `rel`."""
+    if rel == SETTINGS:
+        return (manifest or {}).get("settings_core") != settings_core(load_json(vendor / rel))
+    return (manifest or {}).get("files", {}).get(rel) != sha256_file(vendor / rel)
+
+
 def resolve(project, vendor, rel):
     """Record that the project's copy of `rel` is settled against the plugin's current one."""
     if rel not in FILES:
         fail(f"{rel} is not a vendored factory file")
-    data = dict(load_manifest(project) or {})
-    if dict((r, g) for g, r in classify(project, vendor, data or None)).get(rel) != "merge":
+    old = load_manifest(project)
+    group = dict((r, g) for g, r in classify(project, vendor, old)).get(rel)
+    if group in ("new", "safe"):
+        fail(f"{rel} has an update that isn't applied yet; run --apply-safe first")
+    if not pending(rel, old, vendor):
         fail(f"{rel} is not a pending merge; nothing to resolve")
+    data = dict(old or {})
     data["files"] = dict(data.get("files", {}))
     data["files"][rel] = sha256_file(vendor / rel)
     if rel == SETTINGS:
-        data["settings_core"] = settings_core(load_json(vendor / SETTINGS))
-        data["settings_domains"] = allowed_domains(load_json(vendor / SETTINGS), SETTINGS)
+        mine, theirs = load_json(project / SETTINGS), load_json(vendor / SETTINGS)
+        doc = settings_document(mine, theirs, old)  # against the old base, before it is replaced
+        if doc != mine:
+            write_json(project / SETTINGS, doc)
+        data["settings_core"] = settings_core(theirs)
+        data["settings_domains"] = allowed_domains(theirs, SETTINGS)
     remaining = [r for group, r in classify(project, vendor, data) if group == "merge"]
     current = manifest_data(vendor)["vendor_hash"]
     if not remaining:

@@ -134,8 +134,15 @@ A `merge` file keeps its old manifest entry (none if it had none), and while
 any `merge` remains the manifest keeps its old `vendor_hash` (`"pending"` if
 there was none), so the next session still offers the update.
 
-`--resolved <path>` refuses (exit 1) unless the file is currently a `merge`.
-It records the plugin's current hash for a file the user has settled (and
+Upstream's own domains always follow upstream (a domain upstream lists that
+the project removed comes back); only domains the project added are
+preserved.
+
+`--resolved <path>` refuses (exit 1) when the manifest already records the
+plugin's current version of the file (nothing pending), or when the file is
+`new` or `safe` (an unapplied update that recording would drop); it works
+after the user took upstream's version. For the settings file it first
+rewrites `allowedDomains` against the old manifest base. It records the plugin's current hash for a file the user has settled (and
 `settings_core` and `settings_domains` for the settings file); once no `merge` row
 remains it sets `vendor_hash` to the current one. JSON is written as UTF-8
 without `\u` escapes.

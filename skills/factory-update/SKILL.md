@@ -16,7 +16,8 @@ Announce: "I'm using factory-update to update the software factory here."
    - `config`: new keys in `factory/config.json` will be added, existing
      values kept;
    - `settings`: `factory/runner-settings.json` will be replaced with the
-     plugin's, keeping this project's extra network domains (if the project
+     plugin's, keeping the network domains this project added (upstream's own
+     domains always follow upstream; one removed here comes back) (if the project
      changed it beyond domains and upstream changed it too, it is a `merge`);
    - `merge`: changed both here and upstream, decided one by one below;
    - `owned`, `unchanged`: left alone.
