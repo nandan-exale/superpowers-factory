@@ -55,7 +55,8 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
 - **Step 2 (Adapt), CLAUDE.md:** if the project has `AGENTS.md` and no
   `CLAUDE.md`, create `CLAUDE.md` containing the single line `@AGENTS.md`.
   If it has both and `CLAUDE.md` has no `@AGENTS.md` line, append one. If it
-  uses only `CLAUDE.md`, change nothing.
+  uses only `CLAUDE.md`, change nothing. If `CLAUDE.md` is a symlink to
+  `AGENTS.md`, change nothing.
 
 - **Step 2 (Adapt), Stop hook:** register `factory/bin/stop-hook` for
   interactive sessions. It runs `factory/checks.sh` when a session stops
@@ -63,7 +64,8 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   fail. Merge this into `.claude/settings.json`, creating the file if it
   doesn't exist. Keep every existing key and hook: append to an existing
   `hooks.Stop` list, never replace it. If the file exists but isn't valid
-  JSON, stop and show your human partner instead of rewriting it.
+  JSON, stop and show your human partner instead of rewriting it. If a Stop
+  hook already runs `factory/bin/stop-hook`, leave it; don't add a second.
 
   ```json
   {"hooks": {"Stop": [{"hooks": [{"type": "command",
@@ -76,7 +78,8 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   `pull_request` and on `push` to the base branch, check out the code, run
   the toolchain setup steps copied from the project's existing workflows
   (or the stack's standard `actions/setup-*` action if it has none), then
-  `bash factory/checks.sh`.
+  `bash factory/checks.sh`. If `.github/workflows/factory-checks.yml` already
+  exists, show your human partner the difference and ask before changing it.
 
 - **Step 3 (Verify):** instead of upstream's list, run `factory/bin/doctor`.
   It must exit 0. It checks the config, agent frontmatter (the builder's
