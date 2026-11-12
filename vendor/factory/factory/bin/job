@@ -239,6 +239,35 @@ def daily_spend():
     return total
 
 
+BUDGET_HINT = ("\n\nRaise budgets.job_usd / budgets.job_hours in factory/config.json, "
+               "or give feedback to continue with a fresh allowance.")
+
+
+def daily_problem():
+    cap = budgets()["daily_usd"]
+    spent = daily_spend()
+    if cap is not None and spent >= cap:
+        return f"daily budget: ${spent:.2f} of ${cap:.2f} in the last 24 h"
+    return None
+
+
+def budget_problem(job):
+    """Why the job is over its own budget since its last allowance, or None."""
+    b = budgets()
+    spent = job["cost_usd"] - job.get("budget_base_usd", 0.0)
+    if b["job_usd"] is not None and spent > b["job_usd"]:
+        return f"budget: ${spent:.2f} of ${b['job_usd']:.2f} used"
+    since = parse_time(job.get("budget_base_time") or job["started"])
+    hours = (datetime.now(timezone.utc) - since).total_seconds() / 3600
+    if b["job_hours"] is not None and hours > b["job_hours"]:
+        return f"budget: {hours:.1f} h of {b['job_hours']:g} h used"
+    return None
+
+
+def budgeted_move(old, stage):
+    return stage in {"gate", "review", "approve"} or (stage == "build" and old in {"gate", "review"})
+
+
 def round_dir(job, n=None):
     return job_dir(job["id"]) / f"round-{n or job['round']}"
 
@@ -599,10 +628,39 @@ def next_round(job):
     job["feedback_pending"] = []
 
 
+def notify_needs_human(job):
+    """Post decision.md's reason where the human will look, and label the issue."""
+    d = job_dir(job["id"])
+    body = f"### Factory: needs a human\n\n{(d / 'decision.md').read_text().split(chr(10), 1)[1].strip()}"
+    if job["pr"]:
+        if gh_json("pr", "view", str(job["pr"]), "--json", "isDraft")["isDraft"]:
+            gh("pr", "ready", str(job["pr"]))
+        comment("pr", job["pr"], body)
+    else:
+        comment("issue", job["issue"], body)
+    label("issue", job["issue"], add=LABELS["needs_human"])
+
+
+def stop_for_budget(job, reason):
+    """Send the job to needs-human instead of the move it asked for."""
+    escalate(job, reason + BUDGET_HINT)
+    job["budget_stopped"] = reason
+    notify_needs_human(job)
+    job["stage"] = "needs-human"
+    job["ended"] = now()
+    return job
+
+
 def advance(job, stage):
     old = job["stage"]
     require(stage in TRANSITIONS.get(old, set()) or (stage == "merged" and old not in TERMINAL),
             f"{job['id']}: {old} → {stage} is not a legal transition")
+    if budgeted_move(old, stage):
+        daily = daily_problem()
+        require(daily is None, f"{daily}; the job resumes when it drops")
+        problem = budget_problem(job)
+        if problem:
+            return stop_for_budget(job, problem)
     d = job_dir(job["id"])
     decision = header(d / "intake.md").get("DECISION") if (d / "intake.md").exists() else None
     intake_body = lambda: "\n".join((d / "intake.md").read_text().split("\n\n", 1)[1:]).strip()
@@ -729,18 +787,14 @@ def advance(job, stage):
                 or (feedback and feedback[-1].stat().st_mtime > (d / "decision.md").stat().st_mtime),
                 "use `job feedback` or `job pr-feedback` to send a job back to the builder")
         job["round_limit"] = job["round"] + CONFIG["max_rounds"]
+        job["budget_base_usd"] = job["cost_usd"]
+        job["budget_base_time"] = now()
+        job.pop("budget_stopped", None)
         next_round(job)
         label("issue", job["issue"], remove=LABELS["needs_human"])
 
     if stage == "needs-human":
-        body = f"### Factory: needs a human\n\n{(d / 'decision.md').read_text().split(chr(10), 1)[1].strip()}"
-        if job["pr"]:
-            if gh_json("pr", "view", str(job["pr"]), "--json", "isDraft")["isDraft"]:
-                gh("pr", "ready", str(job["pr"]))
-            comment("pr", job["pr"], body)
-        else:
-            comment("issue", job["issue"], body)
-        label("issue", job["issue"], add=LABELS["needs_human"])
+        notify_needs_human(job)
 
     if stage in TERMINAL and Path(job["worktree"]).exists():
         run(["git", "worktree", "remove", "--force", job["worktree"]])
@@ -793,6 +847,7 @@ def cmd_create(number):
 def cmd_queue():
     """Rows in the order to start them. `resume` and `new` rows fit in the
     concurrency slots; the rest show as `hold` until a running job finishes."""
+    daily = daily_problem()
     jobs = {j["issue"]: j for j in all_jobs()}
     # A job is done once its PR is merged on GitHub, which also closes the issue.
     for j in jobs.values():
@@ -836,6 +891,8 @@ def cmd_queue():
             slots -= 1
         else:
             rows.append(("hold",) + row[1:4] + (f"concurrency {CONCURRENCY} reached",))
+    if daily:
+        rows = [("wait",) + row[1:4] + (daily,) if row[0] in {"resume", "new"} else row for row in rows]
     for row in rows + other_rows:
         print("\t".join(str(c) for c in row))
 
@@ -1029,7 +1086,10 @@ def main(argv):
         elif cmd == "advance" and len(args) == 2:
             job = advance(sync(resolve(args[0])), args[1])
             save(sync(job))
-            print(f"{job['id']}: {job['stage']} (round {job['round']})")
+            if job["stage"] != args[1] and job.get("budget_stopped"):
+                print(f"BUDGET: {job['id']} → needs-human ({job['budget_stopped']})")
+            else:
+                print(f"{job['id']}: {job['stage']} (round {job['round']})")
         elif cmd == "merge" and len(args) == 1:
             cmd_merge(resolve(args[0]))
         elif cmd == "feedback" and len(args) == 1:
