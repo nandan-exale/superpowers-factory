@@ -3,7 +3,7 @@ import shutil
 import tempfile
 import unittest
 
-from installed_project import LABELS, InstalledProject
+from installed_project import LABELS, VENDOR, InstalledProject, load_script
 
 CHECK_NAMES = ("config", "agents", "files", "gitignore", "stop-hook", "claude-md", "labels", "runner")
 
@@ -65,6 +65,40 @@ class DoctorTest(unittest.TestCase):
         res = self.p.run("doctor", "--fast", env={"FAKE_SECURITY_EXIT": "44"})
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         self.assertIn("WARN runner: no Keychain item factory-claude-token", res.stdout)
+
+    def test_checks_run_without_claude_credentials(self):
+        self.p.set_checks_script(
+            "#!/usr/bin/env bash\nenv > \"$(git rev-parse --git-dir)/checks-env\"\n")
+        secrets = {"CLAUDE_CODE_OAUTH_TOKEN": "tok", "ANTHROPIC_API_KEY": "key",
+                   "ANTHROPIC_AUTH_TOKEN": "auth", "ANTHROPIC_BASE_URL": "http://x"}
+        res = self.p.run("doctor", env=secrets)
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        seen = (self.p.git_dir / "checks-env").read_text()
+        self.assertIn("PATH=", seen)
+        for name in secrets:
+            self.assertNotIn(name, seen)
+
+    def protection(self, **env):
+        res = self.p.run("doctor", "--fast", env=env)
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        return res.stdout
+
+    def test_protected_base_branch_passes(self):
+        self.assertIn("PASS runner\n", self.protection())
+
+    def test_unprotected_base_branch_warns(self):
+        out = self.protection(FAKE_GH_API_EXIT="1", FAKE_GH_API_ERR="gh: Branch not protected (HTTP 404)")
+        self.assertIn("WARN runner: base branch main has no protection against force-push/deletion; "
+                      "enable branch protection on GitHub", out)
+
+    def test_branch_allowing_force_push_warns(self):
+        out = self.protection(FAKE_GH_API_OUT=json.dumps(
+            {"allow_force_pushes": {"enabled": True}, "allow_deletions": {"enabled": False}}))
+        self.assertIn("WARN runner: base branch main has no protection against force-push/deletion", out)
+
+    def test_unreadable_protection_warns_without_failing(self):
+        out = self.protection(FAKE_GH_API_EXIT="1", FAKE_GH_API_ERR="gh: Forbidden (HTTP 403)")
+        self.assertIn("WARN runner: could not read branch protection for main", out)
 
     def test_healthy_install_passes(self):
         res = self.doctor("--fast")

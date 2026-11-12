@@ -85,6 +85,18 @@ class StopHookTest(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         self.assertIn("factory/checks.sh failed", res.stderr)
 
+    def test_checks_run_without_claude_credentials(self):
+        self.p.set_checks_script(
+            "#!/usr/bin/env bash\nenv > \"$(git rev-parse --git-dir)/checks-env\"\n")
+        self.edit()
+        secrets = {"CLAUDE_CODE_OAUTH_TOKEN": "tok", "ANTHROPIC_API_KEY": "key",
+                   "ANTHROPIC_AUTH_TOKEN": "auth", "ANTHROPIC_BASE_URL": "http://x"}
+        self.assertEqual(self.hook(**secrets).returncode, 0)
+        seen = (self.p.git_dir / "checks-env").read_text()
+        self.assertIn("PATH=", seen)
+        for name in secrets:
+            self.assertNotIn(name, seen)
+
     def test_missing_checks_does_not_block(self):
         (self.p.root / "factory" / "checks.sh").unlink()
         res = self.hook()

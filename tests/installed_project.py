@@ -1,5 +1,7 @@
 """A throwaway project with the vendored factory installed as /factory-install leaves it."""
 
+import importlib.machinery
+import importlib.util
 import json
 import os
 import shutil
@@ -41,8 +43,15 @@ echo "checks output line"
 exit "$(cat "$git_dir/checks-result" 2>/dev/null || echo 0)"
 """
 
+# `gh api ...` answers $FAKE_GH_API_OUT (default: a protected branch) and exits $FAKE_GH_API_EXIT;
+# every other call prints the labels file.
 FAKE_GH = """#!{python}
 import os, sys
+if sys.argv[1:2] == ["api"]:
+    sys.stderr.write(os.environ.get("FAKE_GH_API_ERR", ""))
+    sys.stdout.write(os.environ.get("FAKE_GH_API_OUT",
+        '{{"allow_force_pushes": {{"enabled": false}}, "allow_deletions": {{"enabled": false}}}}'))
+    sys.exit(int(os.environ.get("FAKE_GH_API_EXIT", "0")))
 sys.stdout.write(open(os.environ["FAKE_GH_LABELS"]).read())
 """
 
@@ -58,6 +67,14 @@ if record:
 sys.stdout.write(os.environ.get(f"FAKE_{{name}}_OUT", ""))
 sys.exit(int(os.environ.get(f"FAKE_{{name}}_EXIT", "0")))
 """
+
+
+def load_script(name, path):
+    """Import an extensionless script such as factory/bin/runner as a module."""
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(name, loader))
+    loader.exec_module(module)
+    return module
 
 
 def clean_env():

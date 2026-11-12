@@ -14,6 +14,7 @@ branch modifies or deletes a file matching config.json `protected_paths`
 
 import fnmatch
 import json
+import os
 import subprocess
 import sys
 import time
@@ -24,6 +25,8 @@ FACTORY = REPO / "factory"
 CONFIG = json.loads((FACTORY / "config.json").read_text())
 CHECKS = FACTORY / "checks.sh"
 TAIL = 80
+# Checks run project code, so they never see the runner's Claude credentials.
+SECRET_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
 
 
 def die(msg):
@@ -54,7 +57,8 @@ def protected_changes(worktree):
 
 def run_checks(worktree):
     start = time.monotonic()
-    res = subprocess.run(["bash", str(CHECKS)], cwd=worktree, capture_output=True, text=True)
+    env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
+    res = subprocess.run(["bash", str(CHECKS)], cwd=worktree, capture_output=True, text=True, env=env)
     return res.returncode, res.stdout + res.stderr, int(time.monotonic() - start)
 
 

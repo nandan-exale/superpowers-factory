@@ -22,6 +22,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 CHECKS = REPO / "factory" / "checks.sh"
+# Checks run project code, so they never see the runner's Claude credentials.
+SECRET_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
 STAMP_NAME = "factory-stop-hook.pass"
 FAILED_NAME = "factory-stop-hook.failed"
 TAIL = 80
@@ -80,9 +82,10 @@ def checks_timeout():
 
 def run_checks(timeout):
     """(exit code, output), or None if the checks timed out and were killed."""
+    env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
     proc = subprocess.Popen(["bash", str(CHECKS)], cwd=REPO, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True, errors="replace",
-                            start_new_session=True)
+                            start_new_session=True, env=env)
     try:
         output, _ = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:

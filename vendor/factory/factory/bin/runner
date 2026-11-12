@@ -80,12 +80,36 @@ def log(line):
         f.write(f"{stamp()} {line}\n")
 
 
+# Sandboxed Bash in the clone can write .git, so no git command run here may execute
+# a hook or fsmonitor program, and none may prompt or wait on ssh.
+GIT_SAFE = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
+GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
+
+
 def git(*args):
-    return subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True)
+    return subprocess.run(["git", *GIT_SAFE, *args], cwd=REPO, capture_output=True, text=True,
+                          env={**os.environ, **GIT_ENV})
+
+
+def hooks_or_fsmonitor_configured():
+    """True if the clone could run code through git: an executable non-sample hook, or
+    core.hooksPath / core.fsmonitor in .git/config (read without the -c overrides)."""
+    hooks = git_path("hooks")
+    if hooks.is_dir() and any(f.is_file() and os.access(f, os.X_OK) and not f.name.endswith(".sample")
+                              for f in hooks.iterdir()):
+        return True
+    for key in ("core.hooksPath", "core.fsmonitor"):
+        res = subprocess.run(["git", "config", "--local", "--get", key], cwd=REPO,
+                             capture_output=True, text=True)
+        if res.returncode == 0:
+            return True
+    return False
 
 
 def git_path(name):
-    return REPO / git("rev-parse", "--git-path", name).stdout.strip()
+    # Without GIT_SAFE: the hooks path asked for here is the configured one, not /dev/null.
+    res = subprocess.run(["git", "rev-parse", "--git-path", name], cwd=REPO, capture_output=True, text=True)
+    return REPO / res.stdout.strip()
 
 
 def first_line(text):
@@ -112,6 +136,8 @@ def run_claude(token, max_seconds):
     """((exit code, stdout) or None on timeout, elapsed seconds)."""
     env = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}
     env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+    env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "1"  # keep the token out of hooks and tests claude starts
+    env.update(GIT_ENV)
     cmd = ["claude", "-p", PROMPT, "--output-format", "json",
            "--permission-mode", "dontAsk", "--settings", str(SETTINGS)]
     start = time.monotonic()
@@ -141,6 +167,9 @@ def cmd_tick():
     except BlockingIOError:
         log("busy")
         return 0
+    if hooks_or_fsmonitor_configured():
+        log("error: git hooks or fsmonitor configured in this clone; remove them")
+        return 1
     branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     if branch != base:
         log(f"skipped: on {branch or '?'}, not {base}")

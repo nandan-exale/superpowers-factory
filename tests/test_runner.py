@@ -6,8 +6,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from installed_project import InstalledProject, git
+from installed_project import VENDOR, InstalledProject, git, load_script
 
 FAKE_CLAUDE = """#!{python}
 import json, os, sys, time
@@ -15,7 +16,8 @@ with open(os.environ["FAKE_RECORD"], "a") as f:
     f.write(json.dumps({{"tool": "claude", "argv": sys.argv[1:],
         "has_token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") == "tok-123",
         "has_api_key": "ANTHROPIC_API_KEY" in os.environ,
-        "has_base_url": "ANTHROPIC_BASE_URL" in os.environ}}) + "\\n")
+        "has_base_url": "ANTHROPIC_BASE_URL" in os.environ,
+        "scrub": os.environ.get("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB")}}) + "\\n")
 time.sleep(float(os.environ.get("FAKE_CLAUDE_SLEEP", "0")))
 print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
                   "total_cost_usd": 1.25, "result": "done"}}))
@@ -252,6 +254,79 @@ class LaunchAgentTest(RunnerCase):
         res = self.runner("install")
         self.assertEqual(res.returncode, 1)
         self.assertIn("launchd only", res.stderr)
+
+
+class SecurityTest(RunnerCase):
+    WORK = [{"number": 7, "title": "Build the widget"}]
+    HOOKS_ERROR = "error: git hooks or fsmonitor configured in this clone; remove them"
+
+    def settings(self):
+        return json.loads((VENDOR / "factory/runner-settings.json").read_text())
+
+    def test_settings_deny_edits_to_git_and_the_runner_s_own_files(self):
+        deny = self.settings()["permissions"]["deny"]
+        for tool in ("Edit", "Write"):
+            for path in ("./.git/**", "./factory/bin/**", "./factory/runner-settings.json",
+                         "./factory/config.json", "./factory/checks.sh", "./.claude/**",
+                         "~/.ssh/**", "~/.claude/**", "~/Library/LaunchAgents/**"):
+                self.assertIn(f"{tool}({path})", deny)
+
+    def test_settings_deny_destructive_git_and_gh(self):
+        deny = self.settings()["permissions"]["deny"]
+        for rule in ("Bash(git push * --force*)", "Bash(git push * -f*)", "Bash(git push *+*)",
+                     "Bash(git push --force-with-lease*)", "Bash(gh repo delete*)",
+                     "Bash(gh repo edit*)", "Bash(gh api -X DELETE*)", "Bash(gh api --method DELETE*)"):
+            self.assertIn(rule, deny)
+
+    def test_settings_allow_local_binding(self):
+        self.assertIs(self.settings()["sandbox"]["network"]["allowLocalBinding"], True)
+
+    def test_git_helper_disables_hooks_fsmonitor_and_prompts(self):
+        module = load_script("runner_under_test", self.p.root / "factory/bin/runner")
+        with mock.patch.object(module.subprocess, "run") as run:
+            module.git("status")
+        args, kwargs = run.call_args
+        self.assertEqual(args[0][:5], ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"])
+        self.assertEqual(args[0][5:], ["status"])
+        self.assertEqual(kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
+        self.assertIn("BatchMode=yes", kwargs["env"]["GIT_SSH_COMMAND"])
+
+    def assertRefusesHooks(self):
+        self.set_issues(self.WORK)
+        res = self.runner("tick")
+        self.assertEqual(res.returncode, 1)
+        self.assertEqual(self.calls("claude"), [])
+        self.assertEqual(self.log_lines()[-1].split(" ", 1)[1], self.HOOKS_ERROR)
+
+    def test_executable_hook_is_refused(self):
+        hook = self.p.git_dir / "hooks" / "post-merge"
+        hook.parent.mkdir(exist_ok=True)
+        hook.write_text("#!/bin/sh\nexit 0\n")
+        hook.chmod(0o755)
+        self.assertRefusesHooks()
+
+    def test_sample_hooks_are_fine(self):
+        sample = self.p.git_dir / "hooks" / "pre-commit.sample"
+        sample.parent.mkdir(exist_ok=True)
+        sample.write_text("#!/bin/sh\nexit 0\n")
+        sample.chmod(0o755)
+        res = self.runner("tick")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertTrue(self.log_lines()[-1].endswith(" idle"))
+
+    def test_hooks_path_in_local_config_is_refused(self):
+        git(self.p.root, "config", "--local", "core.hooksPath", ".githooks")
+        self.assertRefusesHooks()
+
+    def test_fsmonitor_in_local_config_is_refused(self):
+        git(self.p.root, "config", "--local", "core.fsmonitor", "true")
+        self.assertRefusesHooks()
+
+    def test_claude_child_scrubs_the_token_from_its_subprocesses(self):
+        self.set_issues(self.WORK)
+        self.runner("tick")
+        [call] = self.calls("claude")
+        self.assertEqual(call["scrub"], "1")
 
 
 if __name__ == "__main__":

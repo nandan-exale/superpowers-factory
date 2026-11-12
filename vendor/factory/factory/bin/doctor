@@ -25,6 +25,8 @@ EXECUTABLES = ("factory/checks.sh", "factory/bin/job", "factory/bin/gate", "fact
 LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned")
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):")
 CHECKS_TAIL = 20
+# Checks run project code, so they never see the runner's Claude credentials.
+SECRET_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
 
 
 def fail(message):
@@ -171,6 +173,29 @@ RUNNER_ALLOW = ("Bash(factory/bin/job *)", "Bash(factory/bin/gate *)", "Bash(fac
                 "Bash(git *)", "Bash(gh *)", "Bash(bash factory/checks.sh)")
 
 
+def check_branch_protection(base):
+    """WARN unless GitHub says the base branch refuses force pushes and deletion."""
+    gh = shutil.which("gh")
+    if not gh or not base:
+        return []
+    res = subprocess.run([gh, "api", f"repos/{{owner}}/{{repo}}/branches/{base}/protection"],
+                         cwd=REPO, capture_output=True, text=True)
+    unprotected = warn(f"base branch {base} has no protection against force-push/deletion; "
+                       "enable branch protection on GitHub")
+    if res.returncode != 0:
+        if "404" in res.stderr or "not protected" in res.stderr.lower():
+            return [unprotected]
+        return [warn(f"could not read branch protection for {base}; confirm it blocks "
+                     "force-push and deletion")]
+    try:
+        rules = json.loads(res.stdout)
+        open_ = [name for name in ("allow_force_pushes", "allow_deletions")
+                 if (rules.get(name) or {}).get("enabled")]
+    except (ValueError, AttributeError):
+        return [warn(f"could not read branch protection for {base}")]
+    return [unprotected] if open_ else []
+
+
 def check_runner():
     problems = []
     rel = "factory/runner-settings.json"
@@ -195,6 +220,7 @@ def check_runner():
                         capture_output=True, text=True).returncode != 0:
         problems.append(warn(f"no Keychain item {service}; run claude setup-token and "
                              f"security add-generic-password -s {service} -a \"$USER\" -w"))
+    problems += check_branch_protection(cfg.get("base_branch"))
     if sys.platform == "darwin" and shutil.which("launchctl"):
         slug = re.sub(r"[^a-z0-9]+", "-", str(REPO).lower()).strip("-")
         label = f"com.superpowers-factory.{slug}"
@@ -205,8 +231,9 @@ def check_runner():
 
 
 def check_checks():
+    env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
     res = subprocess.run(["bash", str(REPO / "factory" / "checks.sh")], cwd=REPO,
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, env=env)
     if res.returncode == 0:
         return []
     tail = (res.stdout + res.stderr).splitlines()[-CHECKS_TAIL:]
