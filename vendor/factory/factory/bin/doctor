@@ -113,6 +113,8 @@ def check_files():
     problems = []
     if not (REPO / ".claude/skills/factory/SKILL.md").is_file():
         problems.append(fail(".claude/skills/factory/SKILL.md missing"))
+    if not (REPO / "factory" / "manifest.json").is_file():
+        problems.append(fail("factory/manifest.json missing; run /factory-update to write it"))
     for rel in EXECUTABLES:
         path = REPO / rel
         if not path.is_file():
