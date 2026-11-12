@@ -45,8 +45,13 @@ and the file's bytes.
 ### factory/manifest.json (in the project, committed)
 
 ```json
-{"vendor_hash": "<hex>", "files": {"factory/bin/job": "<sha256 of the copy as installed>", "...": "..."}}
+{"vendor_hash": "<hex>", "files": {"factory/bin/job": "<sha256 of the copy as installed>", "...": "..."},
+ "settings_core": "<hex>"}
 ```
+
+`settings_core` is the SHA-256 of the canonical JSON (sorted keys) of the
+vendored `factory/runner-settings.json` with `sandbox.network.allowedDomains`
+removed: the part of that file a project isn't expected to change.
 
 Written by the plugin script `bin/factory-manifest <project>` from the
 plugin's vendored files (not the project's possibly adapted copies), so each
@@ -63,9 +68,13 @@ reads and ~20 hashes). Any internal error prints nothing and exits 0.
 
 States, first match wins:
 
-1. Not a git work tree, or `origin` isn't a GitHub URL → nothing.
+0. `FACTORY_RUNNER` is set (the runner marks its unattended `claude -p`
+   sessions) → nothing.
+1. Not a git work tree, or the host of `origin` isn't `github.com`
+   (`https://`, `ssh://` and `git@host:path` forms; case-insensitive; a
+   look-alike such as `notgithub.com` doesn't count) → nothing.
 2. `factory/bin/job` missing:
-   - `<git dir>/factory-declined` exists → nothing.
+   - `<git common dir>/factory-declined` exists → nothing.
    - else → context: the factory isn't installed here; once, early in the
      session (not if already asked), ask whether to run `/factory-install`;
      if the user declines, run `"<plugin root>/bin/factory-state" decline`,
@@ -84,8 +93,9 @@ builds).
 
 ### bin/factory-state (plugin)
 
-`factory-state decline` writes `<git dir>/factory-declined` (in the git dir,
-so it never shows in the tree); `factory-state reset` removes it.
+`factory-state decline` writes `<git common dir>/factory-declined` (in the
+git dir, so it never shows in the tree; the common dir, so every linked
+worktree of a clone shares one decision); `factory-state reset` removes it.
 
 ### /factory-install changes
 
@@ -95,27 +105,41 @@ install diff. Add `factory/manifest.json` to doctor's `files` check.
 
 ### /factory-update (new skill) and bin/factory-update-plan
 
-`bin/factory-update-plan <project> [--apply-safe]` prints one line per
+`bin/factory-update-plan <project> [--apply-safe | --resolved <path>]` prints one line per
 vendored file, `<group>\t<path>`, then applies when asked. Groups:
 
 | Group | Condition | `--apply-safe` |
 |---|---|---|
 | `new` | missing in the project | copy in |
-| `unchanged` | vendored hash == manifest hash | nothing |
+| `unchanged` | project copy == vendored copy, or vendored hash == manifest hash | nothing |
 | `safe` | vendored changed, project copy == manifest hash | replace |
 | `merge` | vendored changed and project copy differs from manifest | nothing (skill handles) |
 | `owned` | `factory/checks.sh` | never touched |
 | `config` | `factory/config.json` | add keys missing in the project, recursively; never change existing values |
-| `settings` | `factory/runner-settings.json` | take the vendored file, keeping the union of both `sandbox.network.allowedDomains` lists |
+| `settings` | `factory/runner-settings.json`, when everything but `allowedDomains` equals the manifest's `settings_core` (or the vendored file's) | take the vendored file, keeping the union of both `sandbox.network.allowedDomains` lists |
+
+`factory/runner-settings.json` the project changed beyond domains is `merge`
+when upstream changed it too, `unchanged` when upstream didn't (the
+customization is kept), and `merge` when there's no manifest to tell.
+Malformed `sandbox`, `network` or `allowedDomains` shapes on either side make
+the script exit 1 naming the file, applying nothing.
 
 With no manifest, every existing file whose content differs from the
 vendored copy is `merge`. After `--apply-safe` it rewrites the manifest from
 the plugin's vendored files and preserves executable bits on `factory/bin/*`.
+A `merge` file keeps its old manifest entry (none if it had none), and while
+any `merge` remains the manifest keeps its old `vendor_hash` (`"pending"` if
+there was none), so the next session still offers the update.
+
+`--resolved <path>` records the plugin's current hash for a file the user has
+settled (and `settings_core` for the settings file); once no `merge` row
+remains it sets `vendor_hash` to the current one. JSON is written as UTF-8
+without `\u` escapes.
 
 The `factory-update` skill: run the plan, show it, run `--apply-safe` on the
 user's yes; for each `merge` file show the project's diff against the new
-vendored version and ask keep / take upstream / merge by hand (Claude edits);
-run `factory/bin/doctor --fast`; show `git status` and `git diff`; never commit.
+vendored version and ask keep / take upstream / merge by hand (Claude edits),
+then run `--resolved <path>` (all three answers count as resolved); run `factory/bin/doctor --fast`; show `git status` and `git diff`; never commit.
 
 ## Error handling
 
@@ -130,15 +154,19 @@ run `factory/bin/doctor --fast`; show `git status` and `git diff`; never commit.
 
 Stdlib `unittest`, temporary git repos:
 
-- `tests/test_factory_session.py`: not git → no output; non-GitHub origin →
-  no output; not installed → install offer; declined → no output; no
+- `tests/test_factory_session.py`: not git → no output; non-GitHub origin
+  (including look-alike hosts) → no output; ssh and scp-style GitHub URLs
+  offer; `FACTORY_RUNNER` set → no output; a decline in one worktree silences
+  its linked worktrees; not installed → install offer; declined → no output; no
   manifest → update offer + option 3; stale hash → update offer; current →
   option 3 only; output is valid hook JSON; a crash path (unreadable
   manifest dir) → no traceback, exit 0.
 - `tests/test_factory_update.py`: each group; `--apply-safe` results;
   config merge keeps user values and adds new keys; settings keeps added
   domains; manifest rewritten and then `unchanged` everywhere; exec bits kept;
-  no-manifest install → differing files are `merge`.
+  no-manifest install → differing files are `merge`; pending merges survive
+  `--apply-safe` and the update is still offered until `--resolved`; settings
+  customizations; malformed settings shapes; non-ASCII round trip.
 - `tests/test_factory_manifest.py`: deterministic `vendor_hash`; manifest
   entries equal the vendored files' hashes.
 
