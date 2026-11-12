@@ -14,6 +14,7 @@ Usage:
   job feedback <job>             needs-human → build, with your feedback (stdin) as feedback-<k>.md
   job reject <job>               needs-info or needs-human → rejected, with your reason (stdin) as rejection.md
   job agents <job> <json>        record the routed agent set (called by factory/bin/route)
+  job planned <job>              factory:planned issue → intake.md, spec.md, plan.md, routed, in build
   job sync <job>                 refresh reviews, gate and cost from the job's files
   job summary [<job>...]         table of jobs: issue, stage, PR, cost, time
 
@@ -214,6 +215,49 @@ def parse_plan_block(body):
     unknown = [s for s in surfaces if s not in SURFACES]
     require(not unknown, f"unknown surfaces: {', '.join(unknown)} (allowed: {', '.join(SURFACES)})")
     return {**fields, "surfaces": surfaces}
+
+
+def check_plan_commit(plan):
+    """The block's commit is on the base branch and holds both files."""
+    run(["git", "fetch", "origin", BASE])
+    on_base = run(["git", "merge-base", "--is-ancestor", plan["commit"], f"origin/{BASE}"], check=False)
+    require(on_base.returncode == 0, f"commit {plan['commit'][:7]} isn't on origin/{BASE}")
+    for key in ("spec", "plan"):
+        exists = run(["git", "cat-file", "-e", f"{plan['commit']}:{plan[key]}"], check=False)
+        require(exists.returncode == 0, f"{plan[key]} doesn't exist at {plan['commit'][:7]}")
+
+
+def route_agents(risk, surfaces):
+    """factory/bin/route's lookup, in-process: route shells out to `job agents`,
+    which would wait forever on the job lock `job planned` already holds."""
+    reviewers = dict(CONFIG["routing"][risk])
+    for surface in surfaces:
+        reviewers.update(CONFIG["surface_reviewers"][surface])
+    return {"reviewers": reviewers}
+
+
+def planned_intake_md(issue_number, plan):
+    short = plan["commit"][:7]
+    return (
+        "DECISION: ACCEPT\n"
+        f"RISK: {plan['risk']}\n"
+        f"SURFACES: {', '.join(plan['surfaces']) or 'none'}\n"
+        "RESCOPED: no\n"
+        "\n"
+        "## Summary\n"
+        "- Planned with Superpowers: the spec and plan were approved before this issue was filed\n"
+        f"- Spec: `{plan['spec']}` at `{short}`\n"
+        f"- Plan: `{plan['plan']}` at `{short}`\n"
+        "- Risk and surfaces were confirmed by a human at handoff\n"
+        "\n"
+        "## Scope\n"
+        "Build exactly what the plan says, task by task. `spec.md` and `plan.md` in the job\n"
+        f"folder are copies of those files at commit `{plan['commit']}`.\n"
+        "\n"
+        "## Why\n"
+        f"Issue #{issue_number} carries the `{LABELS['planned']}` label: its design was\n"
+        "approved before handoff, so intake didn't review or rescope it.\n"
+    )
 
 
 # ---- Issue → issue.md ------------------------------------------------------
@@ -702,6 +746,33 @@ def cmd_agents(job, spec):
     save(job)
 
 
+def cmd_planned(job):
+    if job["stage"] != "intake":
+        die(f"{job['id']} is in {job['stage']}, not intake")
+    issue = fetch_issue(job["issue"])
+    if LABELS["planned"] not in {l["name"] for l in issue["labels"]}:
+        die(f"issue #{job['issue']} isn't labeled {LABELS['planned']}")
+    d = job_dir(job["id"])
+    try:
+        plan = parse_plan_block(issue["body"])
+        check_plan_commit(plan)
+    except Refused as e:
+        escalate(job, f"The handoff block was refused: {e}\n\n"
+                      "Fix the spec or plan in an interactive session, reject this job, "
+                      "close the issue, and hand off again.")
+        save(advance(sync(job), "needs-human"))
+        print(f"PLANNED: REFUSED {e}")
+        return
+    for key in ("spec", "plan"):
+        (d / f"{key}.md").write_text(run(["git", "show", f"{plan['commit']}:{plan[key]}"]).stdout)
+    (d / "intake.md").write_text(planned_intake_md(job["issue"], plan))
+    job = {**sync(job), "planned": True, "agents": route_agents(plan["risk"], plan["surfaces"])}
+    job = advance(job, "spec")
+    job = advance(job, "build")
+    save(sync(job))
+    print(f"PLANNED: {job['id']} → build ({', '.join(job['agents']['reviewers'])})")
+
+
 def elapsed(job):
     start = datetime.fromisoformat(job["started"].replace("Z", "+00:00"))
     end = datetime.fromisoformat(job["ended"].replace("Z", "+00:00")) if job["ended"] else datetime.now(timezone.utc)
@@ -744,6 +815,8 @@ def main(argv):
             cmd_reject(resolve(args[0]), sys.stdin.read())
         elif cmd == "agents" and len(args) == 2:
             cmd_agents(sync(resolve(args[0])), args[1])
+        elif cmd == "planned" and len(args) == 1:
+            cmd_planned(sync(resolve(args[0])))
         elif cmd == "sync" and len(args) == 1:
             job = sync(resolve(args[0]))
             save(job)

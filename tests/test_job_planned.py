@@ -47,5 +47,77 @@ class TransitionTest(PlannedTestCase):
         self.assertIn("never reached build", str(ctx.exception))
 
 
+class PlannedSuccessTest(PlannedTestCase):
+    def test_valid_plan_reaches_build(self):
+        self.job.cmd_planned(self.load())
+        job = self.load()
+        self.assertEqual(job["stage"], "build")
+        self.assertEqual(job["round"], 1)
+        self.assertTrue(job["planned"])
+        self.assertEqual(job["agents"], {"reviewers": {"code": "sonnet", "ux": "sonnet", "ui": "haiku"}})
+        self.assertEqual(job["intake"]["decision"], "ACCEPT")
+        self.assertEqual(job["intake"]["risk"], "medium")
+        self.assertEqual(job["intake"]["surfaces"], ["ui"])
+
+    def test_spec_and_plan_copied_from_commit(self):
+        self.job.cmd_planned(self.load())
+        self.assertEqual((self.d / "spec.md").read_text(), "# Widget design\n\nThe widget spins.\n")
+        self.assertEqual((self.d / "plan.md").read_text(), "# Widget plan\n\n### Task 1: Spin\n")
+
+    def test_worktree_created_and_issue_commented(self):
+        self.job.cmd_planned(self.load())
+        job = self.load()
+        self.assertTrue(os.path.isdir(job["worktree"]))
+        comments = [c for c in self.project.gh_calls if c[:2] == ("issue", "comment")]
+        self.assertEqual(len(comments), 1)
+        self.assertIn("Factory intake: ACCEPT (risk medium, surfaces: ui)", comments[0][4])
+
+    def test_low_risk_no_surfaces_routes_one_reviewer(self):
+        self.project.set_issue(plan_body(self.project.sha, risk="low", surfaces="[]"))
+        self.job.cmd_planned(self.load())
+        self.assertEqual(self.load()["agents"], {"reviewers": {"code": "haiku"}})
+
+
+class PlannedRefusalTest(PlannedTestCase):
+    def assert_refused(self, fragment):
+        self.job.cmd_planned(self.load())
+        job = self.load()
+        self.assertEqual(job["stage"], "needs-human")
+        decision = (self.d / "decision.md").read_text()
+        self.assertTrue(decision.startswith("ESCALATE\n"))
+        self.assertIn(fragment, decision)
+        self.assertFalse((self.d / "spec.md").exists())
+        self.assertIn(("issue", "edit", "7", "--add-label", "factory:needs-human"), self.project.gh_calls)
+
+    def test_missing_block(self):
+        self.project.set_issue("Just build it.")
+        self.assert_refused("found 0")
+
+    def test_commit_not_on_base(self):
+        self.project.set_issue(plan_body(self.project.unpushed_commit()))
+        self.assert_refused("isn't on origin/main")
+
+    def test_unknown_commit(self):
+        self.project.set_issue(plan_body("b" * 40))
+        self.assert_refused("isn't on origin/main")
+
+    def test_path_missing_at_commit(self):
+        self.project.set_issue(plan_body(self.project.sha, plan="docs/superpowers/plans/nope.md"))
+        self.assert_refused("doesn't exist at")
+
+
+class PlannedPreconditionTest(PlannedTestCase):
+    def test_issue_without_planned_label_exits(self):
+        self.project.set_issue(plan_body(self.project.sha), labels=("factory",))
+        with self.assertRaises(SystemExit):
+            self.job.cmd_planned(self.load())
+        self.assertEqual(self.load()["stage"], "intake")
+
+    def test_job_past_intake_exits(self):
+        self.job.cmd_planned(self.load())
+        with self.assertRaises(SystemExit):
+            self.job.cmd_planned(self.load())
+
+
 if __name__ == "__main__":
     unittest.main()
