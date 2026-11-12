@@ -36,6 +36,16 @@ brainstorming → spec    writing-plans → plan    /factory-handoff → issue
 Ordinary `factory` issues (without `factory:planned`) still go through the
 upstream intake and spec-writer agents.
 
+## Models and effort
+
+Every agent's model and effort come from the project's `factory/config.json`;
+no agent file names a model. `agents.intake` sets intake.
+`routing.<low|medium|high>` sets the spec writer, builder, approver and code
+reviewer for jobs of that risk, and `surface_reviewers` adds the UX, UI and
+security reviewers. Models are aliases listed in `model_aliases`; efforts come
+from `effort_levels`. To see what a role will run on:
+`factory/bin/job agent <job> <role>`.
+
 ## Layout
 
 - `skills/factory-install`, `skills/factory-handoff`: this plugin's skills.

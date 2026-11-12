@@ -15,7 +15,7 @@ Stop and tell the user if any of these fail:
   who can push to it and manage its labels.
 - Its default branch (`gh repo view --json defaultBranchRef`) exists on
   `origin`.
-- `claude --version` is 2.1.257 or later (the intake agent runs on Fable).
+- `claude --version` is 2.1.257 or later.
 - `python3 --version` is 3.10 or later. The scripts use only the standard
   library.
 - None of the files in step 1 already exist. If one does, show the user the
@@ -77,8 +77,10 @@ It must be non-interactive, must not rewrite files (no `--fix`, no
   Add a path only when no job should ever change it. They are fnmatch
   patterns, so `*` also matches `/`.
 - `ports`: move `base` if the project already uses ports 5100–5199.
-- Leave `concurrency`, `max_rounds`, `routing`, `surface_reviewers` and
-  `prices_usd_per_mtok` as they are unless the user asks.
+- Leave `concurrency`, `max_rounds`, `model_aliases`, `effort_levels`,
+  `agents`, `routing`, `surface_reviewers` and `prices_usd_per_mtok` as they
+  are unless the user asks. Every agent's model and effort is set there, never
+  in `.claude/agents/`.
 
 **Agents.** The checklists are general on purpose. Tailor them to the stack
 without changing their structure, file names, first-line formats or one-line
@@ -145,7 +147,8 @@ gh label create factory:needs-human --color D93F0B --description "The factory ne
    script (not the project) or tell the user what's broken.
 2. `factory/bin/job queue` runs without an error.
 3. Each file in `.claude/agents/` has only these frontmatter keys: `name`,
-   `description`, `tools`, `model`, and `hooks` on the builder. Claude Code
+   `description`, `tools`, and `hooks` on the builder. No agent sets `model`:
+   `factory/config.json` does, at spawn time. Claude Code
    ignores unknown keys without a warning, so a typo silently changes behaviour.
 4. `python3 -m json.tool factory/config.json` succeeds.
 5. `git check-ignore factory/jobs/x .worktrees/x` prints both paths, and
@@ -166,7 +169,9 @@ Then tell the user, in a few lines:
 - Every job ends as a PR. The approver merges what it approves; the rest wait
   labeled `factory:needs-human`. Approve one by merging it on GitHub, or tell
   the factory what to change with `/factory <anything>`.
-- Intake runs on Fable, once per issue. Depending on their plan, Fable can
-  bill to usage credits rather than the plan's included usage.
+- Each agent runs on the model and effort `factory/config.json` sets for it:
+  intake in `agents`, the rest per risk in `routing` and `surface_reviewers`.
+  Depending on their plan, some models bill to usage credits rather than the
+  plan's included usage.
 - To start carefully, set `concurrency` to 1 in `factory/config.json` and read
   every PR until they trust it.
