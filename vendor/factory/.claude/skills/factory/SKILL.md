@@ -18,6 +18,11 @@ tell the user; never work around it.
 /factory <anything>   talk to the factory: ask about jobs, give feedback, file a feature
 ```
 
+`/factory` commands run this skill directly. Superpowers brainstorming and
+writing-plans don't apply to them: a `factory:planned` issue was designed and
+planned before it was filed, and every other issue is designed by intake and
+the spec writer.
+
 ## The pipeline
 
 ```
@@ -95,7 +100,16 @@ Start every message to it with `<header>` too.
 Each step below runs when the previous agent or script finishes. Report one
 short line per transition, e.g. `004-dark-mode #12: gate PASS → reviewing (code, ux, ui)`.
 
-**intake.** Spawn `intake` with `<header>`. When it returns, read its
+**intake.** First check the issue's labels
+(`gh issue view <issue> --json labels --jq '.labels[].name'`). If it has
+`factory:planned`, don't spawn `intake`: run `factory/bin/job planned <id>`.
+It prints `PLANNED: <id> → build (<reviewers>)`: go to **build**. Or it prints
+`PLANNED: REFUSED <reason>`: the job is in `needs-human` and finished for this
+run. A refused planned job can only be rejected (`factory/bin/job reject`);
+the fix is a new handoff.
+If it exits non-zero without a `PLANNED:` line, stop this job and show the user the error; don't retry it.
+
+Otherwise spawn `intake` with `<header>`. When it returns, read its
 decision:
 
 - `ACCEPT`: run `factory/bin/route <id>`, then `factory/bin/job advance <id> spec`
@@ -176,7 +190,8 @@ then moves the job to `merged`; stop any agents still running for it.
 **Resuming.** State lives in files, so a new session picks up where a dead one
 stopped. For a `resume` job, run its stage's step again: `intake` and `spec`
 respawn their agent; `build` spawns a new builder told it is resuming (it reads
-`build.md` and `git log` to see how far the last one got); `gate` runs the
+`build.md` and `git log` to see how far the last one got, and, when
+`plan.md` exists, which plan tasks are ticked off); `gate` runs the
 gate; `review` spawns only the reviewers whose `review-<r>.md` is missing in
 the current round; `approve` respawns the approver; `merging` runs
 `factory/bin/job merge <id>`. A `needs-info` job the author has answered shows
