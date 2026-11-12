@@ -9,6 +9,9 @@
     "needs_human": "factory:needs-human",
     "planned": "factory:planned"
   },
+  "pr_feedback": {
+    "allowed": []
+  },
   "model_aliases": ["fable", "opus", "sonnet", "haiku"],
   "effort_levels": ["low", "medium", "high", "xhigh", "max"],
   "agents": {
