@@ -56,6 +56,11 @@ gets them in its next round; and the factory won't merge while a trusted
 comment is unhandled. Merging the PR on GitHub stays the approval. An edit
 counts only if a trusted person made it.
 
+## Working on this repo
+
+Agents and contributors: read `AGENTS.md`, and run `scripts/check` before
+calling a change done. CI runs the same script.
+
 ## Layout
 
 - `skills/factory-install`, `skills/factory-handoff`: this plugin's skills.
