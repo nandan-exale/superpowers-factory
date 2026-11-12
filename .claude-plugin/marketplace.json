@@ -1,0 +1,15 @@
+{
+  "name": "superpowers-factory-dev",
+  "description": "Local marketplace for the superpowers-factory plugin",
+  "owner": {
+    "name": "Nandan Thakur"
+  },
+  "plugins": [
+    {
+      "name": "superpowers-factory",
+      "description": "Hand Superpowers-approved specs and plans to an unattended software factory that builds each plan as one PR",
+      "version": "0.1.0",
+      "source": "./"
+    }
+  ]
+}

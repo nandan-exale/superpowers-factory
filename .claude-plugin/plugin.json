@@ -1,0 +1,10 @@
+{
+  "name": "superpowers-factory",
+  "description": "Hand Superpowers-approved specs and plans to an unattended software factory that builds each plan as one PR",
+  "version": "0.1.0",
+  "author": {
+    "name": "Nandan Thakur"
+  },
+  "license": "GPL-3.0-only",
+  "keywords": ["superpowers", "software-factory", "github-issues", "workflows"]
+}
