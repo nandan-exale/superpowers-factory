@@ -21,7 +21,7 @@ AGENTS = ("intake", "spec-writer", "builder", "reviewer-code",
           "reviewer-security", "reviewer-ux", "reviewer-ui", "approver")
 AGENT_KEYS = {"name", "description", "tools"}
 EXECUTABLES = ("factory/checks.sh", "factory/bin/job", "factory/bin/gate", "factory/bin/route",
-               "factory/bin/stop-hook", "factory/bin/doctor")
+               "factory/bin/stop-hook", "factory/bin/doctor", "factory/bin/runner")
 LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned")
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):")
 CHECKS_TAIL = 20
@@ -167,6 +167,43 @@ def check_labels():
     return [fail(f"label {name!r} missing on GitHub") for name in LABELS if name not in names]
 
 
+RUNNER_ALLOW = ("Bash(factory/bin/job *)", "Bash(factory/bin/gate *)", "Bash(factory/bin/route *)",
+                "Bash(git *)", "Bash(gh *)", "Bash(bash factory/checks.sh)")
+
+
+def check_runner():
+    problems = []
+    rel = "factory/runner-settings.json"
+    path = REPO / rel
+    if not path.is_file():
+        return [fail(f"{rel} missing")]
+    settings = json.loads(path.read_text(encoding="utf-8-sig"))
+    sandbox = settings.get("sandbox") or {}
+    if sandbox.get("enabled") is not True:
+        problems.append(fail(f"{rel}: sandbox.enabled must be true"))
+    if sandbox.get("allowUnsandboxedCommands") is not False:
+        problems.append(fail(f"{rel}: sandbox.allowUnsandboxedCommands must be false"))
+    allow = (settings.get("permissions") or {}).get("allow") or []
+    problems += [fail(f"{rel}: missing allow rule {rule}") for rule in RUNNER_ALLOW if rule not in allow]
+    cfg = json.loads((REPO / "factory" / "config.json").read_text(encoding="utf-8"))
+    service = (cfg.get("runner") or {}).get("keychain_service")
+    if not service:
+        problems.append(fail("factory/config.json has no runner.keychain_service"))
+    elif not shutil.which("security"):
+        problems.append(warn("security not found; Keychain token not checked"))
+    elif subprocess.run(["security", "find-generic-password", "-s", service],
+                        capture_output=True, text=True).returncode != 0:
+        problems.append(warn(f"no Keychain item {service}; run claude setup-token and "
+                             f"security add-generic-password -s {service} -a \"$USER\" -w"))
+    if sys.platform == "darwin" and shutil.which("launchctl"):
+        slug = re.sub(r"[^a-z0-9]+", "-", str(REPO).lower()).strip("-")
+        label = f"com.superpowers-factory.{slug}"
+        if subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{label}"],
+                          capture_output=True, text=True).returncode != 0:
+            problems.append(warn("runner LaunchAgent not loaded; run factory/bin/runner install"))
+    return problems
+
+
 def check_checks():
     res = subprocess.run(["bash", str(REPO / "factory" / "checks.sh")], cwd=REPO,
                          capture_output=True, text=True)
@@ -184,6 +221,7 @@ CHECKS = [
     ("stop-hook", check_stop_hook),
     ("claude-md", check_claude_md),
     ("labels", check_labels),
+    ("runner", check_runner),
     ("checks", check_checks),
 ]
 

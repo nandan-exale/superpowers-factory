@@ -31,10 +31,11 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
     .claude/agents/reviewer-code.md .claude/agents/reviewer-security.md \
     .claude/agents/reviewer-ux.md .claude/agents/reviewer-ui.md .claude/agents/approver.md \
     factory/config.json factory/checks.sh factory/bin/job factory/bin/gate factory/bin/route \
-    factory/bin/stop-hook factory/bin/doctor factory/dashboard.html
+    factory/bin/stop-hook factory/bin/doctor factory/bin/runner factory/runner-settings.json \
+    factory/dashboard.html
   do mkdir -p "$(dirname "$f")" && cp "$VENDOR/$f" "$f"; done
   chmod +x factory/checks.sh factory/bin/job factory/bin/gate factory/bin/route \
-    factory/bin/stop-hook factory/bin/doctor
+    factory/bin/stop-hook factory/bin/doctor factory/bin/runner
   ```
 
 - **Step 2 (Adapt), labels:** also create the planned label:
@@ -80,6 +81,19 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   (or the stack's standard `actions/setup-*` action if it has none), then
   `bash factory/checks.sh`. If `.github/workflows/factory-checks.yml` already
   exists, show your human partner the difference and ask before changing it.
+
+- **Step 2 (Adapt), hands-off running:** in `factory/runner-settings.json`,
+  add the package hosts the project's checks need to
+  `sandbox.network.allowedDomains` (for example `registry.npmjs.org`,
+  `pypi.org` and `files.pythonhosted.org`), found from the lockfiles and
+  `factory/checks.sh`. List them for your human partner. Don't loosen
+  anything else in that file. Then tell them the runner needs three steps
+  they do themselves: (1) make a separate clone of the project for the
+  runner, so it never works in the checkout they edit; (2) run
+  `claude setup-token`, then
+  `security add-generic-password -s factory-claude-token -a "$USER" -w`
+  and paste the token at its prompt; (3) in that clone, run
+  `factory/bin/runner install`. Never ask for, read or store the token.
 
 - **Step 3 (Verify):** instead of upstream's list, run `factory/bin/doctor`.
   It must exit 0. It checks the config, agent frontmatter (the builder's

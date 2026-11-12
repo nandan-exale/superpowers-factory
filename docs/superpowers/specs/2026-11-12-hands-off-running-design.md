@@ -95,36 +95,34 @@ Non-macOS: `install`/`uninstall`/`status` exit 1 with "launchd only";
 Positive integers and a non-empty string; `runner` validates them and exits 1
 naming the bad key.
 
-### Settings merged by /factory-install
+### Runner settings (factory/runner-settings.json)
 
-Into `.claude/settings.json`, keeping everything already there:
-
-- sandbox enabled for Bash, with sandboxed commands auto-allowed, filesystem
-  writes limited to the project directory, and network allowed only to
-  `github.com`, `api.github.com`, `*.githubusercontent.com` and the package
-  hosts the project's stack needs (the install agent derives them from the
-  lockfiles and `checks.sh`, and lists them for the user);
-- `permissions.allow`: `Bash(factory/bin/job:*)`, `Bash(factory/bin/gate:*)`,
-  `Bash(factory/bin/route:*)`, `Bash(git:*)`, `Bash(gh:*)`, `Bash(bash factory/checks.sh)`;
-- `permissions.deny` for `.env*`, `secrets/**` reads, and `git push --force*`.
-
-The exact key names are verified against the current Claude Code settings
-documentation during planning; the plan quotes the source. If the installed
-Claude Code has no sandbox for this platform, the install says so and
-installs the allowlist only.
+Vendored and passed with `--settings`, not merged into the project's
+`.claude/settings.json`: interactive sessions stay unsandboxed, and
+`sandbox.network.strictAllowlist` (ignored in project settings) applies.
+Contents: sandbox enabled, `autoAllowBashIfSandboxed: true`,
+`allowUnsandboxedCommands: false`, network `allowedDomains` GitHub hosts plus
+the project's package hosts (the install agent adds them), `strictAllowlist:
+true`; `permissions.allow` for `Edit`, `Write` and `Bash(...)` rules for
+`factory/bin/job`, `gate`, `route`, `git`, `gh`, `bash factory/checks.sh`;
+`permissions.deny` for `.env`, `.env.*`, `secrets/**` reads and force pushes.
+The runner passes `--permission-mode dontAsk`, so anything else is denied.
+Verified against code.claude.com/docs (sandboxing, permissions,
+permission-modes, headless, authentication), 2026-11.
 
 ### doctor (new check `runner`)
 
-- FAIL if `.claude/settings.json` lacks the sandbox block or any of the
-  allow rules above.
+- FAIL if `factory/runner-settings.json` is missing, has the sandbox off or
+  `allowUnsandboxedCommands` not false, or lacks any of the Bash allow rules
+  above.
 - WARN if `security find-generic-password -s <service>` (no `-w`; the secret
   is never read) exits non-zero.
 - WARN if the LaunchAgent is not loaded (only on macOS; skipped elsewhere).
 
 ### Install skill and docs
 
-`/factory-install` gains a "Hands-off running" step: merge the settings
-above; tell the user to (1) make a dedicated clone for the runner, (2) run
+`/factory-install` gains a "Hands-off running" step: add the project's
+package hosts to the vendored runner settings; tell the user to (1) make a dedicated clone for the runner, (2) run
 `claude setup-token` and `security add-generic-password -s
 factory-claude-token -a "$USER" -w` themselves, (3) run
 `factory/bin/runner install` in that clone. It never handles the token.

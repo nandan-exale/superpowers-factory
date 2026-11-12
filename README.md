@@ -48,6 +48,24 @@ security reviewers. Models are aliases listed in `model_aliases`; efforts come
 from `effort_levels`. To see what a role will run on:
 `factory/bin/job agent <job> <role>`.
 
+## Hands-off running
+
+On macOS, `factory/bin/runner` runs `/factory run` every 15 minutes while
+you're logged in, but only when the queue has work. Set it up once:
+
+1. Clone the project a second time for the runner; it skips any run when its
+   checkout has uncommitted changes or isn't on the base branch.
+2. `claude setup-token`, then
+   `security add-generic-password -s factory-claude-token -a "$USER" -w`
+   and paste the token.
+3. In the runner's clone: `factory/bin/runner install`.
+
+Runs are headless with `--permission-mode dontAsk` and
+`factory/runner-settings.json`: commands run in Claude Code's sandbox
+(project files only, network limited to GitHub and your package hosts), and
+anything not allowed is refused. `factory/bin/runner status` shows the last
+runs; `factory/bin/doctor` checks the setup.
+
 ## PR comments
 
 Comments on a factory PR reach the job's builder without `/factory`. The

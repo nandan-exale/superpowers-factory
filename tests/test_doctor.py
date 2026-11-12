@@ -5,7 +5,7 @@ import unittest
 
 from installed_project import LABELS, InstalledProject
 
-CHECK_NAMES = ("config", "agents", "files", "gitignore", "stop-hook", "claude-md", "labels")
+CHECK_NAMES = ("config", "agents", "files", "gitignore", "stop-hook", "claude-md", "labels", "runner")
 
 
 class DoctorTest(unittest.TestCase):
@@ -42,6 +42,29 @@ class DoctorTest(unittest.TestCase):
             return json.dumps(cfg)
         self.edit("factory/config.json", change)
         self.assertFails("config", "budgets missing")
+
+    def runner_settings(self, change):
+        path = self.p.root / "factory/runner-settings.json"
+        data = json.loads(path.read_text())
+        change(data)
+        path.write_text(json.dumps(data))
+
+    def test_runner_settings_without_sandbox_fail(self):
+        self.runner_settings(lambda d: d["sandbox"].update(enabled=False))
+        self.assertFails("runner", "factory/runner-settings.json: sandbox.enabled must be true")
+
+    def test_runner_settings_missing_allow_rule_fail(self):
+        self.runner_settings(lambda d: d["permissions"]["allow"].remove("Bash(gh *)"))
+        self.assertFails("runner", "factory/runner-settings.json: missing allow rule Bash(gh *)")
+
+    def test_runner_settings_with_escape_hatch_fail(self):
+        self.runner_settings(lambda d: d["sandbox"].update(allowUnsandboxedCommands=True))
+        self.assertFails("runner", "sandbox.allowUnsandboxedCommands must be false")
+
+    def test_missing_keychain_item_warns(self):
+        res = self.p.run("doctor", "--fast", env={"FAKE_SECURITY_EXIT": "44"})
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertIn("WARN runner: no Keychain item factory-claude-token", res.stdout)
 
     def test_healthy_install_passes(self):
         res = self.doctor("--fast")
