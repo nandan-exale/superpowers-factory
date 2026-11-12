@@ -46,12 +46,14 @@ and the file's bytes.
 
 ```json
 {"vendor_hash": "<hex>", "files": {"factory/bin/job": "<sha256 of the copy as installed>", "...": "..."},
- "settings_core": "<hex>"}
+ "settings_core": "<hex>", "settings_domains": ["<allowedDomains as vendored>"]}
 ```
 
 `settings_core` is the SHA-256 of the canonical JSON (sorted keys) of the
 vendored `factory/runner-settings.json` with `sandbox.network.allowedDomains`
 removed: the part of that file a project isn't expected to change.
+`settings_domains` is the vendored `allowedDomains` list, so a later update
+can tell upstream's domains from the ones the project added.
 
 Written by the plugin script `bin/factory-manifest <project>` from the
 plugin's vendored files (not the project's possibly adapted copies), so each
@@ -116,11 +118,12 @@ vendored file, `<group>\t<path>`, then applies when asked. Groups:
 | `merge` | vendored changed and project copy differs from manifest | nothing (skill handles) |
 | `owned` | `factory/checks.sh` | never touched |
 | `config` | `factory/config.json` | add keys missing in the project, recursively; never change existing values |
-| `settings` | `factory/runner-settings.json`, when everything but `allowedDomains` equals the manifest's `settings_core` (or the vendored file's) | take the vendored file, keeping the union of both `sandbox.network.allowedDomains` lists |
+| `settings` | `factory/runner-settings.json`, when everything but `allowedDomains` equals the manifest's `settings_core` (or the vendored file's), or the project customized it, upstream's core is as installed, and the domain list would change | take the vendored file (or, for a customized one, the project's own with only the domains replaced); `allowedDomains` becomes upstream's list followed by the project's extras (its domains not in the manifest's `settings_domains`, or upstream's when absent) |
 
 `factory/runner-settings.json` the project changed beyond domains is `merge`
-when upstream changed it too, `unchanged` when upstream didn't (the
-customization is kept), and `merge` when there's no manifest to tell.
+when upstream changed it too, `unchanged` when upstream didn't and no domain
+changes (the customization is kept; a domain upstream added or removed still
+flows in, as `settings`), and `merge` when there's no manifest to tell.
 Malformed `sandbox`, `network` or `allowedDomains` shapes on either side make
 the script exit 1 naming the file, applying nothing.
 
@@ -131,8 +134,9 @@ A `merge` file keeps its old manifest entry (none if it had none), and while
 any `merge` remains the manifest keeps its old `vendor_hash` (`"pending"` if
 there was none), so the next session still offers the update.
 
-`--resolved <path>` records the plugin's current hash for a file the user has
-settled (and `settings_core` for the settings file); once no `merge` row
+`--resolved <path>` refuses (exit 1) unless the file is currently a `merge`.
+It records the plugin's current hash for a file the user has settled (and
+`settings_core` and `settings_domains` for the settings file); once no `merge` row
 remains it sets `vendor_hash` to the current one. JSON is written as UTF-8
 without `\u` escapes.
 

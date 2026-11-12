@@ -233,6 +233,61 @@ class UpdatePlanTest(unittest.TestCase):
         self.run_plan("--apply-safe")
         self.assertEqual((self.project / "factory/runner-settings.json").read_text(), before)
 
+    def customize_settings(self):
+        mine = self.settings_json(self.project)
+        mine["permissions"]["deny"].append("Bash(sudo *)")
+        mine["sandbox"]["network"]["allowedDomains"].append("registry.npmjs.org")
+        (self.project / "factory/runner-settings.json").write_text(json.dumps(mine))
+
+    def set_upstream_domains(self, change):
+        theirs = self.settings_json(self.vendor)
+        change(theirs["sandbox"]["network"]["allowedDomains"])
+        (self.vendor / "factory/runner-settings.json").write_text(json.dumps(theirs))
+
+    def test_upstream_domain_added_reaches_a_customized_settings_file(self):
+        self.customize_settings()
+        self.set_upstream_domains(lambda d: d.append("new.example.com"))
+        _, groups = self.run_plan()
+        self.assertEqual(groups["factory/runner-settings.json"], "settings")
+        self.run_plan("--apply-safe")
+        merged = self.settings_json(self.project)
+        domains = merged["sandbox"]["network"]["allowedDomains"]
+        self.assertIn("new.example.com", domains)
+        self.assertIn("registry.npmjs.org", domains)
+        self.assertIn("Bash(sudo *)", merged["permissions"]["deny"])
+        upstream = self.settings_json(self.vendor)["sandbox"]["network"]["allowedDomains"]
+        self.assertEqual(domains[:len(upstream)], upstream)
+        _, groups = self.run_plan()
+        self.assertEqual(groups["factory/runner-settings.json"], "unchanged")
+
+    def test_upstream_domain_removed_leaves_a_customized_settings_file(self):
+        self.customize_settings()
+        removed = self.settings_json(self.vendor)["sandbox"]["network"]["allowedDomains"][0]
+        self.set_upstream_domains(lambda d: d.remove(removed))
+        self.run_plan("--apply-safe")
+        domains = self.settings_json(self.project)["sandbox"]["network"]["allowedDomains"]
+        self.assertNotIn(removed, domains)
+        self.assertIn("registry.npmjs.org", domains)
+        self.assertIn("Bash(sudo *)", self.settings_json(self.project)["permissions"]["deny"])
+
+    def test_upstream_domain_removed_leaves_an_uncustomized_settings_file(self):
+        removed = self.settings_json(self.vendor)["sandbox"]["network"]["allowedDomains"][0]
+        mine = self.settings_json(self.project)
+        mine["sandbox"]["network"]["allowedDomains"].append("registry.npmjs.org")
+        (self.project / "factory/runner-settings.json").write_text(json.dumps(mine))
+        self.set_upstream_domains(lambda d: d.remove(removed))
+        self.run_plan("--apply-safe")
+        domains = self.settings_json(self.project)["sandbox"]["network"]["allowedDomains"]
+        self.assertNotIn(removed, domains)
+        self.assertIn("registry.npmjs.org", domains)
+
+    def test_resolved_refuses_a_file_that_is_not_a_pending_merge(self):
+        before = (self.project / ff.MANIFEST).read_text()
+        res, _ = self.run_plan("--resolved", "factory/bin/gate")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("not a pending merge", res.stderr)
+        self.assertEqual((self.project / ff.MANIFEST).read_text(), before)
+
     def test_settings_without_manifest_core_differing_is_a_merge(self):
         (self.project / ff.MANIFEST).unlink()
         mine = self.settings_json(self.project)

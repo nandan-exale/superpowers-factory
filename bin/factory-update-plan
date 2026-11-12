@@ -16,6 +16,7 @@ their old manifest entry and the old vendor_hash, so the update stays pending.
 is left the manifest's vendor_hash becomes current.
 """
 
+import copy
 import json
 import shutil
 import sys
@@ -51,15 +52,45 @@ def load_manifest(project):
     return data if isinstance(data, dict) and isinstance(data.get("files"), dict) else None
 
 
+def allowed_domains(data, where):
+    """sandbox.network.allowedDomains of a settings file, [] when absent; refuses odd shapes."""
+    sandbox = data.get("sandbox", {}) if isinstance(data, dict) else None
+    network = sandbox.get("network", {}) if isinstance(sandbox, dict) else None
+    domains = network.get("allowedDomains", []) if isinstance(network, dict) else None
+    if not isinstance(domains, list) or not all(isinstance(d, str) for d in domains):
+        fail(f"{where}: sandbox and sandbox.network must be objects and "
+             "sandbox.network.allowedDomains a list of strings")
+    return domains
+
+
+def settings_document(mine, upstream, manifest):
+    """The project's settings with upstream's domain list: upstream's domains first, then the
+    domains the project added (those not in the manifest's list, or upstream's when it has none).
+    A project that is still on the old core takes upstream's whole file instead."""
+    mine_domains = allowed_domains(mine, SETTINGS)
+    theirs = allowed_domains(upstream, f"{SETTINGS} (plugin copy)")
+    base = (manifest or {}).get("settings_domains")
+    if not isinstance(base, list):
+        base = theirs
+    wanted = theirs + [d for d in mine_domains if d not in base and d not in theirs]
+    old_core = (manifest or {}).get("settings_core")
+    doc = copy.deepcopy(upstream if old_core and settings_core(mine) == old_core else mine)
+    doc.setdefault("sandbox", {}).setdefault("network", {})["allowedDomains"] = wanted
+    return doc
+
+
 def classify_settings(project, vendor, manifest):
-    mine, theirs = settings_core(load_json(project / SETTINGS)), settings_core(load_json(vendor / SETTINGS))
+    mine, theirs = load_json(project / SETTINGS), load_json(vendor / SETTINGS)
+    mine_core, theirs_core = settings_core(mine), settings_core(theirs)
     base = (manifest or {}).get("settings_core")
-    if mine == theirs or mine == base:
+    if mine_core == theirs_core or mine_core == base:
         return "settings"
     if base is None:
         return "merge"
-    # The project customized the file: nothing to do unless upstream changed it too.
-    return "unchanged" if theirs == base else "merge"
+    if theirs_core != base:
+        return "merge"
+    # The project customized the file and upstream's core is as installed: only domains can change.
+    return "settings" if settings_document(mine, theirs, manifest) != mine else "unchanged"
 
 
 def classify(project, vendor, manifest):
@@ -100,25 +131,6 @@ def add_missing(mine, upstream):
     return mine
 
 
-def allowed_domains(data, where):
-    """sandbox.network.allowedDomains of a settings file, [] when absent; refuses odd shapes."""
-    sandbox = data.get("sandbox", {}) if isinstance(data, dict) else None
-    network = sandbox.get("network", {}) if isinstance(sandbox, dict) else None
-    domains = network.get("allowedDomains", []) if isinstance(network, dict) else None
-    if not isinstance(domains, list) or not all(isinstance(d, str) for d in domains):
-        fail(f"{where}: sandbox and sandbox.network must be objects and "
-             "sandbox.network.allowedDomains a list of strings")
-    return domains
-
-
-def merged_settings(mine, upstream):
-    extra = allowed_domains(mine, SETTINGS)
-    allowed_domains(upstream, f"{SETTINGS} (plugin copy)")
-    domains = upstream.setdefault("sandbox", {}).setdefault("network", {}).setdefault("allowedDomains", [])
-    domains.extend(d for d in extra if d not in domains)
-    return upstream
-
-
 def new_manifest(vendor, rows, old):
     """The manifest after an update. A `merge` file keeps its old entry (none if it had none) and
     any merge keeps the old vendor_hash, so the pending merge is still offered next session."""
@@ -131,10 +143,11 @@ def new_manifest(vendor, rows, old):
         else:
             del data["files"][rel]
     if SETTINGS in merges:
-        if "settings_core" in old:
-            data["settings_core"] = old["settings_core"]
-        else:
-            del data["settings_core"]
+        for key in ("settings_core", "settings_domains"):
+            if key in old:
+                data[key] = old[key]
+            else:
+                del data[key]
     if merges:
         old_hash = old.get("vendor_hash")
         data["vendor_hash"] = old_hash if old_hash and old_hash != data["vendor_hash"] else "pending"
@@ -151,7 +164,7 @@ def apply_safe(project, vendor, rows, old):
     if groups.get(CONFIG) == "config":
         config = add_missing(load_json(project / CONFIG), load_json(vendor / CONFIG))
     if groups.get(SETTINGS) == "settings":
-        settings = merged_settings(load_json(project / SETTINGS), load_json(vendor / SETTINGS))
+        settings = settings_document(load_json(project / SETTINGS), load_json(vendor / SETTINGS), old)
     for group, rel in rows:
         src, dst = vendor / rel, project / rel
         if group in ("new", "safe"):
@@ -171,10 +184,13 @@ def resolve(project, vendor, rel):
     if rel not in FILES:
         fail(f"{rel} is not a vendored factory file")
     data = dict(load_manifest(project) or {})
+    if dict((r, g) for g, r in classify(project, vendor, data or None)).get(rel) != "merge":
+        fail(f"{rel} is not a pending merge; nothing to resolve")
     data["files"] = dict(data.get("files", {}))
     data["files"][rel] = sha256_file(vendor / rel)
     if rel == SETTINGS:
         data["settings_core"] = settings_core(load_json(vendor / SETTINGS))
+        data["settings_domains"] = allowed_domains(load_json(vendor / SETTINGS), SETTINGS)
     remaining = [r for group, r in classify(project, vendor, data) if group == "merge"]
     current = manifest_data(vendor)["vendor_hash"]
     if not remaining:

@@ -67,4 +67,5 @@ def manifest_data(vendor=None):
     settings = json.loads((vendor / SETTINGS).read_text(encoding="utf-8"))
     return {"vendor_hash": vendor_hash(vendor),
             "files": {rel: sha256_file(vendor / rel) for rel in FILES},
-            "settings_core": settings_core(settings)}
+            "settings_core": settings_core(settings),
+            "settings_domains": list(settings["sandbox"]["network"]["allowedDomains"])}
