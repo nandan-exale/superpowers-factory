@@ -177,17 +177,78 @@ def cmd_tick():
     return 0 if code == 0 else 1
 
 
+def label():
+    slug = re.sub(r"[^a-z0-9]+", "-", str(REPO).lower()).strip("-")
+    return f"com.superpowers-factory.{slug}"
+
+
+def plist_path():
+    return Path.home() / "Library" / "LaunchAgents" / f"{label()}.plist"
+
+
+def domain():
+    return f"gui/{os.getuid()}"
+
+
+def plist_bytes(runner):
+    out = str(JOBS / "runner.launchd.log")
+    return plistlib.dumps({
+        "Label": label(),
+        "ProgramArguments": [sys.executable, str(FACTORY / "bin" / "runner"), "tick"],
+        "WorkingDirectory": str(REPO),
+        "StartInterval": runner["interval_minutes"] * 60,
+        "RunAtLoad": True,
+        "StandardOutPath": out,
+        "StandardErrorPath": out,
+        "EnvironmentVariables": {"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+    })
+
+
+def require_launchd():
+    if platform.system() != "Darwin":
+        die("launchd only (macOS); elsewhere run `factory/bin/runner tick` from cron or systemd")
+
+
+def launchctl(*args):
+    return subprocess.run(["launchctl", *args], capture_output=True, text=True)
+
+
 def cmd_install(dry_run):
-    load_config()
-    die("install: not implemented yet")
+    _, runner = load_config()
+    data = plist_bytes(runner)
+    if dry_run:
+        sys.stdout.write(data.decode())
+        return 0
+    require_launchd()
+    path = plist_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    JOBS.mkdir(parents=True, exist_ok=True)
+    launchctl("bootout", f"{domain()}/{label()}")
+    path.write_bytes(data)
+    res = launchctl("bootstrap", domain(), str(path))
+    if res.returncode != 0:
+        die(f"launchctl bootstrap failed: {first_line(res.stderr)}")
+    print(f"installed {path}; runs every {runner['interval_minutes']} min")
+    return 0
 
 
 def cmd_uninstall():
-    die("uninstall: not implemented yet")
+    require_launchd()
+    launchctl("bootout", f"{domain()}/{label()}")
+    plist_path().unlink(missing_ok=True)
+    print(f"uninstalled {label()}")
+    return 0
 
 
 def cmd_status():
-    die("status: not implemented yet")
+    require_launchd()
+    loaded = launchctl("print", f"{domain()}/{label()}").returncode == 0
+    path = plist_path()
+    print(f"{label()}: {'loaded' if loaded else 'not loaded'}")
+    print(f"plist: {path}{'' if path.exists() else ' (missing)'}")
+    lines = LOG.read_text().splitlines()[-10:] if LOG.exists() else ["(no runner.log yet)"]
+    print("\n".join(lines))
+    return 0
 
 
 if __name__ == "__main__":

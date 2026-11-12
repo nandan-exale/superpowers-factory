@@ -200,5 +200,59 @@ class TickTest(RunnerCase):
         self.assertEqual(len(self.log_lines()), 2)
 
 
+class LaunchAgentTest(RunnerCase):
+    def plist(self):
+        res = self.runner("install", "--dry-run")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        return plistlib.loads(res.stdout.encode())
+
+    def test_dry_run_plist(self):
+        p = self.plist()
+        self.assertTrue(p["Label"].startswith("com.superpowers-factory."))
+        self.assertRegex(p["Label"], r"^[a-z0-9.-]+$")
+        self.assertEqual(p["ProgramArguments"][1:], [str(self.p.root / "factory/bin/runner"), "tick"])
+        self.assertEqual(p["StartInterval"], 15 * 60)
+        self.assertTrue(p["RunAtLoad"])
+        self.assertEqual(p["WorkingDirectory"], str(self.p.root))
+        self.assertEqual(p["StandardOutPath"], str(self.p.root / "factory/jobs/runner.launchd.log"))
+        self.assertIn(str(self.p.fakebin), p["EnvironmentVariables"]["PATH"])
+
+    def test_dry_run_changes_nothing(self):
+        self.runner("install", "--dry-run")
+        self.assertFalse((self.home / "Library").exists())
+        self.assertEqual(self.calls("launchctl"), [])
+
+    @unittest.skipUnless(sys.platform == "darwin", "launchd only")
+    def test_install_writes_plist_and_bootstraps(self):
+        res = self.runner("install")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        plists = list((self.home / "Library/LaunchAgents").glob("com.superpowers-factory.*.plist"))
+        self.assertEqual(len(plists), 1)
+        argvs = [c["argv"] for c in self.calls("launchctl")]
+        self.assertEqual(argvs[0][0], "bootout")
+        self.assertEqual(argvs[-1], ["bootstrap", f"gui/{os.getuid()}", str(plists[0])])
+
+    @unittest.skipUnless(sys.platform == "darwin", "launchd only")
+    def test_uninstall_removes_plist(self):
+        self.runner("install")
+        res = self.runner("uninstall")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(list((self.home / "Library/LaunchAgents").glob("*.plist")), [])
+
+    @unittest.skipUnless(sys.platform == "darwin", "launchd only")
+    def test_status_shows_state_and_log_tail(self):
+        self.runner("tick")
+        res = self.runner("status", FAKE_LAUNCHCTL_EXIT="113")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("not loaded", res.stdout)
+        self.assertIn(" idle", res.stdout)
+
+    @unittest.skipIf(sys.platform == "darwin", "non-macOS behavior")
+    def test_install_outside_macos_refuses(self):
+        res = self.runner("install")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("launchd only", res.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
