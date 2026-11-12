@@ -660,13 +660,25 @@ EVIDENCE_SECTION_LIMIT = 8_000
 EVIDENCE_BLOCK_LIMIT = 60_000
 EVIDENCE_START = "<!-- factory evidence -->"
 EVIDENCE_END = "<!-- /factory evidence -->"
-CLOSING = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s*(?:[\w.-]+/[\w.-]+)?#\d+", re.I)
+CLOSING = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s*(?:https://github\.com/[\w.-]+/[\w.-]+/issues/\d+|(?:[\w.-]+/[\w.-]+)?#\d+)", re.I)
 
 
 def defuse(text):
     """Agent-written text goes into a PR body: no issue closing, no pings, no fake markers."""
     text = CLOSING.sub(lambda m: f"`{m.group(0)}`", text)
     return text.replace("@", "@\u200b").replace("<!--", "&lt;!--")
+
+
+def fenced(text):
+    """A code fence longer than any backtick run in `text`, so the text can't break out."""
+    fence = "`" * max(3, max((len(r) for r in re.findall(r"`+", text)), default=0) + 1)
+    return f"{fence}\n{text}\n{fence}"
+
+
+def close_fences(text):
+    """An odd number of fence lines means one is open: close it so it can't swallow what follows."""
+    fences = re.findall(r"^(`{3,})", text, re.M)
+    return text + "\n" + max(fences, key=len) if len(fences) % 2 else text
 
 
 def evidence_md(job, full=False):
@@ -681,17 +693,17 @@ def evidence_md(job, full=False):
         return text if full or len(text) <= limit else f"{text[:limit]}\n{note}"
 
     def build_section(heading):
-        return clip(defuse((section(build, heading) if build.exists() else None) or "none recorded"))
+        return close_fences(clip(defuse((section(build, heading) if build.exists() else None) or "none recorded")))
 
     files = ""
     if Path(job["worktree"]).is_dir():
         files = git(job, "diff", "--stat=120", "--stat-count=50", f"origin/{BASE}...HEAD", check=False).stdout.strip()
+        files = fenced(clip(defuse(files))) if files else ""
     checks = "not run"
     if job["round"] and (round_dir(job) / "checks.md").exists():
         lines = (round_dir(job) / "checks.md").read_text().splitlines()
         tail = clip(defuse("\n".join(lines[-EVIDENCE_TAIL:])))
-        fence = "`" * max(3, max((len(r) for r in re.findall(r"`+", tail)), default=0) + 1)
-        checks = "\n".join([defuse(lines[0]) if lines else "", "", fence, tail, fence])
+        checks = "\n".join([defuse(lines[0]) if lines else "", "", fenced(tail)])
     planned = (f"{build_section('Plan tasks')}\n\nDeviations:\n{build_section('Deviations')}"
                if job.get("planned") else "not a planned job")
     reviews = "\n".join(f"- {r} — {v}" for r, v in sorted((job.get("reviews") or {}).items()))
@@ -699,7 +711,7 @@ def evidence_md(job, full=False):
     usd_limit = f"${b['job_usd']:.2f}" if b["job_usd"] is not None else "no limit"
     hours_limit = f"{b['job_hours']:g} h" if b["job_hours"] is not None else "no limit"
     sections = [
-        "", "### Files changed", clip(files) or "none",
+        "", "### Files changed", files or "none",
         "", "### Checks", checks,
         "", "### Acceptance criteria", build_section("Acceptance criteria"),
         "", "### Plan tasks and deviations", planned,

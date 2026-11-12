@@ -1,5 +1,6 @@
 import contextlib
 import io
+import types
 import unittest
 
 from budget_case import BudgetCase
@@ -142,6 +143,28 @@ class EvidenceTest(BudgetCase):
         self.assertIn("`Closes #5`", text)
         after = text.split("`````\n")[-1]
         self.assertTrue(after.startswith("\n### Acceptance criteria"))
+
+    def test_closing_keyword_before_issue_url_is_defused(self):
+        self.in_review()
+        (self.d / "build.md").write_text(
+            "STATUS: READY\n\n## Acceptance criteria\nFixes https://github.com/o/r/issues/3 ok\n")
+        text = self.job.evidence_md(self.current())
+        self.assertIn("`Fixes https://github.com/o/r/issues/3`", text)
+
+    def test_unclosed_fence_in_a_section_cannot_swallow_the_rest(self):
+        self.in_review()
+        (self.d / "build.md").write_text("STATUS: READY\n\n## Acceptance criteria\n```python\nx = 1\n")
+        text = self.job.evidence_md(self.current())
+        before = text[:text.index("\nCloses #7")]
+        fences = [line for line in before.splitlines() if line.startswith("```")]
+        self.assertEqual(len(fences) % 2, 0)
+
+    def test_files_changed_is_defused_and_fenced(self):
+        self.in_review()
+        stat = types.SimpleNamespace(stdout="Fixes #9 | 2 +-\n")
+        self.job.git = lambda *a, **k: stat
+        text = self.job.evidence_md(self.current())
+        self.assertIn("### Files changed\n```\n`Fixes #9` | 2 +-\n```\n", text)
 
     def test_budget_line_uses_the_allowance(self):
         self.in_review(budget_base_usd=20.0)

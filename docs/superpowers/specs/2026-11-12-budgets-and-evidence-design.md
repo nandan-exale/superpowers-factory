@@ -53,7 +53,9 @@ start (`die`) if `budgets` is missing or a value is neither. `doctor`'s
   `cost_usd` or `delta_usd` prints `job: <path>: skipping bad line <n>` to
   stderr and is skipped. A later append starts on a fresh line.
 - Cost never decreases: `sync` keeps `max(previous cost_usd, measured cost)`,
-  and `delta_usd` is clamped at 0 or more.
+  and `delta_usd` is clamped at 0 or more. Because cost is monotonic, after
+  Claude Code cleans up old transcripts a resumed job's new spend is
+  undercounted until the recomputed cost passes the stored maximum.
 
 ## Enforcement
 
