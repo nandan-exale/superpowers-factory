@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""Check the factory install. Implemented in the next task."""
+
+import sys
+
+sys.exit(1)

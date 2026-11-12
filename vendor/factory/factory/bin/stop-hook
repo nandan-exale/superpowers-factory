@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Claude Code Stop hook: don't end a turn while factory/checks.sh fails.
+
+Runs factory/checks.sh when the working tree has changes that haven't passed
+yet. The tree state that last passed is remembered in the git dir
+(factory-stop-hook.pass), so stopping again without new edits is instant.
+Blocks (exit 2) once per failure and never blocks on its own breakage.
+"""
+
+import hashlib
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+CHECKS = REPO / "factory" / "checks.sh"
+STAMP_NAME = "factory-stop-hook.pass"
+TAIL = 80
+
+
+def git(*args, text=True):
+    return subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=text)
+
+
+def note(message):
+    print(f"stop-hook: {message}", file=sys.stderr)
+
+
+def read_payload():
+    try:
+        payload = json.load(sys.stdin)
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def tree_key():
+    """Hash of HEAD, the diff against it, and every untracked, unignored file."""
+    digest = hashlib.sha256()
+    digest.update(git("rev-parse", "HEAD").stdout.encode())
+    digest.update(git("diff", "HEAD", "--binary", text=False).stdout)
+    untracked = git("ls-files", "--others", "--exclude-standard", "-z").stdout.split("\0")
+    for rel in sorted(filter(None, untracked)):
+        digest.update(rel.encode() + b"\0")
+        path = REPO / rel
+        if path.is_file():
+            digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def stamp_path():
+    return REPO / git("rev-parse", "--git-path", STAMP_NAME).stdout.strip()
+
+
+def main():
+    payload = read_payload()
+    try:
+        status = git("status", "--porcelain")
+    except FileNotFoundError:
+        note("git not found; skipping checks")
+        return 0
+    if status.returncode != 0:
+        note("not a git repository; skipping checks")
+        return 0
+    if not status.stdout.strip():
+        return 0
+    if not CHECKS.is_file():
+        note("factory/checks.sh not found; skipping checks")
+        return 0
+    key = tree_key()
+    stamp = stamp_path()
+    if stamp.is_file() and stamp.read_text().strip() == key:
+        return 0
+    try:
+        res = subprocess.run(["bash", str(CHECKS)], cwd=REPO, capture_output=True, text=True)
+    except OSError as exc:
+        note(f"could not run factory/checks.sh: {exc}")
+        return 0
+    if res.returncode == 0:
+        stamp.write_text(key + "\n")
+        return 0
+    tail = "\n".join((res.stdout + res.stderr).splitlines()[-TAIL:])
+    print(f"factory/checks.sh failed (exit {res.returncode}); last lines:\n{tail}", file=sys.stderr)
+    if payload.get("stop_hook_active"):
+        note("not blocking again; fix this before you finish")
+        return 0
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
