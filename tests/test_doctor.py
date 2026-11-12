@@ -88,6 +88,20 @@ class DoctorTest(unittest.TestCase):
         res = self.doctor("--fast")
         self.assertEqual(res.returncode, 0, res.stdout)
 
+    def test_symlinked_claude_md_passes(self):
+        (self.p.root / "CLAUDE.md").unlink()
+        (self.p.root / "CLAUDE.md").symlink_to("AGENTS.md")
+        res = self.doctor("--fast")
+        self.assertEqual(res.returncode, 0, res.stdout)
+        self.assertIn("PASS claude-md\n", res.stdout)
+
+    def test_bom_in_settings_and_claude_md_is_ok(self):
+        for rel in (".claude/settings.json", "CLAUDE.md"):
+            path = self.p.root / rel
+            path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes())
+        res = self.doctor("--fast")
+        self.assertEqual(res.returncode, 0, res.stdout)
+
     def test_missing_label_fails(self):
         self.p.set_labels([name for name in LABELS if name != "factory:planned"])
         self.assertFails("labels", "label 'factory:planned' missing")

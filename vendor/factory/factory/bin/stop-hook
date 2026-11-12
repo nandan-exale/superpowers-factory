@@ -5,10 +5,17 @@ Runs factory/checks.sh when the working tree has changes that haven't passed
 yet. The tree state that last passed is remembered in the git dir
 (factory-stop-hook.pass), so stopping again without new edits is instant.
 Blocks (exit 2) once per failure and never blocks on its own breakage.
+
+A failure also leaves factory-stop-hook.failed in the git dir, so committing
+the broken edits can't skip the next run: with that marker present, checks run
+even on a clean tree. A pass removes the marker. Checks that run longer than
+FACTORY_STOP_HOOK_TIMEOUT seconds (default 540) are killed and don't block.
 """
 
 import hashlib
 import json
+import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -16,11 +23,16 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 CHECKS = REPO / "factory" / "checks.sh"
 STAMP_NAME = "factory-stop-hook.pass"
+FAILED_NAME = "factory-stop-hook.failed"
 TAIL = 80
+CHUNK = 1 << 20
+DEFAULT_TIMEOUT = 540
 
 
 def git(*args, text=True):
-    return subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=text)
+    if text:
+        return subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True, errors="replace")
+    return subprocess.run(["git", *args], cwd=REPO, capture_output=True)
 
 
 def note(message):
@@ -38,19 +50,50 @@ def read_payload():
 def tree_key():
     """Hash of HEAD, the diff against it, and every untracked, unignored file."""
     digest = hashlib.sha256()
-    digest.update(git("rev-parse", "HEAD").stdout.encode())
-    digest.update(git("diff", "HEAD", "--binary", text=False).stdout)
+    if git("rev-parse", "--verify", "-q", "HEAD").returncode == 0:
+        base = "HEAD"
+        digest.update(git("rev-parse", "HEAD").stdout.encode())
+    else:
+        base = git("hash-object", "-t", "tree", os.devnull).stdout.strip()
+    digest.update(git("diff", base, "--binary", text=False).stdout)
     untracked = git("ls-files", "--others", "--exclude-standard", "-z").stdout.split("\0")
     for rel in sorted(filter(None, untracked)):
         digest.update(rel.encode() + b"\0")
         path = REPO / rel
         if path.is_file():
-            digest.update(path.read_bytes())
+            with path.open("rb") as handle:
+                while chunk := handle.read(CHUNK):
+                    digest.update(chunk)
     return digest.hexdigest()
 
 
-def stamp_path():
-    return REPO / git("rev-parse", "--git-path", STAMP_NAME).stdout.strip()
+def git_file(name):
+    return REPO / git("rev-parse", "--git-path", name).stdout.strip()
+
+
+def checks_timeout():
+    try:
+        return float(os.environ.get("FACTORY_STOP_HOOK_TIMEOUT", DEFAULT_TIMEOUT))
+    except ValueError:
+        return float(DEFAULT_TIMEOUT)
+
+
+def run_checks(timeout):
+    """(exit code, output), or None if the checks timed out and were killed."""
+    proc = subprocess.Popen(["bash", str(CHECKS)], cwd=REPO, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, errors="replace",
+                            start_new_session=True)
+    try:
+        output, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.communicate()
+        return None
+    return proc.returncode, output
+
+
+def clear(path):
+    path.unlink(missing_ok=True)
 
 
 def main():
@@ -63,25 +106,34 @@ def main():
     if status.returncode != 0:
         note("not a git repository; skipping checks")
         return 0
-    if not status.stdout.strip():
+    stamp = git_file(STAMP_NAME)
+    failed = git_file(FAILED_NAME)
+    if not status.stdout.strip() and not failed.exists():
         return 0
     if not CHECKS.is_file():
         note("factory/checks.sh not found; skipping checks")
         return 0
-    key = tree_key()
-    stamp = stamp_path()
-    if stamp.is_file() and stamp.read_text().strip() == key:
+    if stamp.is_file() and stamp.read_text().strip() == tree_key():
+        clear(failed)
         return 0
+    timeout = checks_timeout()
     try:
-        res = subprocess.run(["bash", str(CHECKS)], cwd=REPO, capture_output=True, text=True)
+        result = run_checks(timeout)
     except OSError as exc:
         note(f"could not run factory/checks.sh: {exc}")
         return 0
-    if res.returncode == 0:
-        stamp.write_text(key + "\n")
+    if result is None:
+        note(f"factory/checks.sh took over {timeout:g} s; not blocking")
         return 0
-    tail = "\n".join((res.stdout + res.stderr).splitlines()[-TAIL:])
-    print(f"factory/checks.sh failed (exit {res.returncode}); last lines:\n{tail}", file=sys.stderr)
+    code, output = result
+    if code == 0:
+        # Key the tree as checks left it, so files they write can't defeat the cache.
+        stamp.write_text(tree_key() + "\n")
+        clear(failed)
+        return 0
+    failed.write_text("failed\n")
+    tail = "\n".join(output.splitlines()[-TAIL:])
+    print(f"factory/checks.sh failed (exit {code}); last lines:\n{tail}", file=sys.stderr)
     if payload.get("stop_hook_active"):
         note("not blocking again; fix this before you finish")
         return 0

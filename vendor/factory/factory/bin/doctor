@@ -116,8 +116,10 @@ def check_gitignore():
     for directory in ("factory/jobs/", ".worktrees/"):
         res = subprocess.run(["git", "check-ignore", "-q", f"{directory}x"], cwd=REPO,
                              capture_output=True, text=True)
-        if res.returncode != 0:
+        if res.returncode == 1:
             problems.append(fail(f"{directory} is not gitignored"))
+        elif res.returncode != 0:
+            problems.append(fail(f"git check-ignore failed: {res.stderr.strip()}"))
     return problems
 
 
@@ -125,7 +127,7 @@ def check_stop_hook():
     path = REPO / ".claude" / "settings.json"
     if not path.is_file():
         return [fail(".claude/settings.json missing; it must register factory/bin/stop-hook as a Stop hook")]
-    settings = json.loads(path.read_text(encoding="utf-8"))
+    settings = json.loads(path.read_text(encoding="utf-8-sig"))
     for group in settings.get("hooks", {}).get("Stop", []):
         for hook in group.get("hooks", []):
             if "factory/bin/stop-hook" in hook.get("command", ""):
@@ -138,8 +140,8 @@ def check_claude_md():
     claude = REPO / "CLAUDE.md"
     if not has_agents and not claude.is_file():
         return [fail("neither AGENTS.md nor CLAUDE.md exists")]
-    if has_agents and claude.is_file():
-        lines = [line.strip() for line in claude.read_text(encoding="utf-8").splitlines()]
+    if has_agents and claude.is_file() and not claude.samefile(REPO / "AGENTS.md"):
+        lines = [line.strip() for line in claude.read_text(encoding="utf-8-sig").splitlines()]
         if "@AGENTS.md" not in lines:
             return [fail("CLAUDE.md doesn't import AGENTS.md; add a line @AGENTS.md")]
     return []

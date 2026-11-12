@@ -45,15 +45,24 @@ sys.stdout.write(open(os.environ["FAKE_GH_LABELS"]).read())
 """
 
 
+def clean_env():
+    """Inherited environment minus GIT_*, with the user's git config switched off."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    return env
+
+
 def git(cwd, *args):
-    res = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
+    res = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True,
+                         env=clean_env())
     return res.stdout
 
 
 class InstalledProject:
     """`tmp` is an empty directory; the project is tmp/project, helpers live beside it."""
 
-    def __init__(self, tmp):
+    def __init__(self, tmp, commit=True):
         tmp = Path(tmp).resolve()
         self.root = tmp / "project"
         self.fakebin = tmp / "fakebin"
@@ -75,7 +84,8 @@ class InstalledProject:
         self.set_labels(LABELS)
         git(self.root, "init", "-q")
         git(self.root, "add", "-A")
-        self.commit("install")
+        if commit:
+            self.commit("install")
 
     @property
     def git_dir(self):
@@ -93,6 +103,13 @@ class InstalledProject:
             "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
             "commit", "-q", "-m", message)
 
+    def commit_all(self, message):
+        git(self.root, "add", "-A")
+        self.commit(message)
+
+    def set_checks_script(self, text):
+        self.write("factory/checks.sh", text, executable=True)
+
     def set_checks_result(self, code):
         (self.git_dir / "checks-result").write_text(f"{code}\n")
 
@@ -105,7 +122,7 @@ class InstalledProject:
 
     def env(self, gh=True):
         """Environment for running a factory script: no inherited GIT_*, fake gh or none."""
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env = clean_env()
         env["FAKE_GH_LABELS"] = str(self.labels_file)
         if gh:
             env["PATH"] = f"{self.fakebin}{os.pathsep}{os.environ.get('PATH', '')}"
@@ -113,8 +130,9 @@ class InstalledProject:
             env["PATH"] = "/usr/bin:/bin"
         return env
 
-    def run(self, script, *args, stdin="", gh=True):
+    def run(self, script, *args, stdin="", gh=True, env=None):
         return subprocess.run(
             [sys.executable, str(self.root / "factory" / "bin" / script), *args],
-            input=stdin, capture_output=True, text=True, cwd=self.root, env=self.env(gh),
+            input=stdin, capture_output=True, text=True, cwd=self.root,
+            env={**self.env(gh), **(env or {})},
         )

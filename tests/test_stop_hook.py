@@ -1,10 +1,12 @@
 import json
 import tempfile
+import time
 import unittest
 
-from installed_project import InstalledProject
+from installed_project import CHECKS_SH, InstalledProject
 
 STAMP = "factory-stop-hook.pass"
+FAILED = "factory-stop-hook.failed"
 
 
 class StopHookTest(unittest.TestCase):
@@ -13,8 +15,9 @@ class StopHookTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.p = InstalledProject(tmp.name)
 
-    def hook(self, payload=None, stdin=None):
-        return self.p.run("stop-hook", stdin=stdin if stdin is not None else json.dumps(payload or {}))
+    def hook(self, payload=None, stdin=None, **env):
+        stdin = stdin if stdin is not None else json.dumps(payload or {})
+        return self.p.run("stop-hook", stdin=stdin, env=env)
 
     def edit(self, text="edit"):
         self.p.write("AGENTS.md", f"# Agents\n{text}\n")
@@ -92,6 +95,64 @@ class StopHookTest(unittest.TestCase):
         self.p.set_checks_result(1)
         self.edit()
         res = self.hook(stdin="[]")
+        self.assertEqual(res.returncode, 2, res.stderr)
+        self.assertNotIn("Traceback", res.stderr)
+
+    def test_checks_output_files_do_not_defeat_cache(self):
+        self.p.set_checks_script(CHECKS_SH.replace("exit ", "echo x > build-out.txt\nexit ", 1))
+        self.edit()
+        for _ in range(3):
+            res = self.hook()
+            self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(self.p.checks_runs(), 1)
+
+    def test_repo_without_commits_runs_checks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = InstalledProject(tmp, commit=False)
+            res = p.run("stop-hook", stdin="{}")
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(p.checks_runs(), 1)
+            p.set_checks_result(1)
+            p.write("AGENTS.md", "# Agents\nedit\n")
+            res = p.run("stop-hook", stdin="{}")
+            self.assertEqual(res.returncode, 2, res.stderr)
+            self.assertEqual(p.checks_runs(), 2)
+
+    def test_slow_checks_time_out_without_blocking(self):
+        self.p.set_checks_script("#!/usr/bin/env bash\nsleep 5\n")
+        self.edit()
+        start = time.monotonic()
+        res = self.hook(FACTORY_STOP_HOOK_TIMEOUT="1")
+        self.assertLess(time.monotonic() - start, 4)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("took over 1 s; not blocking", res.stderr)
+        self.assertFalse((self.p.git_dir / STAMP).exists())
+
+    def test_commit_after_failure_does_not_bypass(self):
+        self.p.set_checks_result(1)
+        self.edit()
+        self.assertEqual(self.hook().returncode, 2)
+        self.assertTrue((self.p.git_dir / FAILED).is_file())
+        self.p.commit_all("fix attempt")
+        res = self.hook()
+        self.assertEqual(res.returncode, 2, res.stderr)
+        self.assertEqual(self.p.checks_runs(), 2)
+
+    def test_pass_clears_failure_marker(self):
+        self.p.set_checks_result(1)
+        self.edit()
+        self.hook()
+        self.p.set_checks_result(0)
+        self.assertEqual(self.hook().returncode, 0)
+        self.assertFalse((self.p.git_dir / FAILED).exists())
+        self.p.commit_all("done")
+        self.hook()
+        self.assertEqual(self.p.checks_runs(), 2)
+
+    def test_non_utf8_checks_output_does_not_crash(self):
+        self.p.set_checks_script("#!/usr/bin/env bash\nprintf '\\377\\376 bad\\n'\nexit 1\n")
+        self.edit()
+        res = self.hook()
         self.assertEqual(res.returncode, 2, res.stderr)
         self.assertNotIn("Traceback", res.stderr)
 
