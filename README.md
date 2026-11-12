@@ -19,8 +19,11 @@ debugging and verification skills.
 
 ## Use it in a project
 
-1. In the project, run `/factory-install` once and commit what it adds. Then
-   start a fresh session: the factory's agents only load at session start.
+1. In the project, run `/factory-install` once and commit what it adds. It
+   also adds a Stop hook that runs `factory/checks.sh` before a session ends,
+   a `CLAUDE.md` that imports `AGENTS.md`, and a CI workflow for the same
+   checks. `factory/bin/doctor` checks the install at any time. Then start a
+   fresh session: the factory's agents only load at session start.
 2. `superpowers:brainstorming` → spec, `superpowers:writing-plans` → plan.
    When writing-plans offers an execution choice, run `/factory-handoff` instead.
 3. In a fresh session, run `/factory run`.
