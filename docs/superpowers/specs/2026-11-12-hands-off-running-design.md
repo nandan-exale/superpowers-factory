@@ -39,7 +39,14 @@ without permission prompts, and without ever skipping permissions.
 **`runner tick`** — one scheduled run:
 
 1. **Lock:** `fcntl.flock(LOCK_EX | LOCK_NB)` on `<git dir>/factory-runner.lock`. Held → log `busy`, exit 0.
-2. **Preflight:** current branch must be `config.base_branch` and
+2. **Preflight:** if `.git/hooks` holds an executable non-sample file, or
+   `core.hooksPath` or `core.fsmonitor` is set in the clone's local config,
+   log `error: git hooks or fsmonitor configured in this clone; remove them`
+   and exit 1 (sandboxed Bash can write `.git`, and a hook would run outside
+   the sandbox). Every git command the runner runs passes
+   `-c core.hooksPath=/dev/null -c core.fsmonitor=false` and runs with
+   `GIT_TERMINAL_PROMPT=0` and `GIT_SSH_COMMAND="ssh -o BatchMode=yes"`.
+   Then the current branch must be `config.base_branch` and
    `git status --porcelain` empty (gitignored job state doesn't count).
    Otherwise log `skipped: <reason>`, exit 0. The runner never stashes,
    resets or checks out anything.
@@ -56,24 +63,38 @@ without permission prompts, and without ever skipping permissions.
 6. **Run:** `claude -p "/factory run" --output-format json` in `REPO`, in its
    own process group, with environment = the runner's environment minus
    `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, plus
-   `CLAUDE_CODE_OAUTH_TOKEN`. Timeout `runner.max_minutes` → kill the group,
-   log `timeout`, exit 1.
-7. **Record:** the JSON output goes to `factory/jobs/runs/<UTC time>.json`;
-   one line goes to `factory/jobs/runner.log`:
+   `CLAUDE_CODE_OAUTH_TOKEN` and `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` (Claude
+   Code then strips credentials from the environment of the Bash commands,
+   hooks and MCP servers it starts; the variable exists in the installed
+   binary). claude's stdout and stderr go to files, not pipes, so a process
+   that outlives claude with them open can't hold the tick; the runner waits
+   with `runner.max_minutes` as the timeout, then kills the whole group and
+   logs `timeout` (exit 1). A `claude` that can't be started logs `error:
+   claude not found on PATH` (exit 1). On SIGTERM (launchd unloading the
+   agent) the runner kills the group, logs `stopped` and exits 1.
+7. **Record:** claude's output goes to `factory/jobs/runs/<UTC time>.json` and
+   `<UTC time>.stderr.log`; only the newest 50 runs (pairs) are kept. One line
+   goes to `factory/jobs/runner.log`:
    `<time> ran exit=<code> <seconds>s cost=$<total_cost_usd or ?>`.
 
 Every tick appends exactly one line to `runner.log`, starting with the UTC
-time and one of `busy`, `skipped`, `idle`, `ran`, `timeout`, `error`.
+time and one of `busy`, `skipped`, `idle`, `ran`, `timeout`, `stopped`,
+`error`. An invalid `runner` config during `tick` logs `error: config: <what
+is wrong>` and exits 1; the other subcommands print it to stderr and exit 1.
 
 **`runner install [--dry-run]`** — writes
-`~/Library/LaunchAgents/com.superpowers-factory.<repo-slug>.plist`
+`~/Library/LaunchAgents/com.superpowers-factory.<repo-slug>-<hash>.plist`
 (`<repo-slug>`: the checkout's absolute path with non-alphanumerics replaced
-by `-`, lowercase) with `ProgramArguments` = `[<python3 path>, <REPO>/factory/bin/runner, tick]`,
+by `-`, lowercase; `<hash>`: the first 8 hex digits of the SHA-256 of that
+path, so two paths with the same slug don't collide; `doctor` carries a copy
+of the label function and a test keeps the two equal) with `ProgramArguments` = `[<python3 path>, <REPO>/factory/bin/runner, tick]`,
 `WorkingDirectory` = `REPO`, `StartInterval` = `runner.interval_minutes * 60`,
 `RunAtLoad` true, `StandardOutPath`/`StandardErrorPath` =
 `factory/jobs/runner.launchd.log`, and `EnvironmentVariables.PATH` set to the
 installing shell's `PATH` (so `git`, `gh`, `claude` resolve). Then
-`launchctl bootstrap gui/<uid> <plist>` (after `bootout` if already loaded).
+`launchctl bootstrap gui/<uid> <plist>`: after `bootout` it polls `launchctl
+print` until the old agent is gone (up to 3 s), then bootstraps, retrying up
+to 3 times.
 `--dry-run` prints the plist and changes nothing.
 
 **`runner uninstall`** — `launchctl bootout`, delete the plist.
@@ -102,19 +123,55 @@ Vendored and passed with `--settings`, not merged into the project's
 `sandbox.network.strictAllowlist` (ignored in project settings) applies.
 Contents: sandbox enabled, `autoAllowBashIfSandboxed: true`,
 `allowUnsandboxedCommands: false`, network `allowedDomains` GitHub hosts plus
-the project's package hosts (the install agent adds them), `strictAllowlist:
-true`; `permissions.allow` for `Edit`, `Write` and `Bash(...)` rules for
-`factory/bin/job`, `gate`, `route`, `git`, `gh`, `bash factory/checks.sh`;
-`permissions.deny` for `.env`, `.env.*`, `secrets/**` reads and force pushes.
+the project's package hosts (the install agent adds them),
+`allowLocalBinding: true` (dev servers bind to localhost; the key exists in the
+installed binary), `strictAllowlist: true`; `permissions.allow` for `Edit`,
+`Write` and `Bash(...)` rules for `factory/bin/job`, `gate`, `route`, `git`,
+`gh`, `bash factory/checks.sh`.
+
+`permissions.deny`:
+
+- reads of `.env`, `.env.*`, `secrets/**`, `~/.ssh/**`, `~/.aws/**`;
+- `Edit` and `Write` of `./.git/**`, `./factory/bin/**`,
+  `./factory/runner-settings.json`, `./factory/config.json`,
+  `./factory/checks.sh`, `./.claude/**`, and of `~/.ssh/**`, `~/.claude/**`,
+  `~/Library/LaunchAgents/**`. (A blanket `~/**` deny would also match the
+  project when it lives under the home directory, so the home paths that
+  matter are listed instead; the sandbox already limits writes to the
+  project.) Sandboxed Bash can still write inside the repo, which is why the
+  runner also disables hooks and fsmonitor and refuses a clone that has them;
+- destructive git and gh: force pushes in every spelling (`--force`, `-f`,
+  `+refspec`, `--force-with-lease`), `gh repo delete`, `gh repo edit`, and
+  `gh api` with `DELETE`. These are speed bumps, not a boundary: the
+  boundary is branch protection on the base branch (see doctor).
+
 The runner passes `--permission-mode dontAsk`, so anything else is denied.
 Verified against code.claude.com/docs (sandboxing, permissions,
 permission-modes, headless, authentication), 2026-11.
+
+Changes to `factory/bin/runner`, `factory/runner-settings.json` and the rest
+of the factory only take effect through the base branch: the runner requires a
+clean tree on the base branch and pulls, so such a change arrives only by a
+merged PR, which the approver and the human review.
+
+### Token-free checks
+
+`factory/checks.sh` runs project code, so `gate`, `stop-hook` and `doctor`
+run it with `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
+`ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` removed from its environment.
+This is independent of `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`.
 
 ### doctor (new check `runner`)
 
 - FAIL if `factory/runner-settings.json` is missing, has the sandbox off or
   `allowUnsandboxedCommands` not false, or lacks any of the Bash allow rules
   above.
+- WARN if the base branch has no protection against force pushes and
+  deletion: `gh api repos/{owner}/{repo}/branches/<base>/protection` fails with
+  404 or reports `allow_force_pushes` or `allow_deletions` enabled ("base
+  branch <b> has no protection against force-push/deletion; enable branch
+  protection on GitHub"). If gh can't tell (403, network), WARN "could not
+  read branch protection", never FAIL.
 - WARN if `security find-generic-password -s <service>` (no `-w`; the secret
   is never read) exits non-zero.
 - WARN if the LaunchAgent is not loaded (only on macOS; skipped elsewhere).
@@ -159,6 +216,19 @@ README gains a "Hands-off running" section with the same steps and
 
 `tests/test_doctor.py`: missing sandbox/allow rules FAIL; missing Keychain
 item WARN (fake `security`).
+
+## Residual risks
+
+- Tests and hooks the agent runs through `bash factory/checks.sh` or project
+  scripts are not sandboxed. The token is removed from their environment, but
+  they keep network and disk access as the user.
+- The allowed `gh` and `git` can still post to GitHub (comments, issues,
+  pushes to other branches, PRs). Branch protection on the base branch is the
+  backstop for the branch that matters.
+- A change to `factory/bin/runner`, `factory/runner-settings.json` or the
+  checks, merged by a human, takes effect on the next tick.
+- The LaunchAgent records the `python3` and `PATH` it was installed with;
+  reinstall (`runner install`) if either changes.
 
 ## Out of scope
 

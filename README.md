@@ -66,6 +66,17 @@ Runs are headless with `--permission-mode dontAsk` and
 anything not allowed is refused. `factory/bin/runner status` shows the last
 runs; `factory/bin/doctor` checks the setup.
 
+It requires branch protection on the base branch (no force pushes, no
+deletion); `factory/bin/doctor` warns when it's missing. Know what's left:
+
+- Tests and hooks the agent runs aren't sandboxed. They don't get your token,
+  but they can reach the network and your disk.
+- The allowed `gh` and `git` can still post to GitHub (comments, issues, other
+  branches).
+- A change to the runner's own files takes effect only once it's merged to
+  the base branch, so review those changes like any other; it runs on the
+  next tick.
+
 ## PR comments
 
 Comments on a factory PR reach the job's builder without `/factory`. The

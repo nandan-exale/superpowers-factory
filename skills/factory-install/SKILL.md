@@ -87,7 +87,16 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   `sandbox.network.allowedDomains` (for example `registry.npmjs.org`,
   `pypi.org` and `files.pythonhosted.org`), found from the lockfiles and
   `factory/checks.sh`. List them for your human partner. Don't loosen
-  anything else in that file. Then tell them the runner needs three steps
+  anything else in that file. Dev servers can bind to localhost
+  (`allowLocalBinding` is already on), but a tool that needs a Unix socket,
+  such as agent-browser, may not work inside the sandbox
+  (`sandbox.network.allowUnixSockets` exists but isn't set); say so as a
+  known limitation instead of widening it. The runner also needs branch
+  protection on the base branch (no force pushes, no deletion): `doctor`
+  warns when it's missing, so tell them to enable it on GitHub. Changes to
+  `factory/bin/**` and `factory/runner-settings.json` take effect only
+  through the base branch, after a merged PR; if Python or `PATH` changes,
+  run `factory/bin/runner install` again. Then tell them the runner needs three steps
   they do themselves: (1) make a separate clone of the project for the
   runner, so it never works in the checkout they edit; (2) run
   `claude setup-token`, then
