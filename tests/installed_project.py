@@ -20,6 +20,8 @@ COPIED = (
     "factory/bin/route",
     "factory/bin/stop-hook",
     "factory/bin/doctor",
+    "factory/bin/runner",
+    "factory/runner-settings.json",
     "factory/dashboard.html",
 )
 LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned")
@@ -42,6 +44,19 @@ exit "$(cat "$git_dir/checks-result" 2>/dev/null || echo 0)"
 FAKE_GH = """#!{python}
 import os, sys
 sys.stdout.write(open(os.environ["FAKE_GH_LABELS"]).read())
+"""
+
+# Records argv to $FAKE_RECORD (one JSON line per call) when set; exits $FAKE_<NAME>_EXIT (default 0);
+# prints $FAKE_<NAME>_OUT when set.
+FAKE_TOOL = """#!{python}
+import json, os, sys
+name = os.path.basename(sys.argv[0]).upper()
+record = os.environ.get("FAKE_RECORD")
+if record:
+    with open(record, "a") as f:
+        f.write(json.dumps({{"tool": name.lower(), "argv": sys.argv[1:]}}) + "\\n")
+sys.stdout.write(os.environ.get(f"FAKE_{{name}}_OUT", ""))
+sys.exit(int(os.environ.get(f"FAKE_{{name}}_EXIT", "0")))
 """
 
 
@@ -81,6 +96,10 @@ class InstalledProject:
         gh = self.fakebin / "gh"
         gh.write_text(FAKE_GH.format(python=sys.executable))
         gh.chmod(0o755)
+        for tool in ("security", "launchctl"):
+            path = self.fakebin / tool
+            path.write_text(FAKE_TOOL.format(python=sys.executable))
+            path.chmod(0o755)
         self.set_labels(LABELS)
         git(self.root, "init", "-q")
         git(self.root, "add", "-A")

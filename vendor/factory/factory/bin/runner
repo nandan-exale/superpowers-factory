@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Run the software factory unattended.
+
+Usage:
+  runner tick                  one scheduled run: lock, preflight, pull, check the queue, run /factory run headless
+  runner install [--dry-run]   install the launchd LaunchAgent that runs `tick` every runner.interval_minutes
+  runner uninstall             unload and delete the LaunchAgent
+  runner status                LaunchAgent state and the last lines of factory/jobs/runner.log
+
+The Claude token comes from the macOS Keychain item named by
+runner.keychain_service (store it with
+`security add-generic-password -s <service> -a "$USER" -w`). It is passed to
+claude only through its environment, never in arguments, files or logs.
+"""
+
+import fcntl
+import json
+import os
+import platform
+import plistlib
+import re
+import signal
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+FACTORY = REPO / "factory"
+JOBS = FACTORY / "jobs"
+LOG = JOBS / "runner.log"
+RUNS = JOBS / "runs"
+SETTINGS = FACTORY / "runner-settings.json"
+PROMPT = "/factory run"
+STRIPPED_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN")
+
+
+def die(message):
+    print(f"runner: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def load_config():
+    """(base branch, validated runner config)."""
+    cfg = json.loads((FACTORY / "config.json").read_text(encoding="utf-8"))
+    runner = cfg.get("runner")
+    if not isinstance(runner, dict):
+        die("factory/config.json has no runner object (interval_minutes, max_minutes, keychain_service)")
+    for key in ("interval_minutes", "max_minutes"):
+        value = runner.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            die(f"factory/config.json runner.{key} must be a positive integer, not {value!r}")
+    service = runner.get("keychain_service")
+    if not isinstance(service, str) or not service.strip():
+        die("factory/config.json runner.keychain_service must be a non-empty string")
+    return cfg["base_branch"], runner
+
+
+def main(argv):
+    if argv == ["tick"]:
+        return cmd_tick()
+    if argv in (["install"], ["install", "--dry-run"]):
+        return cmd_install(dry_run=len(argv) == 2)
+    if argv == ["uninstall"]:
+        return cmd_uninstall()
+    if argv == ["status"]:
+        return cmd_status()
+    print(__doc__.strip(), file=sys.stderr)
+    return 1
+
+
+def cmd_tick():
+    load_config()
+    die("tick: not implemented yet")
+
+
+def cmd_install(dry_run):
+    load_config()
+    die("install: not implemented yet")
+
+
+def cmd_uninstall():
+    die("uninstall: not implemented yet")
+
+
+def cmd_status():
+    die("status: not implemented yet")
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

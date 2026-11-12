@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Write",
+      "Bash(factory/bin/job *)",
+      "Bash(factory/bin/gate *)",
+      "Bash(factory/bin/route *)",
+      "Bash(git *)",
+      "Bash(gh *)",
+      "Bash(bash factory/checks.sh)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "allowUnsandboxedCommands": false,
+    "network": {
+      "allowedDomains": ["github.com", "api.github.com", "*.githubusercontent.com"],
+      "strictAllowlist": true
+    }
+  }
+}
