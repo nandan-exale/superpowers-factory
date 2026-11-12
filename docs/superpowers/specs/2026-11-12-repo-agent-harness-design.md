@@ -29,8 +29,9 @@ checks failing. CI runs the same command.
   - Factory code and repo scripts are stdlib only.
   - No agent or skill frontmatter sets `model`; models and effort come from
     `factory/config.json`.
-  - Keep `LICENSE` and `vendor/factory/NOTICE`; a change to a vendored file
-    adds a line to `NOTICE` if the file isn't already listed.
+  - Keep `LICENSE` and `vendor/factory/NOTICE`. `NOTICE` says every commit
+    after the unmodified import is a modification, so vendored edits need no
+    `NOTICE` change, but they go in their own commits.
   - No upstream branding.
   - Superpowers core is never modified.
 - **Workflow:** run `scripts/check` before claiming work is done; features go
@@ -53,7 +54,7 @@ per problem. Exit 0 if all pass, 1 otherwise.
 | `tests` | `python3 -m unittest discover -s tests` exits 0. Skipped with `--fast`. |
 | `compile` | `vendor/factory/factory/bin/{job,gate,route}` compile (`compile()` on the source, no `.pyc` written); `bash -n vendor/factory/factory/checks.sh` exits 0. |
 | `json` | `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `vendor/factory/factory/config.json` parse. |
-| `config` | Every `{model, effort}` in `agents`, `routing.<risk>` and `surface_reviewers` names a key of `model_aliases` and a member of `effort_levels`. |
+| `config` | Every `{model, effort}` in `agents`, `routing.<risk>` and `surface_reviewers` has a `model` listed in `model_aliases` and an `effort` listed in `effort_levels`. |
 | `frontmatter` | Every `skills/*/SKILL.md`, `vendor/factory/.claude/skills/*/SKILL.md` and `vendor/factory/.claude/agents/*.md` starts with a `---` block that has non-empty `name` and `description` and no `model` key. Parsed line by line (top-level `key:` lines), no YAML library. |
 | `license` | `LICENSE` and `vendor/factory/NOTICE` exist and are non-empty. |
 | `branding` | No tracked file (`git ls-files`) contains a forbidden token. Files are split into lowercase `[a-z0-9]+` tokens; a token is forbidden if its SHA-256 is in a set stored in the script, so the script itself names nothing. |
