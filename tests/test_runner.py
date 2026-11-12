@@ -21,7 +21,8 @@ with open(os.environ["FAKE_RECORD"], "a") as f:
         "has_token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") == "tok-123",
         "has_api_key": "ANTHROPIC_API_KEY" in os.environ,
         "has_base_url": "ANTHROPIC_BASE_URL" in os.environ,
-        "scrub": os.environ.get("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB")}}) + "\\n")
+        "scrub": os.environ.get("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"),
+        "runner": os.environ.get("FACTORY_RUNNER")}}) + "\\n")
 if os.environ.get("FAKE_CLAUDE_GRANDCHILD"):
     import subprocess
     subprocess.Popen(["sleep", "20"], start_new_session=True)
@@ -410,6 +411,12 @@ class SecurityTest(RunnerCase):
         self.runner("tick")
         [call] = self.calls("claude")
         self.assertEqual(call["scrub"], "1")
+
+    def test_claude_child_is_marked_as_a_runner_session(self):
+        self.set_issues(self.WORK)
+        self.runner("tick")
+        [call] = self.calls("claude")
+        self.assertEqual(call["runner"], "1")
 
 
 class SpecGapTest(RunnerCase):

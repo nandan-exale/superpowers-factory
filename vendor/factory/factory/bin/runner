@@ -173,6 +173,7 @@ def run_claude(token, max_seconds, out_path, err_path):
     env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "1"  # keep the token out of hooks and tests claude starts
     env.update(GIT_ENV)
+    env["FACTORY_RUNNER"] = "1"  # plugin SessionStart hooks stay quiet in unattended sessions
     cmd = ["claude", "-p", PROMPT, "--output-format", "json",
            "--permission-mode", "dontAsk", "--settings", str(SETTINGS)]
     start = time.monotonic()
