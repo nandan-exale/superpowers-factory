@@ -110,6 +110,14 @@ class CheckTest(RepoCopyTest):
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
 
+    def test_syntax_error_in_route_fails(self):
+        self.edit("vendor/factory/factory/bin/route", lambda text: text + "\ndef broken(:\n")
+        self.assertFails("compile", "bin/route:")
+
+    def test_bash_syntax_error_in_checks_fails(self):
+        self.edit("vendor/factory/factory/checks.sh", lambda text: text + "\nif then\n")
+        self.assertFails("compile", "checks.sh:")
+
 
 if __name__ == "__main__":
     unittest.main()

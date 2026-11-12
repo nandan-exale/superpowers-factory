@@ -4,6 +4,7 @@
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -105,11 +106,26 @@ def check_frontmatter(root, opts):
     return problems
 
 
+def check_compile(root, opts):
+    problems = []
+    for name in ("job", "gate", "route"):
+        path = root / FACTORY / "bin" / name
+        try:
+            compile(path.read_text(encoding="utf-8"), str(path), "exec")
+        except (OSError, SyntaxError) as exc:
+            problems.append(f"bin/{name}: {exc}")
+    res = subprocess.run(["bash", "-n", str(root / FACTORY / "checks.sh")], capture_output=True, text=True)
+    if res.returncode != 0:
+        problems.append(f"checks.sh: {res.stderr.strip()}")
+    return problems
+
+
 CHECKS = [
     ("license", check_license),
     ("json", check_json),
     ("config", check_config),
     ("frontmatter", check_frontmatter),
+    ("compile", check_compile),
 ]
 
 
