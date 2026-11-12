@@ -43,10 +43,15 @@ echo "checks output line"
 exit "$(cat "$git_dir/checks-result" 2>/dev/null || echo 0)"
 """
 
-# `gh api ...` answers $FAKE_GH_API_OUT (default: a protected branch) and exits $FAKE_GH_API_EXIT;
+# `gh api .../rules/branches/...` answers $FAKE_GH_RULES_OUT (default none) and exits $FAKE_GH_RULES_EXIT;
+# other `gh api ...` answers $FAKE_GH_API_OUT (default: a protected branch) and exits $FAKE_GH_API_EXIT;
 # every other call prints the labels file.
 FAKE_GH = """#!{python}
 import os, sys
+if sys.argv[1:2] == ["api"] and "rules/branches" in sys.argv[2]:
+    sys.stderr.write(os.environ.get("FAKE_GH_RULES_ERR", ""))
+    sys.stdout.write(os.environ.get("FAKE_GH_RULES_OUT", "[]"))
+    sys.exit(int(os.environ.get("FAKE_GH_RULES_EXIT", "0")))
 if sys.argv[1:2] == ["api"]:
     sys.stderr.write(os.environ.get("FAKE_GH_API_ERR", ""))
     sys.stdout.write(os.environ.get("FAKE_GH_API_OUT",

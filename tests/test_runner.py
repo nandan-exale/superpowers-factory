@@ -377,6 +377,34 @@ class SecurityTest(RunnerCase):
         git(self.p.root, "config", "--local", "core.fsmonitor", "true")
         self.assertRefusesHooks()
 
+    def assertRefusesConfig(self, key):
+        self.set_issues(self.WORK)
+        res = self.runner("tick")
+        self.assertEqual(res.returncode, 1)
+        self.assertEqual(self.calls("claude"), [])
+        self.assertIn(f"error: git config in this clone sets {key}; remove it", self.log_lines()[-1])
+
+    def test_risky_local_config_keys_are_refused(self):
+        for key, value in (("credential.helper", "!echo"), ("core.askPass", "x"),
+                           ("core.sshCommand", "ssh -v"), ("remote.origin.uploadpack", "x"),
+                           ("remote.origin.receivepack", "x"), ("include.path", "../x"),
+                           ("includeIf.gitdir:/a/.path", "../x")):
+            with self.subTest(key=key):
+                git(self.p.root, "config", "--local", key, value)
+                self.assertRefusesConfig(key.lower())
+                git(self.p.root, "config", "--local", "--unset", key)
+
+    def test_global_credential_helper_is_left_alone(self):
+        self.set_issues([])
+        res = self.runner("tick", GIT_CONFIG_GLOBAL=str(self.write_global_config()))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertTrue(self.log_lines()[-1].endswith(" idle"))
+
+    def write_global_config(self):
+        path = self.tmp / "gitconfig"
+        path.write_text("[credential]\n\thelper = !gh auth git-credential\n")
+        return path
+
     def test_claude_child_scrubs_the_token_from_its_subprocesses(self):
         self.set_issues(self.WORK)
         self.runner("tick")

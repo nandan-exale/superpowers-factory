@@ -102,19 +102,34 @@ def git(*args):
                           env={**os.environ, **GIT_ENV})
 
 
+RISKY_KEYS = ("credential.helper", "core.askpass", "core.sshcommand")
+
+
+def risky_local_key():
+    """The first key in .git/config (read without the -c overrides) that lets the clone run a
+    program or pull in more config, or None. Global config, such as the user's gh credential
+    helper, is deliberately left alone."""
+    res = subprocess.run(["git", "config", "--local", "--name-only", "--list"], cwd=REPO,
+                         capture_output=True, text=True)
+    for key in res.stdout.splitlines():
+        if (key in RISKY_KEYS or key == "include.path"
+                or (key.startswith("includeif.") and key.endswith(".path"))
+                or (key.startswith("remote.") and key.endswith((".uploadpack", ".receivepack")))
+                or (key.startswith("credential.") and key.endswith(".helper"))):
+            return key
+    return None
+
+
 def hooks_or_fsmonitor_configured():
     """True if the clone could run code through git: an executable non-sample hook, or
-    core.hooksPath / core.fsmonitor in .git/config (read without the -c overrides)."""
+    core.hooksPath / core.fsmonitor in .git/config."""
     hooks = git_path("hooks")
     if hooks.is_dir() and any(f.is_file() and os.access(f, os.X_OK) and not f.name.endswith(".sample")
                               for f in hooks.iterdir()):
         return True
-    for key in ("core.hooksPath", "core.fsmonitor"):
-        res = subprocess.run(["git", "config", "--local", "--get", key], cwd=REPO,
-                             capture_output=True, text=True)
-        if res.returncode == 0:
-            return True
-    return False
+    res = subprocess.run(["git", "config", "--local", "--name-only", "--list"], cwd=REPO,
+                         capture_output=True, text=True)
+    return any(key in ("core.hookspath", "core.fsmonitor") for key in res.stdout.splitlines())
 
 
 def git_path(name):
@@ -171,7 +186,7 @@ def run_claude(token, max_seconds, out_path, err_path):
         except subprocess.TimeoutExpired:
             code = None
         finally:
-            kill_group(proc)
+            kill_group(proc)  # on purpose, even after a clean exit: stops dev servers claude left behind
             proc.wait()
             CHILD = None
     return code, int(time.monotonic() - start)
@@ -217,6 +232,10 @@ def cmd_tick():
     signal.signal(signal.SIGTERM, on_sigterm)
     if hooks_or_fsmonitor_configured():
         log("error: git hooks or fsmonitor configured in this clone; remove them")
+        return 1
+    key = risky_local_key()
+    if key:
+        log(f"error: git config in this clone sets {key}; remove it")
         return 1
     branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     if branch != base:

@@ -86,10 +86,29 @@ class DoctorTest(unittest.TestCase):
     def test_protected_base_branch_passes(self):
         self.assertIn("PASS runner\n", self.protection())
 
-    def test_unprotected_base_branch_warns(self):
+    UNCONFIRMED = ("WARN runner: could not confirm branch protection for main (needs admin, "
+                   "or uses rulesets without force-push/deletion rules)")
+    RULES = json.dumps([{"type": "non_fast_forward"}, {"type": "deletion"}, {"type": "pull_request"}])
+
+    def test_unprotected_base_branch_cannot_be_confirmed(self):
         out = self.protection(FAKE_GH_API_EXIT="1", FAKE_GH_API_ERR="gh: Branch not protected (HTTP 404)")
-        self.assertIn("WARN runner: base branch main has no protection against force-push/deletion; "
-                      "enable branch protection on GitHub", out)
+        self.assertIn(self.UNCONFIRMED, out)
+
+    def test_rulesets_blocking_force_push_and_deletion_pass(self):
+        out = self.protection(FAKE_GH_API_EXIT="1", FAKE_GH_API_ERR="gh: Not Found (HTTP 404)",
+                              FAKE_GH_RULES_OUT=self.RULES)
+        self.assertIn("PASS runner\n", out)
+
+    def test_rulesets_with_only_one_rule_do_not_confirm(self):
+        out = self.protection(FAKE_GH_API_EXIT="1", FAKE_GH_API_ERR="gh: Not Found (HTTP 404)",
+                              FAKE_GH_RULES_OUT=json.dumps([{"type": "deletion"}]))
+        self.assertIn(self.UNCONFIRMED, out)
+
+    def test_rulesets_override_a_classic_answer_that_allows_force_push(self):
+        out = self.protection(FAKE_GH_API_OUT=json.dumps(
+            {"allow_force_pushes": {"enabled": True}, "allow_deletions": {"enabled": False}}),
+            FAKE_GH_RULES_OUT=self.RULES)
+        self.assertIn("PASS runner\n", out)
 
     def test_branch_allowing_force_push_warns(self):
         out = self.protection(FAKE_GH_API_OUT=json.dumps(
@@ -98,7 +117,7 @@ class DoctorTest(unittest.TestCase):
 
     def test_unreadable_protection_warns_without_failing(self):
         out = self.protection(FAKE_GH_API_EXIT="1", FAKE_GH_API_ERR="gh: Forbidden (HTTP 403)")
-        self.assertIn("WARN runner: could not read branch protection for main", out)
+        self.assertIn(self.UNCONFIRMED, out)
 
     def test_healthy_install_passes(self):
         res = self.doctor("--fast")

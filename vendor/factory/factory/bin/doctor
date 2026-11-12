@@ -181,27 +181,33 @@ def launchd_label():
     return f"com.superpowers-factory.{slug}-{digest}"
 
 
+def gh_api(gh, path):
+    res = subprocess.run([gh, "api", path], cwd=REPO, capture_output=True, text=True)
+    try:
+        return json.loads(res.stdout) if res.returncode == 0 else None
+    except ValueError:
+        return None
+
+
 def check_branch_protection(base):
-    """WARN unless GitHub says the base branch refuses force pushes and deletion."""
+    """WARN unless GitHub confirms the base branch refuses force pushes and deletion, through
+    classic branch protection or through rulesets."""
     gh = shutil.which("gh")
     if not gh or not base:
         return []
-    res = subprocess.run([gh, "api", f"repos/{{owner}}/{{repo}}/branches/{base}/protection"],
-                         cwd=REPO, capture_output=True, text=True)
-    unprotected = warn(f"base branch {base} has no protection against force-push/deletion; "
-                       "enable branch protection on GitHub")
-    if res.returncode != 0:
-        if "404" in res.stderr or "not protected" in res.stderr.lower():
-            return [unprotected]
-        return [warn(f"could not read branch protection for {base}; confirm it blocks "
-                     "force-push and deletion")]
-    try:
-        rules = json.loads(res.stdout)
-        open_ = [name for name in ("allow_force_pushes", "allow_deletions")
-                 if (rules.get(name) or {}).get("enabled")]
-    except (ValueError, AttributeError):
-        return [warn(f"could not read branch protection for {base}")]
-    return [unprotected] if open_ else []
+    classic = gh_api(gh, f"repos/{{owner}}/{{repo}}/branches/{base}/protection")
+    if isinstance(classic, dict) and not any(
+            (classic.get(name) or {}).get("enabled") for name in ("allow_force_pushes", "allow_deletions")):
+        return []
+    rules = gh_api(gh, f"repos/{{owner}}/{{repo}}/rules/branches/{base}")
+    types = {rule.get("type") for rule in rules if isinstance(rule, dict)} if isinstance(rules, list) else set()
+    if {"non_fast_forward", "deletion"} <= types:
+        return []
+    if isinstance(classic, dict):
+        return [warn(f"base branch {base} has no protection against force-push/deletion; "
+                     "enable branch protection on GitHub")]
+    return [warn(f"could not confirm branch protection for {base} (needs admin, or uses rulesets "
+                 "without force-push/deletion rules)")]
 
 
 def check_runner():
