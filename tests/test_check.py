@@ -118,6 +118,20 @@ class CheckTest(RepoCopyTest):
         self.edit("vendor/factory/factory/checks.sh", lambda text: text + "\nif then\n")
         self.assertFails("compile", "checks.sh:")
 
+    PROBE_HASH = "71bede1bb2ef6494d196e5e2be06c68e0f5352cd3018a4f44179dfbcc21dac5f"
+
+    def test_forbidden_token_fails(self):
+        self.edit("README.md", lambda text: text + "\nSee Harness" + "Probe.example for more.\n")
+        self.assertFails("branding", "README.md: contains a forbidden upstream name",
+                         "--extra-forbidden-hash", self.PROBE_HASH)
+
+    def test_token_inside_longer_word_passes(self):
+        # the design docs name the probe token in prose; drop them so only the edit is under test
+        shutil.rmtree(self.root / "docs")
+        self.edit("README.md", lambda text: text + "\nharnessprobes\n")
+        code, out = self.run_check("--extra-forbidden-hash", self.PROBE_HASH)
+        self.assertEqual(code, 0, out)
+
 
 if __name__ == "__main__":
     unittest.main()

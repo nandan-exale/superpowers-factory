@@ -2,6 +2,7 @@
 """Check this repo's rules. Prints PASS/FAIL per check and exits 1 on any failure."""
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -120,12 +121,40 @@ def check_compile(root, opts):
     return problems
 
 
+# SHA-256 of lowercase tokens that must never appear in a tracked file
+# (the removed upstream branding). Hashed so this file doesn't name them.
+FORBIDDEN_HASHES = frozenset({
+    "5d4b73fc5f7b579c7b5cb3f03d7447df768e8986966bfd491f24605b45826ddb",
+    "7061401397abcf81551a89f973b8b519250a7e375304eaaf6add87168ada0de3",
+})
+TOKEN = re.compile(r"[a-z0-9]+")
+
+
+def tracked_files(root):
+    res = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, text=True, check=True)
+    return [rel for rel in res.stdout.split("\0") if rel]
+
+
+def check_branding(root, opts):
+    forbidden = FORBIDDEN_HASHES | set(opts.extra_forbidden_hash)
+    problems = []
+    for rel in tracked_files(root):
+        path = root / rel
+        if not path.is_file():
+            continue
+        text = path.read_bytes().decode("utf-8", errors="ignore").lower()
+        if any(hashlib.sha256(token.encode()).hexdigest() in forbidden for token in set(TOKEN.findall(text))):
+            problems.append(f"{rel}: contains a forbidden upstream name")
+    return problems
+
+
 CHECKS = [
     ("license", check_license),
     ("json", check_json),
     ("config", check_config),
     ("frontmatter", check_frontmatter),
     ("compile", check_compile),
+    ("branding", check_branding),
 ]
 
 
