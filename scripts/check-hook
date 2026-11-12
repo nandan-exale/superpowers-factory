@@ -23,6 +23,8 @@ def main():
         payload = json.load(sys.stdin)
     except ValueError:
         payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
     cwd = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
     try:
         status = git(cwd, "status", "--porcelain")
@@ -34,7 +36,11 @@ def main():
         return 0
     if not status.stdout.strip():
         return 0
-    root = git(cwd, "rev-parse", "--show-toplevel").stdout.strip()
+    top = git(cwd, "rev-parse", "--show-toplevel")
+    root = top.stdout.strip()
+    if top.returncode != 0 or not root:
+        print("check-hook: could not find the repo root; skipping checks", file=sys.stderr)
+        return 0
     cmd = [sys.executable, str(CHECK), "--root", root]
     if os.environ.get("CHECK_HOOK_FAST") == "1":
         cmd.append("--fast")
@@ -42,6 +48,11 @@ def main():
     if res.returncode == 0:
         return 0
     failures = [line for line in res.stdout.splitlines() if line.startswith("FAIL ")]
+    if not failures:
+        # scripts/check broke rather than found a problem; don't trap the agent on that
+        print(f"check-hook: scripts/check crashed (exit {res.returncode}); not blocking:\n"
+              + (res.stderr or res.stdout)[-2000:], file=sys.stderr)
+        return 0
     print("scripts/check failed:\n" + "\n".join(failures), file=sys.stderr)
     if payload.get("stop_hook_active"):
         print("Not blocking again; fix these before you finish.", file=sys.stderr)

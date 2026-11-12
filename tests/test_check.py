@@ -158,9 +158,11 @@ class CheckTest(RepoCopyTest):
 
 
 class CheckHookTest(RepoCopyTest):
-    def run_hook(self, payload=None, cwd=None):
-        env = {**os.environ, "CHECK_HOOK_FAST": "1", "CLAUDE_PROJECT_DIR": str(cwd or self.root)}
-        res = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(payload or {}),
+    def run_hook(self, payload=None, cwd=None, hook=HOOK, stdin=None):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update(CHECK_HOOK_FAST="1", CLAUDE_PROJECT_DIR=str(cwd or self.root))
+        res = subprocess.run([sys.executable, str(hook)],
+                             input=json.dumps(payload or {}) if stdin is None else stdin,
                              capture_output=True, text=True, env=env)
         return res.returncode, res.stderr
 
@@ -195,6 +197,19 @@ class CheckHookTest(RepoCopyTest):
             code, err = self.run_hook(cwd=outside)
         self.assertEqual(code, 0)
         self.assertIn("not a git repository", err)
+
+    def test_crashed_check_does_not_block(self):
+        (self.root / "scripts/check").write_text("import sys\nsys.exit('boom')\n")
+        code, err = self.run_hook(hook=self.root / "scripts/check-hook")
+        self.assertEqual(code, 0, err)
+        self.assertIn("crashed", err)
+        self.assertIn("boom", err)
+
+    def test_non_dict_payload_is_ignored(self):
+        (self.root / "vendor/factory/NOTICE").unlink()
+        code, err = self.run_hook(stdin="[]")
+        self.assertEqual(code, 2, err)
+        self.assertNotIn("Traceback", err)
 
 
 if __name__ == "__main__":
