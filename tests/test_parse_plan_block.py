@@ -31,6 +31,12 @@ class ParsePlanBlockTest(unittest.TestCase):
             "risk": "medium", "surfaces": ["ui"],
         })
 
+    def test_crlf_body(self):
+        self.assertEqual(self.parse(plan_body(SHA).replace("\n", "\r\n")), self.parse(plan_body(SHA)))
+
+    def test_duplicate_key(self):
+        self.refused(plan_body(SHA).replace("risk: medium\n", "risk: high\nrisk: medium\n"), "duplicate")
+
     def test_empty_surfaces(self):
         self.assertEqual(self.parse(plan_body(SHA, surfaces="[]"))["surfaces"], [])
 

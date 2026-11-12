@@ -1,8 +1,10 @@
+import contextlib
+import io
 import os
 import tempfile
 import unittest
 
-from factory_project import FactoryProject, plan_body
+from factory_project import FactoryProject, git, plan_body
 
 
 class PlannedTestCase(unittest.TestCase):
@@ -104,6 +106,31 @@ class PlannedRefusalTest(PlannedTestCase):
     def test_path_missing_at_commit(self):
         self.project.set_issue(plan_body(self.project.sha, plan="docs/superpowers/plans/nope.md"))
         self.assert_refused("doesn't exist at")
+
+    def test_issue_from_another_author(self):
+        self.project.set_issue(plan_body(self.project.sha))
+        self.project.issue["author"] = {"login": "mallory"}
+        self.assert_refused("not @mallory")
+
+
+class PlannedFetchFailureTest(PlannedTestCase):
+    def test_fetch_failure_leaves_job_in_intake(self):
+        git(self.project.repo, "remote", "set-url", "origin", "/nonexistent/origin.git")
+        with self.assertRaises(self.job.Refused):
+            self.job.cmd_planned(self.load())
+        self.assertEqual(self.load()["stage"], "intake")
+        self.assertFalse((self.d / "decision.md").exists())
+
+
+class QueueTest(PlannedTestCase):
+    def test_refused_planned_job_hint(self):
+        self.project.set_issue("Just build it.")
+        self.job.cmd_planned(self.load())
+        self.job.gh_json = lambda *a: [{"number": 7, "title": "Build the widget"}]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.job.cmd_queue()
+        self.assertIn("reject it, then hand off a fixed plan", out.getvalue())
 
 
 class PlannedPreconditionTest(PlannedTestCase):

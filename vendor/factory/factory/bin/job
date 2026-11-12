@@ -185,13 +185,14 @@ def reviewers(job):
 PLAN_BLOCK = re.compile(r"^```factory-plan[ \t]*\n(.*?)^```[ \t]*$", re.M | re.S)
 PLAN_PATH = re.compile(r"docs/superpowers/[A-Za-z0-9._/-]+\.md")
 PLAN_KEYS = {"spec", "plan", "commit", "risk", "surfaces"}
-RISKS = ("low", "medium", "high")
-SURFACES = ("ui", "security")
+RISKS = tuple(CONFIG["routing"])
+SURFACES = tuple(CONFIG["surface_reviewers"])
 
 
 def parse_plan_block(body):
     """The `factory-plan` block in a planned issue's body, validated."""
-    blocks = PLAN_BLOCK.findall(body or "")
+    body = (body or "").replace("\r\n", "\n")
+    blocks = PLAN_BLOCK.findall(body)
     require(len(blocks) == 1, f"expected one factory-plan block in the issue body, found {len(blocks)}")
     fields = {}
     for line in blocks[0].splitlines():
@@ -199,6 +200,7 @@ def parse_plan_block(body):
             continue
         key, sep, value = line.partition(":")
         require(sep, f"factory-plan line isn't `key: value`: {line.strip()!r}")
+        require(key.strip() not in fields, f"duplicate factory-plan key {key.strip()!r}")
         fields[key.strip()] = value.strip()
     require(set(fields) == PLAN_KEYS,
             f"factory-plan needs exactly {', '.join(sorted(PLAN_KEYS))}; got {', '.join(sorted(fields))}")
@@ -219,7 +221,6 @@ def parse_plan_block(body):
 
 def check_plan_commit(plan):
     """The block's commit is on the base branch and holds both files."""
-    run(["git", "fetch", "origin", BASE])
     on_base = run(["git", "merge-base", "--is-ancestor", plan["commit"], f"origin/{BASE}"], check=False)
     require(on_base.returncode == 0, f"commit {plan['commit'][:7]} isn't on origin/{BASE}")
     for key in ("spec", "plan"):
@@ -656,7 +657,8 @@ def cmd_queue():
                 other_rows.append(("wait", n, j["id"], j["stage"], "waiting for the author"))
         elif j["stage"] == "needs-human":
             other_rows.append(("wait", n, j["id"], j["stage"], f"merge PR #{j['pr']}, or give feedback"
-                               if j["pr"] else "give feedback"))
+                               if j["pr"] else "give feedback" if Path(j["worktree"]).exists()
+                               else "reject it, then hand off a fixed plan"))
         elif j["stage"] == "rejected":
             other_rows.append(("skip", n, j["id"], j["stage"], f"rejected; delete factory/jobs/{j['id']} to retry"))
         elif j["stage"] == "merged":
@@ -753,7 +755,10 @@ def cmd_planned(job):
     if LABELS["planned"] not in {l["name"] for l in issue["labels"]}:
         die(f"issue #{job['issue']} isn't labeled {LABELS['planned']}")
     d = job_dir(job["id"])
+    run(["git", "fetch", "origin", BASE])
     try:
+        author = issue["author"]["login"]
+        require(author == operator(), f"planned issues must be filed by @{operator()} with /factory-handoff, not @{author}")
         plan = parse_plan_block(issue["body"])
         check_plan_commit(plan)
     except Refused as e:
