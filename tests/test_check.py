@@ -29,7 +29,8 @@ def copy_repo(dest):
         shutil.copy2(src, target)
     git(dest, "init", "-q")
     git(dest, "add", "-A")
-    git(dest, "-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "copy")
+    git(dest, "-c", "user.email=test@example.com", "-c", "user.name=test",
+        "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "copy")
     return dest
 
 
@@ -131,6 +132,27 @@ class CheckTest(RepoCopyTest):
         self.edit("README.md", lambda text: text + "\nharnessprobes\n")
         code, out = self.run_check("--extra-forbidden-hash", self.PROBE_HASH)
         self.assertEqual(code, 0, out)
+
+    def test_not_a_git_repo_reports_git_error(self):
+        shutil.rmtree(self.root / ".git")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL branding: RuntimeError: git ls-files failed", out)
+        self.assertIn("not a git repository", out)
+
+    def test_bom_does_not_hide_frontmatter(self):
+        self.edit("vendor/factory/.claude/agents/intake.md", lambda text: "\ufeff" + text)
+        code, out = self.run_check()
+        self.assertEqual(code, 0, out)
+
+    def test_unreadable_file_does_not_hide_other_problems(self):
+        (self.root / "vendor/factory/.claude/agents/intake.md").write_bytes(b"\xff\xfe---")
+        self.edit("vendor/factory/.claude/agents/builder.md",
+                  lambda text: text.replace("name: builder\n", "name: builder\nmodel: x\n", 1))
+        code, out = self.run_check()
+        self.assertEqual(code, 1, out)
+        self.assertIn("agents/intake.md: unreadable", out)
+        self.assertIn("agents/builder.md: sets model", out)
 
 
 if __name__ == "__main__":
