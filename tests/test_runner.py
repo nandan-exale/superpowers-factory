@@ -105,5 +105,100 @@ class ConfigTest(RunnerCase):
         self.assertIn("Usage:", res.stderr)
 
 
+class TickTest(RunnerCase):
+    WORK = [{"number": 7, "title": "Build the widget"}]
+
+    def test_idle_queue_does_not_call_claude(self):
+        res = self.runner("tick")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(self.calls("claude"), [])
+        self.assertTrue(self.log_lines()[-1].endswith(" idle"))
+
+    def test_work_runs_claude_headless_with_token_and_no_api_vars(self):
+        self.set_issues(self.WORK)
+        res = self.runner("tick")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        [call] = self.calls("claude")
+        self.assertEqual(call["argv"][:4], ["-p", "/factory run", "--output-format", "json"])
+        self.assertIn("--permission-mode", call["argv"])
+        self.assertEqual(call["argv"][call["argv"].index("--permission-mode") + 1], "dontAsk")
+        settings = call["argv"][call["argv"].index("--settings") + 1]
+        self.assertTrue(settings.endswith("factory/runner-settings.json"))
+        self.assertTrue(call["has_token"])
+        self.assertFalse(call["has_api_key"])
+        self.assertFalse(call["has_base_url"])
+        line = self.log_lines()[-1]
+        self.assertRegex(line, r" ran exit=0 \d+s cost=\$1\.25$")
+        self.assertNotIn("tok-123", line + json.dumps(call["argv"]))
+        runs = list((self.p.root / "factory/jobs/runs").glob("*.json"))
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(json.loads(runs[0].read_text())["result"], "done")
+
+    def test_token_is_read_from_the_configured_keychain_item(self):
+        self.set_issues(self.WORK)
+        self.runner("tick")
+        [call] = self.calls("security")
+        self.assertEqual(call["argv"], ["find-generic-password", "-s", "factory-claude-token", "-w"])
+
+    def test_missing_token_is_an_error(self):
+        self.set_issues(self.WORK)
+        res = self.runner("tick", FAKE_SECURITY_EXIT="44", FAKE_SECURITY_OUT="")
+        self.assertEqual(res.returncode, 1)
+        self.assertEqual(self.calls("claude"), [])
+        self.assertIn("error: no token in Keychain item factory-claude-token", self.log_lines()[-1])
+
+    def test_dirty_tree_is_skipped_and_untouched(self):
+        self.set_issues(self.WORK)
+        self.p.write("AGENTS.md", "# Agents\nmine\n")
+        res = self.runner("tick")
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(self.calls("claude"), [])
+        self.assertIn("skipped: uncommitted changes", self.log_lines()[-1])
+        self.assertEqual((self.p.root / "AGENTS.md").read_text(), "# Agents\nmine\n")
+
+    def test_other_branch_is_skipped(self):
+        git(self.p.root, "checkout", "-q", "-b", "feature")
+        res = self.runner("tick")
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("skipped: on feature, not main", self.log_lines()[-1])
+
+    def test_pull_brings_in_new_commits(self):
+        other = self.tmp / "other"
+        git(self.tmp, "clone", "-q", str(self.tmp / "origin.git"), str(other))
+        (other / "NEW.md").write_text("new\n")
+        git(other, "add", "NEW.md")
+        git(other, "-c", "user.email=t@e.com", "-c", "user.name=t", "-c", "commit.gpgsign=false",
+            "commit", "-q", "-m", "new")
+        git(other, "push", "-q", "origin", "main")
+        self.runner("tick")
+        self.assertTrue((self.p.root / "NEW.md").exists())
+
+    def test_busy_when_locked(self):
+        import fcntl
+        lock_path = self.p.git_dir / "factory-runner.lock"
+        with open(lock_path, "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            res = self.runner("tick")
+        self.assertEqual(res.returncode, 0)
+        self.assertTrue(self.log_lines()[-1].endswith(" busy"))
+
+    def test_timeout_kills_claude(self):
+        self.set_issues(self.WORK)
+        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="1", FAKE_CLAUDE_SLEEP="10")
+        self.assertEqual(res.returncode, 1)
+        self.assertRegex(self.log_lines()[-1], r" timeout after \d+s$")
+
+    def test_claude_failure_is_logged_with_exit_code(self):
+        self.set_issues(self.WORK)
+        res = self.runner("tick", FAKE_CLAUDE_EXIT="3")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn(" ran exit=3 ", self.log_lines()[-1])
+
+    def test_every_tick_logs_exactly_one_line(self):
+        self.runner("tick")
+        self.runner("tick")
+        self.assertEqual(len(self.log_lines()), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

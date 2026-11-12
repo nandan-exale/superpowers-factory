@@ -70,9 +70,111 @@ def main(argv):
     return 1
 
 
+def stamp():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def log(line):
+    JOBS.mkdir(parents=True, exist_ok=True)
+    with LOG.open("a") as f:
+        f.write(f"{stamp()} {line}\n")
+
+
+def git(*args):
+    return subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True)
+
+
+def git_path(name):
+    return REPO / git("rev-parse", "--git-path", name).stdout.strip()
+
+
+def first_line(text):
+    return (text.strip().splitlines() or ["?"])[0]
+
+
+def has_work():
+    """True if `job queue` has a resume or new row. Daily-budget waits are not work."""
+    res = subprocess.run([sys.executable, str(FACTORY / "bin" / "job"), "queue"],
+                         cwd=REPO, capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError(first_line(res.stderr or res.stdout))
+    return any(line.split("\t", 1)[0] in {"resume", "new"} for line in res.stdout.splitlines())
+
+
+def read_token(service):
+    res = subprocess.run(["security", "find-generic-password", "-s", service, "-w"],
+                         capture_output=True, text=True)
+    token = res.stdout.strip()
+    return token if res.returncode == 0 and token else None
+
+
+def run_claude(token, max_seconds):
+    """((exit code, stdout) or None on timeout, elapsed seconds)."""
+    env = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}
+    env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+    cmd = ["claude", "-p", PROMPT, "--output-format", "json",
+           "--permission-mode", "dontAsk", "--settings", str(SETTINGS)]
+    start = time.monotonic()
+    proc = subprocess.Popen(cmd, cwd=REPO, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, start_new_session=True)
+    try:
+        out, _ = proc.communicate(timeout=max_seconds)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.communicate()
+        return None, int(time.monotonic() - start)
+    return (proc.returncode, out), int(time.monotonic() - start)
+
+
+def cost_of(output):
+    try:
+        return f"${json.loads(output)['total_cost_usd']:.2f}"
+    except (ValueError, KeyError, TypeError):
+        return "?"
+
+
 def cmd_tick():
-    load_config()
-    die("tick: not implemented yet")
+    base, runner = load_config()
+    lock = open(git_path("factory-runner.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        log("busy")
+        return 0
+    branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if branch != base:
+        log(f"skipped: on {branch or '?'}, not {base}")
+        return 0
+    if git("status", "--porcelain").stdout.strip():
+        log("skipped: uncommitted changes")
+        return 0
+    pull = git("pull", "--ff-only", "-q", "origin", base)
+    if pull.returncode != 0:
+        log(f"skipped: pull failed: {first_line(pull.stderr)}")
+        return 0
+    try:
+        work = has_work()
+    except RuntimeError as exc:
+        log(f"error: queue: {exc}")
+        return 1
+    if not work:
+        log("idle")
+        return 0
+    token = read_token(runner["keychain_service"])
+    if not token:
+        log(f"error: no token in Keychain item {runner['keychain_service']}; "
+            "run claude setup-token and store it")
+        return 1
+    max_seconds = int(os.environ.get("FACTORY_RUNNER_MAX_SECONDS") or runner["max_minutes"] * 60)
+    result, seconds = run_claude(token, max_seconds)
+    if result is None:
+        log(f"timeout after {seconds}s")
+        return 1
+    code, out = result
+    RUNS.mkdir(parents=True, exist_ok=True)
+    (RUNS / f"{stamp().replace(':', '')}.json").write_text(out)
+    log(f"ran exit={code} {seconds}s cost={cost_of(out)}")
+    return 0 if code == 0 else 1
 
 
 def cmd_install(dry_run):
