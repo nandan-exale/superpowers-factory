@@ -26,14 +26,14 @@ the spec writer.
 ## The pipeline
 
 ```
-intake (fable)     → ACCEPT (scope possibly changed) | NEEDS-INFO | REJECT, posted as an issue comment
-route (script)     → reviewers + models from risk/surfaces via config.json
+intake             → ACCEPT (scope possibly changed) | NEEDS-INFO | REJECT, posted as an issue comment
+route (script)     → every later agent's model + effort, from risk/surfaces via config.json
 worktree           → factory/<job-id> from origin/<base>
-spec-writer (opus) → spec.md
-builder (opus)     → commits; the first push opens a draft PR "Closes #<n>"
+spec-writer        → spec.md
+builder            → commits; the first push opens a draft PR "Closes #<n>"
 gate (script)      → checks.sh; FAIL → builder gets the log, no reviewers spawned
 reviewers (routed) → parallel, WAIT FOR ALL; CHANGES → builder → gate → reviewers
-approver (opus)    → APPROVE: sync origin/<base>, gate, gh pr merge
+approver           → APPROVE: sync origin/<base>, gate, gh pr merge
                      ESCALATE: PR ready, decision as PR comment, label factory:needs-human
 ```
 
@@ -52,7 +52,7 @@ through the scripts. `factory/jobs/` is gitignored runtime state.
 <repo>/factory/checks.sh                       the repo's checks; the gate runs it
 <repo>/factory/bin/job                         the only writer of job.json
 <repo>/factory/bin/gate                        runs checks.sh in a worktree → round-N/checks.md
-<repo>/factory/bin/route                       risk + surfaces → the job's agents
+<repo>/factory/bin/route                       risk + surfaces → every agent's model and effort
 <repo>/factory/jobs/<job-id>/job.json          the job's state; the dashboard reads it
 <repo>/factory/jobs/<job-id>/issue.md          the issue, quoted as data
 <repo>/factory/jobs/<job-id>/intake.md         intake's decision, scope, risk, surfaces
@@ -72,9 +72,13 @@ agent and for the human, not for you. Your context has to last the whole run.
 ## Spawning agents
 
 Spawn every agent with the Agent tool, in the background, with
-`subagent_type` set to the agent's name. Pass `model` from `job.json`
-`agents` for the reviewers, and never for intake, spec-writer, builder or
-approver: their frontmatter sets it. Each agent replies with one line;
+`subagent_type` set to the agent's name. Before every spawn, run
+`factory/bin/job agent <id> <role>`, where role is `intake`, `spec-writer`,
+`builder`, `approver` or `reviewer-<r>`. It prints
+`model=<alias> effort=<level>`: pass both as the Agent tool's `model` and
+`effort`. Agents have no model of their own, so a spawn without them silently
+runs on this session's model. If the command refuses, `factory/config.json`
+is wrong: stop that job and show the user the error. Each agent replies with one line;
 you are notified when it finishes, and you advance that job then. While agents
 run, don't poll and don't wait: end your turn with a one-line status.
 
@@ -142,8 +146,9 @@ gate's `round-<N-1>/checks.md`, the reviews in `round-<N-1>/`, or
   No reviewer runs on a failing build.
 
 **review.** Spawn every reviewer in `job.json` `agents.reviewers` **in one
-message**, so they run in parallel: `subagent_type` `reviewer-<r>`, model from
-the same map, prompt `<header> Review round <N>.` plus the port for `ux` and
+message**, so they run in parallel: `subagent_type` `reviewer-<r>`, `model`
+and `effort` from `factory/bin/job agent <id> reviewer-<r>`, prompt
+`<header> Review round <N>.` plus the port for `ux` and
 `ui`. **WAIT FOR ALL.** Each time one finishes, run
 `factory/bin/job sync <id>` so the dashboard fills in. When every reviewer has
 finished:

@@ -2,7 +2,6 @@
 name: reviewer-ux
 description: Factory review lens. Reviews a job branch for user experience (flows, states, copy, accessibility) and writes round-N/review-ux.md.
 tools: Read, Grep, Glob, Bash, Write
-model: sonnet
 ---
 
 You are the UX reviewer for one factory job. Your prompt gives the job id,
