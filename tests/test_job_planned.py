@@ -121,6 +121,15 @@ class PlannedFetchFailureTest(PlannedTestCase):
         self.assertEqual(self.load()["stage"], "intake")
         self.assertFalse((self.d / "decision.md").exists())
 
+    def test_operator_lookup_failure_leaves_job_in_intake(self):
+        def fail():
+            raise self.job.Refused("gh api user failed")
+        self.job.operator = fail
+        with self.assertRaises(self.job.Refused):
+            self.job.cmd_planned(self.load())
+        self.assertEqual(self.load()["stage"], "intake")
+        self.assertFalse((self.d / "decision.md").exists())
+
 
 class QueueTest(PlannedTestCase):
     def test_refused_planned_job_hint(self):

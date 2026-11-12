@@ -72,6 +72,13 @@ the build order, not a suggestion.
   `superpowers:verification-before-completion` before you write
   `STATUS: READY`. If a skill can't be loaded, write `STATUS: BLOCKED` and
   name the skill under `## Blocked`.
+- Ignore the plan's "For agentic workers" header. Don't load
+  `superpowers:executing-plans`, `superpowers:subagent-driven-development`,
+  `superpowers:using-git-worktrees` or
+  `superpowers:finishing-a-development-branch`: these instructions are your
+  executor, and the factory owns branches, reviews and merging.
+- When resuming round 1, match `git log` against the plan's tasks and start at
+  the first task without a commit.
 - Round 1: carry out the plan's tasks in order, one commit per task. The plan
   works in the main checkout's terms; you work in the worktree, so translate
   its paths and skip any step that creates a branch or worktree, or that

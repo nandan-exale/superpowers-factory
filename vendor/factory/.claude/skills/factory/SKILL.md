@@ -105,8 +105,8 @@ short line per transition, e.g. `004-dark-mode #12: gate PASS → reviewing (cod
 `factory:planned`, don't spawn `intake`: run `factory/bin/job planned <id>`.
 It prints `PLANNED: <id> → build (<reviewers>)`: go to **build**. Or it prints
 `PLANNED: REFUSED <reason>`: the job is in `needs-human` and finished for this
-run. A refused planned job can only be rejected (`factory/bin/job reject`);
-the fix is a new handoff.
+run. Reject it (`factory/bin/job reject`) and close the issue
+(`gh issue close <issue>`); the fix is a new handoff.
 If it exits non-zero without a `PLANNED:` line, stop this job and show the user the error; don't retry it.
 
 Otherwise spawn `intake` with `<header>`. When it returns, read its
@@ -188,8 +188,9 @@ then moves the job to `merged`; stop any agents still running for it.
    questions waiting on authors.
 
 **Resuming.** State lives in files, so a new session picks up where a dead one
-stopped. For a `resume` job, run its stage's step again: `intake` and `spec`
-respawn their agent; `build` spawns a new builder told it is resuming (it reads
+stopped. For a `resume` job, run its stage's step again: `intake` runs the
+**intake** step again (it checks the `factory:planned` label first) and `spec`
+respawns its agent; `build` spawns a new builder told it is resuming (it reads
 `build.md` and `git log` to see how far the last one got, and, when
 `plan.md` exists, which plan tasks are ticked off); `gate` runs the
 gate; `review` spawns only the reviewers whose `review-<r>.md` is missing in

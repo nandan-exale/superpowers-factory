@@ -30,6 +30,8 @@ gh label list --limit 200 --json name --jq '.[].name' | grep -qx factory:planned
                                               # either missing: re-run /factory-install
 BASE=$(python3 -c 'import json; print(json.load(open("factory/config.json"))["base_branch"])')
 git status --porcelain -- <spec> <plan>       # must print nothing: commit them first
+git cat-file -e HEAD:<spec>                   # each must succeed, else the file is
+git cat-file -e HEAD:<plan>                   # gitignored or uncommitted: commit it
 git fetch origin "$BASE"
 git merge-base --is-ancestor HEAD "origin/$BASE"
 ```
@@ -39,6 +41,10 @@ the current branch is `$BASE`, ask: "Push `$BASE` to origin so the factory
 can see the plan?" Run `git push origin "$BASE"` only on an explicit yes. On
 any other branch, say the plan must reach `$BASE` first (merge it or open a
 PR) and stop.
+
+Both paths must match `^docs/superpowers/[A-Za-z0-9._/-]+\.md$` and contain
+no `..` segment. The factory refuses anything else, so move the files there
+first.
 
 Check that no open issue already hands off this plan:
 

@@ -756,9 +756,10 @@ def cmd_planned(job):
         die(f"issue #{job['issue']} isn't labeled {LABELS['planned']}")
     d = job_dir(job["id"])
     run(["git", "fetch", "origin", BASE])
+    me = operator()
     try:
         author = issue["author"]["login"]
-        require(author == operator(), f"planned issues must be filed by @{operator()} with /factory-handoff, not @{author}")
+        require(author == me, f"planned issues must be filed by @{me} with /factory-handoff, not @{author}")
         plan = parse_plan_block(issue["body"])
         check_plan_commit(plan)
     except Refused as e:
