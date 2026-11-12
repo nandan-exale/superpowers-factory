@@ -16,6 +16,7 @@ JSON_FILES = (
     ".claude-plugin/plugin.json",
     ".claude-plugin/marketplace.json",
     "vendor/factory/factory/config.json",
+    "hooks/hooks.json",
 )
 
 
@@ -120,6 +121,15 @@ def check_compile(root, opts):
             compile(path.read_text(encoding="utf-8"), str(path), "exec")
         except (OSError, SyntaxError) as exc:
             problems.append(f"bin/{name}: {exc}")
+    for rel in ("bin/factory_files.py", "bin/factory-manifest", "bin/factory-state",
+                "bin/factory-update-plan", "hooks/factory-session"):
+        path = root / rel
+        if not path.exists():
+            continue  # added by later tasks; JSON and test checks cover their absence
+        try:
+            compile(path.read_text(encoding="utf-8"), str(path), "exec")
+        except SyntaxError as exc:
+            problems.append(f"{rel}: {exc}")
     res = subprocess.run(["bash", "-n", str(root / FACTORY / "checks.sh")], capture_output=True, text=True)
     if res.returncode != 0:
         problems.append(f"checks.sh: {res.stderr.strip()}")

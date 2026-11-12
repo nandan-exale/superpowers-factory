@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""Write <project>/factory/manifest.json from the plugin's vendored factory files.
+
+Usage: factory-manifest <project>
+"""
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from factory_files import MANIFEST, manifest_data  # noqa: E402
+
+
+def write_manifest(project):
+    path = Path(project) / MANIFEST
+    path.write_text(json.dumps(manifest_data(), indent=2, sort_keys=True) + "\n")
+    return path
+
+
+def main(argv):
+    if len(argv) != 1:
+        print(__doc__.strip(), file=sys.stderr)
+        return 1
+    project = Path(argv[0]).resolve()
+    if not (project / "factory").is_dir():
+        print(f"factory-manifest: {project} has no factory/ directory", file=sys.stderr)
+        return 1
+    print(write_manifest(project))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

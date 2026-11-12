@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""SessionStart hook. Implemented in the next task; prints nothing."""
+
+import sys
+
+sys.exit(0)
