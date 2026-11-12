@@ -45,6 +45,16 @@ security reviewers. Models are aliases listed in `model_aliases`; efforts come
 from `effort_levels`. To see what a role will run on:
 `factory/bin/job agent <job> <role>`.
 
+## PR comments
+
+Comments on a factory PR reach the job's builder without `/factory`. The
+factory reads conversation comments, inline review comments and reviews with a
+body from the operator (the `gh` account running it) and the logins in
+`factory/config.json` `pr_feedback.allowed`; bots and everyone else are
+ignored. An escalated job resumes on the next `/factory run`; a running job
+gets them in its next round; and the factory won't merge while a trusted
+comment is unhandled. Merging the PR on GitHub stays the approval.
+
 ## Layout
 
 - `skills/factory-install`, `skills/factory-handoff`: this plugin's skills.

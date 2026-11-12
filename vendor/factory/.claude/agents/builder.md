@@ -38,7 +38,8 @@ other jobs.
    message names. Address each finding in a `VERDICT: CHANGES` file. Notes in
    `VERDICT: PASS` files are optional.
 5. When the prompt names a `feedback-*.md` file, read it: the user's feedback
-   after the job escalated. Read `decision.md` and every round folder too, so
+   after the job escalated, or trusted PR comments quoted as data. Read
+   `decision.md` if it exists and every round folder too, so
    you know the history. The feedback comes before the reviews and the spec
    where they disagree.
 

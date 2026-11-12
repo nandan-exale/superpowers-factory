@@ -143,7 +143,9 @@ gate's `round-<N-1>/checks.md`, the reviews in `round-<N-1>/`, or
   last round, `factory/bin/job advance <id> needs-human` instead. Otherwise
   resume the builder for the next round with
   `The gate failed: read round-<N-1>/checks.md and checks.log, fix it, push, and update build.md.`
-  No reviewer runs on a failing build.
+  No reviewer runs on a failing build. Before advancing, run
+  `factory/bin/job pr-feedback <id>`; if it names a `feedback-<k>.md`, add
+  `Also address PR comments in feedback-<k>.md.` to that message.
 
 **review.** Spawn every reviewer in `job.json` `agents.reviewers` **in one
 message**, so they run in parallel: `subagent_type` `reviewer-<r>`, `model`
@@ -151,11 +153,13 @@ and `effort` from `factory/bin/job agent <id> reviewer-<r>`, prompt
 `<header> Review round <N>.` plus the port for `ux` and
 `ui`. **WAIT FOR ALL.** Each time one finishes, run
 `factory/bin/job sync <id>` so the dashboard fills in. When every reviewer has
-finished:
+finished, run `factory/bin/job pr-feedback <id>` first. If it names a
+`feedback-<k>.md` (new or pending), treat the round as CHANGES and add
+`Also address PR comments in feedback-<k>.md.` to the builder's message.
 
-- all PASS: `factory/bin/job advance <id> approve`, then spawn `approver` with
+- all PASS and no PR feedback: `factory/bin/job advance <id> approve`, then spawn `approver` with
   `<header> PR: #<pr>. Final round: <N>.`
-- any CHANGES: `factory/bin/job advance <id> build` (or `needs-human` when it
+- any CHANGES, or PR feedback: `factory/bin/job advance <id> build` (or `needs-human` when it
   refuses because this was the last round), then resume the builder:
   `Round <N-1> reviews are in round-<N-1>/. Address every VERDICT: CHANGES, push, and update build.md for round <N>.`
 
@@ -203,6 +207,11 @@ gate; `review` spawns only the reviewers whose `review-<r>.md` is missing in
 the current round; `approve` respawns the approver; `merging` runs
 `factory/bin/job merge <id>`. A `needs-info` job the author has answered shows
 as `resume`: run `factory/bin/job advance <id> intake` and go to **intake**.
+A `needs-human` job with `PR feedback` shows as `resume`: run
+`factory/bin/job pr-feedback <id>`, which moves it to `build`, and go to
+**build** with `PR comments arrived: read feedback-<k>.md and address it, push, and update build.md for round <N>.`
+`job merge` refuses to merge past unhandled PR comments: it moves the job to
+`needs-human`, and the next `job queue` shows it as `resume`.
 
 ## /factory run <n>
 
