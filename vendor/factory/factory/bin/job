@@ -178,6 +178,44 @@ def reviewers(job):
     return list(job["agents"]["reviewers"])
 
 
+# ---- Planned issues: the block /factory-handoff writes --------------------
+
+
+PLAN_BLOCK = re.compile(r"^```factory-plan[ \t]*\n(.*?)^```[ \t]*$", re.M | re.S)
+PLAN_PATH = re.compile(r"docs/superpowers/[A-Za-z0-9._/-]+\.md")
+PLAN_KEYS = {"spec", "plan", "commit", "risk", "surfaces"}
+RISKS = ("low", "medium", "high")
+SURFACES = ("ui", "security")
+
+
+def parse_plan_block(body):
+    """The `factory-plan` block in a planned issue's body, validated."""
+    blocks = PLAN_BLOCK.findall(body or "")
+    require(len(blocks) == 1, f"expected one factory-plan block in the issue body, found {len(blocks)}")
+    fields = {}
+    for line in blocks[0].splitlines():
+        if not line.strip():
+            continue
+        key, sep, value = line.partition(":")
+        require(sep, f"factory-plan line isn't `key: value`: {line.strip()!r}")
+        fields[key.strip()] = value.strip()
+    require(set(fields) == PLAN_KEYS,
+            f"factory-plan needs exactly {', '.join(sorted(PLAN_KEYS))}; got {', '.join(sorted(fields))}")
+    for key in ("spec", "plan"):
+        path = fields[key]
+        require(PLAN_PATH.fullmatch(path) and ".." not in path.split("/"),
+                f"{key} must be a .md path under docs/superpowers/ with no `..`: {path!r}")
+    require(re.fullmatch(r"[0-9a-f]{40}", fields["commit"]),
+            f"commit must be a 40-character lowercase hex sha: {fields['commit']!r}")
+    require(fields["risk"] in RISKS, f"risk must be one of {', '.join(RISKS)}: {fields['risk']!r}")
+    listed = re.fullmatch(r"\[(.*)\]", fields["surfaces"])
+    require(listed, f"surfaces must be a list like [ui, security] or []: {fields['surfaces']!r}")
+    surfaces = [s.strip() for s in listed.group(1).split(",") if s.strip()]
+    unknown = [s for s in surfaces if s not in SURFACES]
+    require(not unknown, f"unknown surfaces: {', '.join(unknown)} (allowed: {', '.join(SURFACES)})")
+    return {**fields, "surfaces": surfaces}
+
+
 # ---- Issue → issue.md ------------------------------------------------------
 
 
