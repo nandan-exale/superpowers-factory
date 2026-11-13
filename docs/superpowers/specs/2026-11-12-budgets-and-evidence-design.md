@@ -3,7 +3,7 @@
 Date: 2026-11-12
 Status: approved design. Spec 1 of 4 toward a hands-off factory (then:
 hands-off running, auto setup + handoff, learning loop). Draws on
-DenisSergeevitch/agents-best-practices (MIT): runtime policy enforced outside
+the agents-best-practices skill (MIT): runtime policy enforced outside
 the model, explicit budgets and stop rules, a durable progress log, and final
 evidence for every change.
 

@@ -2,7 +2,7 @@
 
 Date: 2026-11-12
 Status: approved design. Spec 4 of 4 toward a hands-off factory. Applies
-DenisSergeevitch/agents-best-practices (MIT): repeated failures should become
+the agents-best-practices skill (MIT): repeated failures should become
 validators, checks or docs rather than repeated advice, with human approval
 before any rule changes.
 
@@ -29,7 +29,7 @@ approves it, and the factory builds it like any other job.
 | Detection | Reviewers tag findings; `job learn` counts tags deterministically. No model reads findings unless a tag crosses the threshold. |
 | Proposal path | GitHub issue labeled `factory:learning`; approval = adding `factory`. |
 | Spend | Learner cost is logged and counts toward `budgets.daily_usd`. |
-| agents-best-practices | Vendored as a plugin skill with its MIT license, with one modification: its self-update section is replaced by a pinned-snapshot note. |
+| agents-best-practices | Vendored as a plugin skill with its MIT license, with two modifications: its self-update section is replaced by a pinned-snapshot note, and links to external repositories are removed from its references. |
 
 ## Components
 
@@ -152,12 +152,13 @@ Its model and effort come from `agents.learner` via `job agent <tag> learner`
 
 ### agents-best-practices (plugin skill)
 
-Vendored from DenisSergeevitch/agents-best-practices at a pinned
-commit, with one modification (the "Freshness and self-update" section of
+Vendored from the upstream agents-best-practices skill at a pinned
+commit, with two modifications (the "Freshness and self-update" section of
 `SKILL.md` is replaced by a pinned-snapshot note, because a shipped skill
-mustn't fetch or rewrite itself) into `skills/agents-best-practices/` (`SKILL.md`, `references/`,
-`LICENSE`), plus `skills/agents-best-practices/SOURCE` naming the repo,
-commit, date and the modification. Images are not vendored. README credits it.
+mustn't fetch or rewrite itself; and links to external repositories are
+removed from `references/source-links.md`, keeping their labels) into `skills/agents-best-practices/` (`SKILL.md`, `references/`,
+`LICENSE`), plus `skills/agents-best-practices/SOURCE` naming the upstream
+commit, date and the modifications. Images are not vendored. README credits it.
 `scripts/check` already checks its frontmatter; `license` also requires its
 `LICENSE` and `SOURCE`.
 

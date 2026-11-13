@@ -45,10 +45,10 @@ Canonical guidance lives in [staged context reduction](context-memory-compaction
 ## Pi 1.0 routing, configuration events, and cache warming
 
 - Release article: [Pi 1.0](https://earendil.com/posts/pi-1-0/), October 1, 2026.
-- Pinned implementation: [v1.0.0 at `a13d35a742c6ef8462812a28fbe1d8c8b7431c32`](https://github.com/earendil-works/pi/tree/a13d35a742c6ef8462812a28fbe1d8c8b7431c32), released October 1; README, relevant docs, source, and tests inspected October 4, 2026. Tests were not executed and provider cache behavior was not reproduced.
-- Routing: [virtual-model documentation](https://github.com/earendil-works/pi/blob/a13d35a742c6ef8462812a28fbe1d8c8b7431c32/packages/coding-agent/docs/virtual-models.md), [model runtime](https://github.com/earendil-works/pi/blob/a13d35a742c6ef8462812a28fbe1d8c8b7431c32/packages/coding-agent/src/core/model-runtime.ts), [session preflight/state](https://github.com/earendil-works/pi/blob/a13d35a742c6ef8462812a28fbe1d8c8b7431c32/packages/coding-agent/src/core/agent-session.ts), and [routing suite tests](https://github.com/earendil-works/pi/blob/a13d35a742c6ef8462812a28fbe1d8c8b7431c32/packages/coding-agent/test/suite/virtual-models.test.ts).
-- Configuration: [message documentation](https://github.com/earendil-works/pi/blob/a13d35a742c6ef8462812a28fbe1d8c8b7431c32/packages/coding-agent/docs/message-types.md), [actual message type](https://github.com/earendil-works/pi/blob/a13d35a742c6ef8462812a28fbe1d8c8b7431c32/packages/ai/src/types.ts), [transcript replay/projection](https://github.com/earendil-works/pi/blob/a13d35a742c6ef8462812a28fbe1d8c8b7431c32/packages/ai/src/utils/transcript.ts), [Anthropic projection](https://github.com/earendil-works/pi/blob/a13d35a742c6ef8462812a28fbe1d8c8b7431c32/packages/ai/src/api/anthropic-messages.ts), and [tool-change tests](https://github.com/earendil-works/pi/blob/a13d35a742c6ef8462812a28fbe1d8c8b7431c32/packages/ai/test/transcript-tool-changes.test.ts).
-- Warming: [cache warmer](https://github.com/earendil-works/pi/blob/a13d35a742c6ef8462812a28fbe1d8c8b7431c32/packages/coding-agent/src/core/cache-warmer.ts) and [warmer tests](https://github.com/earendil-works/pi/blob/a13d35a742c6ef8462812a28fbe1d8c8b7431c32/packages/coding-agent/test/cache-warmer.test.ts).
+- Pinned implementation: v1.0.0 at `a13d35a742c6ef8462812a28fbe1d8c8b7431c32`, released October 1; README, relevant docs, source, and tests inspected October 4, 2026. Tests were not executed and provider cache behavior was not reproduced.
+- Routing: virtual-model documentation, model runtime, session preflight/state, and routing suite tests.
+- Configuration: message documentation, actual message type, transcript replay/projection, Anthropic projection, and tool-change tests.
+- Warming: cache warmer and warmer tests.
 
 This release composes familiar routing, event-sourcing, progressive-disclosure, and programmatic-tool mechanisms. It adds useful implementation evidence for gaps in this library, not a new model, training method, or autonomy level. Codemode and deferred loading reuse the existing tool and connector owners; terminal styling adds no harness contract. The separately announced experimental Pi Durable package was outside this October 4 intake; the later, separately pinned intake below covers it.
 
@@ -71,14 +71,14 @@ This is a first-party engineering account without linked benchmark code, raw tel
 ## Pi Durable task and conversation runtime
 
 - Launch article: [Pi Durable](https://earendil.com/posts/pi-durable/), October 1, 2026. The article describes an experimental framework alongside the coding-agent release.
-- Pinned implementation: [main at `b2b5c42f6138b73ec4b2f49ec0ca468800f88586`](https://github.com/earendil-works/pi/tree/b2b5c42f6138b73ec4b2f49ec0ca468800f88586), committed October 5, 2026; [package version 1.0.2](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/package.json). README, spec, relevant source, and tests inspected October 5. The upstream test suite was not executed, and production recovery, provider behavior, and power-loss durability were not reproduced.
-- Contract map: [README](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/README.md) and [runtime/storage specification](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/docs/spec.md).
-- Commit and storage evidence: [Session admission/publication](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/src/session/session.ts#L405), [JSONL marker protocol](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/src/storage/jsonl/storage.ts#L277), and [storage conformance cases](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/src/testing/storage-conformance.ts).
-- Execution evidence: [scheduler](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/src/harness/scheduler.ts), [generation](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/src/harness/generation.ts), and [tool intent/replay](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/src/harness/tool.ts#L85).
-- Recovery and ownership tests: [task recovery](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/test/harness-tasks-recovery.test.ts), [model recovery](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/test/harness-generation-recovery.test.ts), [tool recovery](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/test/harness-tools-recovery.test.ts), and [structured task completion/cancellation](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/test/harness-structured.test.ts).
-- Intake evidence: [submission admission](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/src/harness/submissions.ts#L148), [inbox boundaries](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/src/harness/inbox.ts#L58), [submission tests](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/test/harness-submissions.test.ts), and [inbox tests](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/test/harness-inbox.test.ts).
-- State and observation evidence: [document definitions](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/src/documents.ts), [fork tests](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/test/session-forks.test.ts), [watch delivery](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/src/session/observation.ts#L200), and [watch tests](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/test/session-watches.test.ts).
-- Context and progress evidence: [compaction](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/src/harness/compaction.ts), [compaction tests](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/test/harness-compaction.test.ts), and [adaptive output batching](https://github.com/earendil-works/pi/blob/b2b5c42f6138b73ec4b2f49ec0ca468800f88586/packages/durable/src/harness/output.ts#L250).
+- Pinned implementation: main at `b2b5c42f6138b73ec4b2f49ec0ca468800f88586`, committed October 5, 2026; package version 1.0.2. README, spec, relevant source, and tests inspected October 5. The upstream test suite was not executed, and production recovery, provider behavior, and power-loss durability were not reproduced.
+- Contract map: README and runtime/storage specification.
+- Commit and storage evidence: Session admission/publication, JSONL marker protocol, and storage conformance cases.
+- Execution evidence: scheduler, generation, and tool intent/replay.
+- Recovery and ownership tests: task recovery, model recovery, tool recovery, and structured task completion/cancellation.
+- Intake evidence: submission admission, inbox boundaries, submission tests, and inbox tests.
+- State and observation evidence: document definitions, fork tests, watch delivery, and watch tests.
+- Context and progress evidence: compaction, compaction tests, and adaptive output batching.
 
 This is a composition of established durable execution, event-sourcing, typed state, structured concurrency, and conversational control patterns. It supplies a reusable post-MVP architecture profile, not a new model, training method, or autonomy level. The contribution is the set of contracts across commits, recoverable tasks, ownership, intake, and context placement.
 
@@ -114,7 +114,7 @@ Canonical guidance lives in [always-on agents](always-on-agents.md) and [context
 ## Scheduled collection and delivery bookkeeping
 
 - Lance Martin and CJ Avilla, [Building effective agent automations](https://claude.dev/blog/building-effective-agent-automations/), published October 8, 2026; article and linked implementation rechecked October 13, 2026.
-- Reference implementation: [Claude Quickstarts daily brief at `9ec32b91df50b0d4906cae64b13c6298055ff40d`](https://github.com/anthropics/claude-quickstarts/tree/9ec32b91df50b0d4906cae64b13c6298055ff40d/managed-agents/daily-brief), committed October 7, 2026. Inspected the [agent instructions](https://github.com/anthropics/claude-quickstarts/blob/9ec32b91df50b0d4906cae64b13c6298055ff40d/managed-agents/daily-brief/agents/daily-brief/agent.md), [deployment](https://github.com/anthropics/claude-quickstarts/blob/9ec32b91df50b0d4906cae64b13c6298055ff40d/managed-agents/daily-brief/agents/daily-brief/deployment.md), README, environment and memory-store configuration, credential setup, and inspection utilities. No runtime was deployed or source code executed; the inspected quickstart contains no deterministic collector/delivery implementation or corresponding tests.
+- Reference implementation: Claude Quickstarts daily brief at `9ec32b91df50b0d4906cae64b13c6298055ff40d`, committed October 7, 2026. Inspected the agent instructions, deployment, README, environment and memory-store configuration, credential setup, and inspection utilities. No runtime was deployed or source code executed; the inspected quickstart contains no deterministic collector/delivery implementation or corresponding tests.
 
 This is a composition of incremental collection, partial-result reporting, and external-effect bookkeeping, not a new model, training method, or autonomy level. The useful delta is their monitoring-specific relationship; generic scheduling, memory, permissions, budgets, and retries already have owners.
 
@@ -143,14 +143,14 @@ Documentation version boundaries:
 - The conversation guide mentions `response.cancelled`, whereas the current server schema specifies terminal `response.done` with status. Preserve this discrepancy rather than copying guide prose into an event contract.
 - Live transcript/delegation events and context acknowledgments are not conventional completed turns, execution results, or playback receipts. The exact event/limit distinctions belong in [provider adapters](provider-api-patterns.md#realtime-voice-adapters); model-managed compaction does not make conversation history an authoritative business record.
 
-Pinned implementation: [OpenAI Codex at `7e9c061ceb388c67097acac069d6b7f8a60e5011`](https://github.com/openai/codex/tree/7e9c061ceb388c67097acac069d6b7f8a60e5011). Source-observed evidence:
+Pinned implementation: OpenAI Codex at `7e9c061ceb388c67097acac069d6b7f8a60e5011`. Source-observed evidence:
 
-- The supplied [handoff routing path](https://github.com/openai/codex/blob/7e9c061ceb388c67097acac069d6b7f8a60e5011/codex-rs/core/src/realtime_conversation.rs#L1797-L1819) routes text into the main session before publishing the raw event. That receipt log deliberately omits routed text because it can contain spoken prompts or workspace secrets.
-- The [front-agent prompt](https://github.com/openai/codex/blob/7e9c061ceb388c67097acac069d6b7f8a60e5011/codex-rs/prompts/templates/realtime/backend_prompt.md#L13-L51) separates conversational presentation from execution and steers ongoing backend work. Its refusal suppression and elevation of backend output are product policy, not provider-neutral instruction-authority or security rules.
-- The [admission gate](https://github.com/openai/codex/blob/7e9c061ceb388c67097acac069d6b7f8a60e5011/codex-rs/core/src/realtime_conversation.rs#L136-L165) serializes routing against retirement; the [response queue](https://github.com/openai/codex/blob/7e9c061ceb388c67097acac069d6b7f8a60e5011/codex-rs/core/src/realtime_conversation.rs#L421-L473) coalesces response creation while generation is active. These are lifecycle controls, not proof of end-to-end exactly-once work or audible delivery.
-- [Audio ingress](https://github.com/openai/codex/blob/7e9c061ceb388c67097acac069d6b7f8a60e5011/codex-rs/core/src/realtime_conversation.rs#L858-L883) can drop a frame on a full queue while returning success. [Native playback](https://github.com/openai/codex/blob/7e9c061ceb388c67097acac069d6b7f8a60e5011/codex-rs/voice-host/src/playback.rs#L81-L107) can consume an overdue chunk without enqueuing it. Successful submission/consumption therefore does not prove speech was played.
-- The [interruption handler](https://github.com/openai/codex/blob/7e9c061ceb388c67097acac069d6b7f8a60e5011/codex-rs/core/src/realtime_conversation.rs#L2590-L2624) truncates using [accumulated received-audio duration](https://github.com/openai/codex/blob/7e9c061ceb388c67097acac069d6b7f8a60e5011/codex-rs/core/src/realtime_conversation.rs#L2752-L2792), not a confirmed speaker cursor. The profile's provenance-bearing playback cursor is proposed stronger guidance.
-- Product [model literals](https://github.com/openai/codex/blob/7e9c061ceb388c67097acac069d6b7f8a60e5011/codex-rs/core/src/realtime_conversation.rs#L112-L113) are `gpt-realtime-1.5` and `gpt-live-1-codex`; [version selection](https://github.com/openai/codex/blob/7e9c061ceb388c67097acac069d6b7f8a60e5011/codex-rs/core/src/realtime_conversation.rs#L1587-L1600) does not establish current public API availability. The [V2 parser](https://github.com/openai/codex/blob/7e9c061ceb388c67097acac069d6b7f8a60e5011/codex-rs/codex-api/src/endpoint/realtime_websocket/protocol_v2.rs#L65-L76) also logs unsupported payloads; the payload-free handoff receipt is not global log redaction.
+- The supplied handoff routing path routes text into the main session before publishing the raw event. That receipt log deliberately omits routed text because it can contain spoken prompts or workspace secrets.
+- The front-agent prompt separates conversational presentation from execution and steers ongoing backend work. Its refusal suppression and elevation of backend output are product policy, not provider-neutral instruction-authority or security rules.
+- The admission gate serializes routing against retirement; the response queue coalesces response creation while generation is active. These are lifecycle controls, not proof of end-to-end exactly-once work or audible delivery.
+- Audio ingress can drop a frame on a full queue while returning success. Native playback can consume an overdue chunk without enqueuing it. Successful submission/consumption therefore does not prove speech was played.
+- The interruption handler truncates using accumulated received-audio duration, not a confirmed speaker cursor. The profile's provenance-bearing playback cursor is proposed stronger guidance.
+- Product model literals are `gpt-realtime-1.5` and `gpt-live-1-codex`; version selection does not establish current public API availability. The V2 parser also logs unsupported payloads; the payload-free handoff receipt is not global log redaction.
 
 Independent voice-system evidence, checked on the same date:
 
@@ -188,11 +188,11 @@ No model calls, live latency/accuracy benchmarks, device commissioning, or Codex
 ## Commerce interaction and memory contracts
 
 - Anthropic article, September 2, 2026: [A guide to the anatomy of effective commerce agents](https://claude.com/blog/the-anatomy-of-effective-commerce-agents).
-- Reference implementation: [commerce-agents at `fd4d59224ab96b43c6dc6888207c67b3bd5a24cf`](https://github.com/anthropics/commerce-agents/tree/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf), committed August 31, 2026; source and tests inspected September 5, 2026.
-- UI evidence: [typed presentation runner](https://github.com/anthropics/commerce-agents/blob/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf/commerce-common/commerce_common/presentation.py#L120) and [record enrichment, filtering, and disclosures](https://github.com/anthropics/commerce-agents/blob/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf/shopping-agent/core/shopping_agent/enrichment.py#L82).
-- Mutation evidence: [cart caps and serialization](https://github.com/anthropics/commerce-agents/blob/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf/shopping-agent/core/shopping_agent/gates.py#L85), [apply approval gate](https://github.com/anthropics/commerce-agents/blob/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf/merchant-agent/core/merchant_agent/gates.py#L192), and [staged-value policy recheck](https://github.com/anthropics/commerce-agents/blob/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf/merchant-agent/core/merchant_agent/changes.py#L188).
-- Memory evidence: [common write and lifecycle implementation](https://github.com/anthropics/commerce-agents/blob/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf/commerce-common/commerce_common/memory.py), [merchant identity scope](https://github.com/anthropics/commerce-agents/blob/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf/merchant-agent/core/merchant_agent/executor.py#L133), and [post-turn host scheduling](https://github.com/anthropics/commerce-agents/blob/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf/examples/demo_common/host.py#L201).
-- Evaluation and deployment evidence: [eval-authoring skill](https://github.com/anthropics/commerce-agents/blob/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf/plugins/commerce-builder/skills/commerce-evals/SKILL.md#L8) and [safety boundaries](https://github.com/anthropics/commerce-agents/blob/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf/docs/safety.md).
+- Reference implementation: commerce-agents at `fd4d59224ab96b43c6dc6888207c67b3bd5a24cf`, committed August 31, 2026; source and tests inspected September 5, 2026.
+- UI evidence: typed presentation runner and record enrichment, filtering, and disclosures.
+- Mutation evidence: cart caps and serialization, apply approval gate, and staged-value policy recheck.
+- Memory evidence: common write and lifecycle implementation, merchant identity scope, and post-turn host scheduling.
+- Evaluation and deployment evidence: eval-authoring skill and safety boundaries.
 
 This is a concrete composition of existing agent-loop, skill, presentation, memory, and host-enforcement patterns. It is not a new model architecture or autonomy level. The core implementation supplies typed UI calls, server-owned record fields and disclosure copy, provenance gates, resulting-cart-state caps, and staged changes with approval and policy checks.
 
@@ -208,7 +208,7 @@ Canonical guidance lives in [tools and permissions](tools-and-permissions.md#rec
 ## MCP
 
 - MCP specification, stable 2026-07-28: https://modelcontextprotocol.io/specification/2026-07-28
-- MCP specification source at the stable tag: https://github.com/modelcontextprotocol/modelcontextprotocol/tree/5f5440bb26a62e2cf3440b92da5a667efa03b267
+- MCP specification source at the stable tag
 - MCP authorization: https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization
 - MCP server discovery: https://modelcontextprotocol.io/specification/2026-07-28/server/discover
 - MCP tools: https://modelcontextprotocol.io/specification/2026-07-28/server/tools
@@ -217,19 +217,19 @@ Canonical guidance lives in [tools and permissions](tools-and-permissions.md#rec
 
 - CodeAct paper, arXiv v4: https://arxiv.org/abs/2402.01030v4
 - CodeAct ICML 2024 publication: https://proceedings.mlr.press/v235/wang24h.html
-- CodeAct official implementation at researched revision: https://github.com/xingyaoww/code-act/tree/d607f56c9cfe9e8632ebaf65dcaf2b4b7fe1c6f8
+- CodeAct official implementation at researched revision
 - ToolLLM paper, arXiv v2: https://arxiv.org/abs/2307.16789v2
 - ToolLLM ICLR 2024 publication: https://proceedings.iclr.cc/paper_files/paper/2024/hash/28e50ee5b72e90b50e7196fde8ea260e-Abstract-Conference.html
-- ToolBench official implementation at the paper-era revision: https://github.com/OpenBMB/ToolBench/tree/ce541837c92f47f832e91f3ae92480fbbdb9a1e3
+- ToolBench official implementation at the paper-era revision
 - Gorilla paper, arXiv v1: https://arxiv.org/abs/2305.15334v1
 - Gorilla NeurIPS 2024 publication: https://proceedings.nips.cc/paper_files/paper/2024/hash/e4c61f578ff07830f5c37378dd3ecb0d-Abstract-Conference.html
-- Gorilla official implementation at the paper-era release: https://github.com/ShishirPatil/gorilla/tree/29f5ffb6726e3fab8c7fc7bfe017d037a693b10d
+- Gorilla official implementation at the paper-era release
 - NovelAPIBench paper, arXiv v1 preprint: https://arxiv.org/abs/2606.03657v1
 
 ## Speculative and asynchronous tool execution
 
 - Speculative Programmatic Tool Calling article, August 2026: https://alexzhang13.github.io/blog/2026/spec-ptc/
-- Speculative Programmatic Tool Calling implementation, v0.1.1 researched revision: https://github.com/alexzhang13/spec-ptc/tree/9b78b7d6ceeaf8afd1557c4e3a999ce653fc0e17
+- Speculative Programmatic Tool Calling implementation, v0.1.1 researched revision
 - Conveyor paper, arXiv v2: https://arxiv.org/abs/2406.00059v2
 - Speculative Interaction Agents paper, arXiv v2: https://arxiv.org/abs/2605.13360v2
 - AsyncFC paper, arXiv v1: https://arxiv.org/abs/2605.15077v1
@@ -237,9 +237,9 @@ Canonical guidance lives in [tools and permissions](tools-and-permissions.md#rec
 ## Hybrid latent/text generation and native continuation
 
 - Paper: Zou et al., [Hybrid Reasoning Agents, arXiv:2610.18861v1](https://arxiv.org/html/2610.18861v1), October 13, 2026; methods, analyses, and appendices inspected October 19. The paper is licensed CC BY 4.0.
-- Official implementation: [togethercomputer/HybridAgent at `1b41cebbd2388d083ee1820af421b7f9e24affb5`](https://github.com/togethercomputer/HybridAgent/tree/1b41cebbd2388d083ee1820af421b7f9e24affb5), committed October 18, 2026; README, generation, readout, tool, SFT, and RL paths inspected October 19. No tracked test/CI files were found. Training, inference, and benchmarks were not executed; performance claims were not independently reproduced.
-- Runtime evidence: [persistent KV/position/mask handling](https://github.com/togethercomputer/HybridAgent/blob/1b41cebbd2388d083ee1820af421b7f9e24affb5/hybrid_agent/engine.py#L215), [latent transitions](https://github.com/togethercomputer/HybridAgent/blob/1b41cebbd2388d083ee1820af421b7f9e24affb5/hybrid_agent/engine.py#L328), and [backbone/logit computation](https://github.com/togethercomputer/HybridAgent/blob/1b41cebbd2388d083ee1820af421b7f9e24affb5/hybrid_agent/sampling.py#L39).
-- Inspection and training evidence: [nearest-token projection](https://github.com/togethercomputer/HybridAgent/blob/1b41cebbd2388d083ee1820af421b7f9e24affb5/hybrid_agent/readout.py#L15), [inspector](https://github.com/togethercomputer/HybridAgent/blob/1b41cebbd2388d083ee1820af421b7f9e24affb5/interpretable_latent_mode/trace.py#L77), [self-conditioned SFT](https://github.com/togethercomputer/HybridAgent/blob/1b41cebbd2388d083ee1820af421b7f9e24affb5/hybrid_sft/model.py#L96), [recorded-latent replay](https://github.com/togethercomputer/HybridAgent/blob/1b41cebbd2388d083ee1820af421b7f9e24affb5/hybrid_rl/replay.py#L95), and [replay-agreement logging](https://github.com/togethercomputer/HybridAgent/blob/1b41cebbd2388d083ee1820af421b7f9e24affb5/hybrid_rl/train.py#L253).
+- Official implementation: togethercomputer/HybridAgent at `1b41cebbd2388d083ee1820af421b7f9e24affb5`, committed October 18, 2026; README, generation, readout, tool, SFT, and RL paths inspected October 19. No tracked test/CI files were found. Training, inference, and benchmarks were not executed; performance claims were not independently reproduced.
+- Runtime evidence: persistent KV/position/mask handling, latent transitions, and backbone/logit computation.
+- Inspection and training evidence: nearest-token projection, inspector, self-conditioned SFT, recorded-latent replay, and replay-agreement logging.
 - Published [8B](https://huggingface.co/togethercomputer/HybridAgent-8B-Agentic) and [14B](https://huggingface.co/togethercomputer/HybridAgent-14B-Agentic) model cards were checked October 19. They require the custom runtime for hybrid generation; ordinary Transformers loading provides text-only behavior. Weights were not downloaded or tested.
 
 This is a model-generation, serving, and post-training contribution, with lineage in continuous latent reasoning and cached autoregressive continuation. A learned residual HybridLink maps last-layer hidden states into the input-embedding space; HybridSFT coordinates the link/backbone, and HybridRL trains the backbone while keeping the link fixed. It is not frozen-weight harness editing, strict RLM context programming, or a new autonomy level. Its reusable harness-facing delta belongs in [native generation-state adapters](provider-api-patterns.md#native-generation-state-adapters) and [serving evals](evals.md#native-generation-state-and-hybrid-serving-evals), not a second recursive-harness profile or a training manual.
@@ -254,8 +254,8 @@ This is a model-generation, serving, and post-training contribution, with lineag
 
 Additional reproduction and deployment limits:
 
-- [Released inference defaults](https://github.com/togethercomputer/HybridAgent/blob/1b41cebbd2388d083ee1820af421b7f9e24affb5/hybrid_inference/run_batch.py#L41) use 4–200 latent steps per span; [RL presets](https://github.com/togethercomputer/HybridAgent/blob/1b41cebbd2388d083ee1820af421b7f9e24affb5/hybrid_rl/config.py#L8) differ by task and from the paper's 16–256. Checkpoints, budgets, and generation rules must be matched before claiming reproduction.
-- The [Python tool](https://github.com/togethercomputer/HybridAgent/blob/1b41cebbd2388d083ee1820af421b7f9e24affb5/hybrid_agent/tools/python_tool.py#L81) explicitly runs with current-user filesystem/network access; its subprocess is not a security sandbox. Valid tool formatting and error-free execution do not demonstrate permission enforcement or task correctness.
+- Released inference defaults use 4–200 latent steps per span; RL presets differ by task and from the paper's 16–256. Checkpoints, budgets, and generation rules must be matched before claiming reproduction.
+- The Python tool explicitly runs with current-user filesystem/network access; its subprocess is not a security sandbox. Valid tool formatting and error-free execution do not demonstrate permission enforcement or task correctness.
 - Section 8 proposes KV-level context management, mode-aware workflow scheduling, and hybrid trajectories as inter-agent messages as future directions. Do not present those as implemented generic harness contracts or assume opaque latent state provides confidentiality.
 
 The generic adapter requirements for scoped/versioned continuation, explicit loss/restart outcomes, host tool authority, computation limits, and calibrated diagnostics are this skill's stronger recommended integration contract. Reuse existing context, routing, recovery, permissions, tracing, and measurement owners by link rather than restating them.
@@ -263,19 +263,19 @@ The generic adapter requirements for scoped/versioned continuation, explicit los
 ## Recursive and continually refining harnesses
 
 - Recursive Language Models paper: https://arxiv.org/abs/2512.24601
-- Recursive Language Models reference implementation: https://github.com/alexzhang13/rlm
+- Recursive Language Models reference implementation
 - Continual Harness paper: https://arxiv.org/abs/2605.09998
-- Continual Harness official implementation: https://github.com/sethkarten/continual-harness
+- Continual Harness official implementation
 - Recursive Agent Harnesses paper: https://arxiv.org/abs/2606.13643
 - Voyager paper: https://arxiv.org/abs/2305.16291
 
 ### Harness²: task-local contrastive search and improvement experience
 
 - Paper: [Harness²: Recursive Agent Harnessing for an Open World, arXiv:2610.14224v1](https://arxiv.org/html/2610.14224v1), submitted October 9, 2026; sections 2.1–2.3 and experimental setup inspected October 19.
-- Implementation: [google-research/harness2 at `1cfe254e8d25b15f37048c3730134686abe60335`](https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335), committed October 14, 2026 UTC; README, experiment documentation, relevant source, and workflow tests inspected October 19. Upstream tests and model-backed benchmarks were not executed; reported performance gains were not independently reproduced.
-- Search evidence: [recursion scheduling and proposal validation](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/harness2/core/recursion.py), [rollout/stage ledger](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/harness2/core/ledger.py), and [anonymous selection](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/harness2/core/selection.py).
-- Retention evidence: [reflection prompts](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/harness2/core/prompts.py#L1106), [library eligibility and storage](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/harness2/core/library.py#L106), and [task sequencing/resume](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/harness2/core/schedule.py).
-- Validation scope: [workflow tests](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/tests/test_workflow.py), [experiment and contamination notes](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/docs/EXPERIMENTS.md), [grader tripwires](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/harness2/core/context.py#L454), and [Codex executor options](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/harness2/substrate/codex.py#L149).
+- Implementation: google-research/harness2 at `1cfe254e8d25b15f37048c3730134686abe60335`, committed October 14, 2026 UTC; README, experiment documentation, relevant source, and workflow tests inspected October 19. Upstream tests and model-backed benchmarks were not executed; reported performance gains were not independently reproduced.
+- Search evidence: recursion scheduling and proposal validation, rollout/stage ledger, and anonymous selection.
+- Retention evidence: reflection prompts, library eligibility and storage, and task sequencing/resume.
+- Validation scope: workflow tests, experiment and contamination notes, grader tripwires, and Codex executor options.
 
 This is a composition of known test-time search, harness editing, execution comparison, and continual experience mechanisms with frozen model weights. Its useful addition here is task-local behavioral contrast followed by selective harness composition, plus experience about future refinement. It does not establish a new model architecture, training method, autonomy level, or a requirement for recursive child agents.
 
@@ -301,7 +301,7 @@ Canonical additions live in [task-local contrastive refinement](self-refining-re
 
 - OpenAI, [On the Navier–Stokes Millennium Prize Problem](https://openai.com/index/navier-stokes-solution/), published September 8, 2026; updated September 10; rechecked September 30. “How we found the proof” is the public orchestration account.
 - User-supplied excerpt from “What Comes After Loops?: Deep Dive Into Agentic Architecture,” September 29, 2026, 11:15–11:40 AM PT, Mezzanine Stage; listed speakers Raj Pathak and Eric Provencher. This is supplied panel evidence, not an independently verified official recording or complete transcript.
-- Mathematical artifacts: [Lean repository at `f9e8bc5b38b6e212696e8a30e3e91517af887bbd`](https://github.com/openai/NavierStokesAndEuler/tree/f9e8bc5b38b6e212696e8a30e3e91517af887bbd), September 10 revision; [README](https://github.com/openai/NavierStokesAndEuler/blob/f9e8bc5b38b6e212696e8a30e3e91517af887bbd/README.md), [entry module](https://github.com/openai/NavierStokesAndEuler/blob/f9e8bc5b38b6e212696e8a30e3e91517af887bbd/NavierStokes.lean), and [comparator documentation](https://github.com/openai/NavierStokesAndEuler/blob/f9e8bc5b38b6e212696e8a30e3e91517af887bbd/ComparatorChallenges/README.md) inspected September 30; linked [Navier–Stokes paper](https://cdn.openai.com/pdf/32d9f210-8b73-45e0-91bc-82a30aef8a9a/navier-stokes.pdf) and [Euler paper](https://cdn.openai.com/pdf/315b36cd-ec98-4023-8342-93345194ece1/euler.pdf) inspected for source scope.
+- Mathematical artifacts: Lean repository at `f9e8bc5b38b6e212696e8a30e3e91517af887bbd`, September 10 revision; README, entry module, and comparator documentation inspected September 30; linked [Navier–Stokes paper](https://cdn.openai.com/pdf/32d9f210-8b73-45e0-91bc-82a30aef8a9a/navier-stokes.pdf) and [Euler paper](https://cdn.openai.com/pdf/315b36cd-ec98-4023-8342-93345194ece1/euler.pdf) inspected for source scope.
 - Prior lineage: [Hearsay-III, AAAI 1980](https://cdn.aaai.org/AAAI/1980/AAAI80-032.pdf), shared blackboard information and scheduling; [The Contract Net Protocol, December 1980](https://www.reidgsmith.com/The_Contract_Net_Protocol_Dec-1980.pdf), dynamic task allocation and information exchange; [Tree of Thoughts, arXiv:2305.10601v2, December 3, 2023](https://arxiv.org/abs/2305.10601v2), exploration and evaluation of reasoning alternatives. Primary sources rechecked September 30; lineage does not establish which mechanisms the reported run implemented.
 
 | Claim | Evidence boundary |
@@ -374,8 +374,8 @@ Canonical guidance lives in [the public-board communication section](skills-and-
 
 ## Implementation examples
 
-- Bun PR with generated workflow program examples: https://github.com/oven-sh/bun/pull/30412/changes
-- Prime Agent repository at researched revision: https://github.com/PrimeIntellect-ai/prime-agent/tree/a18809e00ea30638584d87b3afea7285a9d7296c
+- Bun PR with generated workflow program examples
+- Prime Agent repository at researched revision
 - Prime Agent launch article: https://www.primeintellect.ai/blog/prime-agent
 
 ## Use in responses

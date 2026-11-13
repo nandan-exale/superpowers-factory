@@ -102,7 +102,7 @@ __pycache__/
 ````markdown
 # superpowers-factory
 
-Design with [Superpowers](https://github.com/obra/superpowers).
+Design with Superpowers.
 
 You brainstorm and plan interactively. `/factory-handoff` turns the committed
 spec and plan into one GitHub issue labeled `factory` + `factory:planned`.
@@ -1458,18 +1458,18 @@ Expected: 26 tests, all `ok`.
 - [ ] **Step 2: Create a throwaway project**
 
 ```bash
-mkdir -p /Users/nandanthakur/projects/factory-e2e && cd /Users/nandanthakur/projects/factory-e2e
+mkdir -p <test-project> && cd <test-project>
 git init -q -b main
 printf 'def add(a, b):\n    return a + b\n' > calc.py
 mkdir tests && printf 'import unittest\nfrom calc import add\n\nclass AddTest(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(add(2, 3), 5)\n' > tests/test_calc.py
 printf '# calc\n\nTests: `python3 -m unittest discover -s tests`\n' > AGENTS.md
 git add . && git commit -qm "init calc"
-gh repo create factory-e2e --private --source . --push
+gh repo create <test-project> --private --source . --push
 ```
 
 - [ ] **Step 3: Install the plugin and the factory**
 
-In Claude Code, in `/Users/nandanthakur/projects/factory-e2e`:
+In Claude Code, in `<test-project>`:
 
 ```text
 /plugin marketplace add /Users/nandanthakur/projects/superpowers-factory
@@ -1516,7 +1516,7 @@ a `Factory: needs a human` comment and the `factory:needs-human` label.
 Ask your human partner before deleting anything. On their yes:
 
 ```bash
-gh repo delete factory-e2e --yes
+gh repo delete <test-project> --yes
 ```
 
 `gh repo delete` needs the `delete_repo` scope; if it fails, your human partner deletes it on GitHub.

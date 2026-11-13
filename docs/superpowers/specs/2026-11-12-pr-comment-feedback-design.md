@@ -1,8 +1,8 @@
 # PR comment follow-ups — Design
 
 Date: 2026-11-12
-Status: approved design. The idea is borrowed from deepseek-ai/dsh-superagent-prototype, where later
-comments on a Thread reach the Ticket's Executor without a new mention.
+Status: approved design. The idea: later comments on a work
+item reach the agent working on it without a new mention.
 
 ## Goal
 

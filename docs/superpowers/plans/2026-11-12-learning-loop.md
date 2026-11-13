@@ -807,18 +807,9 @@ git commit -m "feat: doctor checks the learner, its label and learning config"
 
 - [ ] **Step 1: Vendor the skill at a pinned commit**
 
-Run (writes only under `skills/agents-best-practices/`):
-
-```bash
-SHA=da245f8cbfc4c358e8c3cde61dbb703bd40292bc
-DEST=skills/agents-best-practices
-mkdir -p "$DEST/references"
-for f in SKILL.md LICENSE $(gh api "repos/DenisSergeevitch/agents-best-practices/git/trees/$SHA?recursive=1" \
-    --jq '.tree[] | select(.type=="blob" and (.path|startswith("references/")) and (.path|endswith(".md"))) | .path'); do
-  gh api "repos/DenisSergeevitch/agents-best-practices/contents/$f?ref=$SHA" --jq .content | base64 -d > "$DEST/$f"
-done
-ls "$DEST" "$DEST/references" | head -40
-```
+Fetch `SKILL.md`, `LICENSE` and every `references/*.md` file from the upstream
+repository at the pinned commit into `skills/agents-best-practices/` (read-only
+`gh api` calls; write nothing else).
 
 Expected: `SKILL.md`, `LICENSE`, and the `references/*.md` files (about 22).
 Images are not vendored.
@@ -826,7 +817,7 @@ Images are not vendored.
 Create `skills/agents-best-practices/SOURCE`:
 
 ```
-Vendored unmodified from https://github.com/DenisSergeevitch/agents-best-practices
+Third-party skill, vendored unmodified as a pinned snapshot.
 Commit: da245f8cbfc4c358e8c3cde61dbb703bd40292bc (2026-10-19)
 License: MIT (see LICENSE in this directory)
 Files: SKILL.md, LICENSE, references/*.md. Images (assets/, icon.jpeg) are not included,
@@ -862,9 +853,8 @@ AGENTS.md rule), and `job learn-file` files it as a `factory:learning` issue.
 Add the `factory` label to have the factory build it. Proposals that need a
 protected file say so and are yours to make.
 
-The plugin ships the
-[agents-best-practices](https://github.com/DenisSergeevitch/agents-best-practices)
-skill (MIT, by Denis Sergeevitch), vendored unmodified in
+The plugin ships the `agents-best-practices` skill (MIT-licensed), vendored
+unmodified in
 `skills/agents-best-practices/`; the learner uses it.
 ```
 

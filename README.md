@@ -2,7 +2,8 @@
 
 ![superpowers-factory: design with Superpowers, then the factory builds, gates, reviews and ships each plan as one PR](assets/banner.svg)
 
-Design with [Superpowers](https://github.com/obra/superpowers).
+Design with Superpowers, the Claude Code plugin for brainstorming and planning
+(installed separately).
 
 You brainstorm and plan interactively. `/factory-handoff` turns the committed
 spec and plan into one GitHub issue labeled `factory` + `factory:planned`.
@@ -105,10 +106,10 @@ AGENTS.md rule), and `job learn-file` files it as a `factory:learning` issue.
 Add the `factory` label to have the factory build it. Proposals that need a
 protected file say so and are yours to make.
 
-The plugin ships the
-[agents-best-practices](https://github.com/DenisSergeevitch/agents-best-practices)
-skill (MIT, by Denis Sergeevitch), vendored with one modification (its
-self-update section is replaced by a pinned-snapshot note; see `SOURCE`) in
+The plugin ships the `agents-best-practices` skill (MIT-licensed, see
+`skills/agents-best-practices/LICENSE`), vendored with two modifications (its
+self-update section is replaced by a pinned-snapshot note, and links to
+external repositories are removed from its references; see `SOURCE`) in
 `skills/agents-best-practices/`; the learner uses it.
 
 ## PR comments
