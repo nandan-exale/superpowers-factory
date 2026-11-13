@@ -1514,7 +1514,8 @@ def cmd_planned(job):
     for key in ("spec", "plan"):
         (d / f"{key}.md").write_text(run(["git", "show", f"{plan['commit']}:{plan[key]}"]).stdout)
     (d / "intake.md").write_text(planned_intake_md(job["issue"], plan))
-    job = {**sync(job), "planned": True, "agents": route_agents(plan["risk"], plan["surfaces"])}
+    job = {**sync(job), "planned": True, "plan_paths": [plan["spec"], plan["plan"]],
+           "agents": route_agents(plan["risk"], plan["surfaces"])}
     job = advance(job, "spec")
     job = advance(job, "build")
     save(sync(job))
