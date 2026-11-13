@@ -24,7 +24,7 @@ AGENT_KEYS = {"name", "description", "tools"}
 EXECUTABLES = ("factory/checks.sh", "factory/bin/job", "factory/bin/gate", "factory/bin/route",
                "factory/bin/stop-hook", "factory/bin/doctor", "factory/bin/runner")
 LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned",
-          "factory:learning")
+          "factory:learning", "factory:revert", "factory:risk-ok")
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):")
 CHECKS_TAIL = 20
 # Checks run project code, so they never see the runner's Claude credentials.
@@ -83,6 +83,25 @@ def check_config():
         if not isinstance(tags, list) or not tags or not all(
                 isinstance(t, str) and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", t) for t in tags):
             problems.append(fail("learning.tags must be a non-empty list of lowercase-hyphenated names"))
+    watch = cfg.get("watch")
+    if watch is not None:
+        if not isinstance(watch, dict):
+            problems.append(fail("watch must be an object with enabled, max_minutes and ignore_workflows"))
+        else:
+            if not isinstance(watch.get("enabled", True), bool):
+                problems.append(fail("watch.enabled must be true or false"))
+            mins = watch.get("max_minutes", 60)
+            if isinstance(mins, bool) or not isinstance(mins, int) or mins <= 0:
+                problems.append(fail("watch.max_minutes must be a positive integer"))
+            names = watch.get("ignore_workflows", [])
+            if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+                problems.append(fail("watch.ignore_workflows must be a list of workflow names"))
+    risky = cfg.get("risky_paths", [])
+    if not isinstance(risky, list) or not all(isinstance(p, str) and p for p in risky):
+        problems.append(fail("risky_paths must be a list of glob strings"))
+    allow = (cfg.get("secret_scan") or {}).get("allow", []) if isinstance(cfg.get("secret_scan", {}), dict) else None
+    if not isinstance(allow, list) or not all(isinstance(p, str) and p for p in allow):
+        problems.append(fail("secret_scan.allow must be a list of glob strings"))
     if not isinstance(cfg.get("agents", {}).get("learner"), dict):
         problems.append(fail("agents.learner missing; expected {model, effort}"))
     return problems
@@ -187,6 +206,17 @@ def check_labels():
     return [fail(f"label {name!r} missing on GitHub") for name in LABELS if name not in names]
 
 
+def check_paused():
+    path = REPO / "factory" / "jobs" / "paused.json"
+    if not path.exists():
+        return []
+    try:
+        reason = json.loads(path.read_text()).get("reason", "?")
+    except ValueError:
+        reason = "paused.json is unreadable"
+    return [warn(f"{reason}; factory/bin/job resume clears it once the base branch is fixed")]
+
+
 RUNNER_ALLOW = ("Bash(factory/bin/job *)", "Bash(factory/bin/gate *)", "Bash(factory/bin/route *)",
                 "Bash(git *)", "Bash(gh *)", "Bash(bash factory/checks.sh)")
 
@@ -277,6 +307,7 @@ CHECKS = [
     ("stop-hook", check_stop_hook),
     ("claude-md", check_claude_md),
     ("labels", check_labels),
+    ("paused", check_paused),
     ("runner", check_runner),
     ("checks", check_checks),
 ]
