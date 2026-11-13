@@ -123,7 +123,7 @@ def risky_local_key():
     res = subprocess.run(["git", "config", "--local", "--name-only", "--list"], cwd=REPO,
                          capture_output=True, text=True)
     for key in res.stdout.splitlines():
-        if (key in RISKY_KEYS or key == "include.path"
+        if (key in RISKY_KEYS or key == "include.path" or key.startswith("filter.")
                 or (key.startswith("includeif.") and key.endswith(".path"))
                 or (key.startswith("remote.") and key.endswith((".uploadpack", ".receivepack")))
                 or (key.startswith("credential.") and key.endswith(".helper"))):
@@ -338,34 +338,50 @@ def state_files():
     if not JOBS.exists():
         return []
     return [p.relative_to(JOBS).as_posix() for p in sorted(JOBS.rglob("*"))
-            if p.is_file() and not p.name.endswith(".lock") and p.stat().st_size <= STATE_MAX_BYTES]
+            if p.is_file() and not p.is_symlink() and not p.name.endswith(".lock")
+            and p.stat().st_size <= STATE_MAX_BYTES]
 
 
 def state_commit(files, parent):
     """A commit of `files` (relative to factory/jobs) on `parent`, built in a temporary index so the
-    main checkout's index and tree are untouched."""
+    main checkout's index and tree are untouched. Blobs are hashed with --no-filters and the commit
+    is unsigned, so no filter or gpg program from .git/config runs outside the sandbox."""
     index = git_dir() / "factory-state.index"
     index.unlink(missing_ok=True)
     env = {**os.environ, **GIT_ENV, "GIT_INDEX_FILE": str(index), "GIT_DIR": str(git_dir()),
            "GIT_WORK_TREE": str(JOBS)}
 
-    def g(*args):
-        res = subprocess.run(["git", *GIT_SAFE, *args], cwd=JOBS, capture_output=True, text=True, env=env)
+    def g(*args, stdin=None):
+        res = subprocess.run(["git", *GIT_SAFE, *args], cwd=JOBS, capture_output=True, text=True, env=env,
+                             input=stdin)
         if res.returncode != 0:
             raise RuntimeError(f"git {args[0]}: {first_line(res.stderr)}")
         return res.stdout.strip()
 
     try:
+        blobs = []
         for i in range(0, len(files), 200):
-            g("add", "-f", "--", *files[i:i + 200])
+            blobs += g("hash-object", "-w", "--no-filters", "--", *files[i:i + 200]).split()
+        if files:
+            g("update-index", "-z", "--add", "--index-info",
+              stdin="".join(f"100644 {blob}\t{path}\0" for blob, path in zip(blobs, files)))
         tree = g("write-tree")
-        return g("commit-tree", tree, *(["-p", parent] if parent else []), "-m", f"factory state {stamp()}")
+        return g("commit-tree", "--no-gpg-sign", tree, *(["-p", parent] if parent else []),
+                 "-m", f"factory state {stamp()}")
     finally:
         index.unlink(missing_ok=True)
 
 
 def save_state():
-    """Commit factory/jobs on top of origin's factory-state and push it; one retry after a rejection."""
+    """Commit factory/jobs on top of origin's factory-state and push it; one retry after a rejection.
+    Refuses, like a local tick's preflight, when the session left config that would run code through git."""
+    if hooks_or_fsmonitor_configured():
+        log(f"error: git hooks or fsmonitor configured in this clone; not saving {STATE_BRANCH}")
+        return False
+    key = risky_local_key()
+    if key:
+        log(f"error: git config in this clone sets {key}; not saving {STATE_BRANCH}")
+        return False
     JOBS.mkdir(parents=True, exist_ok=True)
     files = state_files()
     for _ in range(2):
@@ -411,7 +427,7 @@ def cmd_tick(ci=False):
         code = tick_body(base, runner, token or "")
     finally:
         if not save_state():
-            log(f"error: {STATE_BRANCH} push failed twice; this run's state is in the workflow artifact")
+            log(f"error: {STATE_BRANCH} not saved; this run's state is in the workflow artifact")
             code = 1
     return code
 
@@ -444,7 +460,7 @@ def tick_body(base, runner, ci_token_value):
     if not work:
         log("idle")
         return 0
-    if ci_token_value is not None or os.environ.get("GITHUB_ACTIONS") == "true":
+    if ci_token_value is not None:
         token = ci_token_value
         if not token:
             log("error: CLAUDE_CODE_OAUTH_TOKEN isn't set; add the FACTORY_CLAUDE_TOKEN secret")
