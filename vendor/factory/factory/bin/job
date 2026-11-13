@@ -552,9 +552,74 @@ def cmd_watch():
         print(f"WATCH: {job['id']} {state}" + (f"; no CI runs on {BASE} within {cfg['max_minutes']} min" if state == "no-ci" else ""))
 
 
+def revert_label():
+    return LABELS.get("revert", "factory:revert")
+
+
+def revert_command(method, sha, count):
+    """git args that undo a PR as it landed: a merge commit, a squash commit, or `count` rebased commits."""
+    if method == "merge":
+        return ["revert", "--no-edit", "-m", "1", sha]
+    if method == "rebase" and count > 1:
+        return ["revert", "--no-edit", f"{sha}~{count}..{sha}"]
+    return ["revert", "--no-edit", sha]
+
+
+def open_revert_pr(job, failed):
+    """Revert the merge on factory/revert-<id> in a throwaway worktree, push it, open a PR. Never merges."""
+    sha, method = job["watch"]["sha"], CONFIG["merge_method"]
+    branch = f"factory/revert-{job['id']}"
+    path = REPO / ".worktrees" / f"revert-{job['id']}"
+    run_net(["git", "fetch", "origin", BASE])
+    run(["git", "worktree", "add", "-q", "-b", branch, str(path), f"origin/{BASE}"])
+    try:
+        count = len(gh_json("pr", "view", str(job["pr"]), "--json", "commits")["commits"]) if method == "rebase" else 1
+        res = run(["git", *revert_command(method, sha, count)], cwd=path, check=False)
+        if res.returncode != 0:
+            run(["git", "revert", "--abort"], cwd=path, check=False)
+            raise Refused("the revert didn't apply cleanly")
+        run_net(["git", "push", "-u", "origin", branch], cwd=path)
+    finally:
+        run(["git", "worktree", "remove", "--force", str(path)], check=False)
+    gh("label", "create", revert_label(), "--color", "B60205",
+       "--description", "Reverts a factory merge that broke the base branch", "--force")
+    runs = "\n".join(f"- {r['workflowName']}: {r['url']}" for r in failed)
+    url = gh("pr", "create", "--base", BASE, "--head", branch, "--label", revert_label(),
+             "--title", f'Revert "{job["title"]}"',
+             "--body", f"{MARKER}\nReverts #{job['pr']} ({sha[:7]}): {BASE} failed after it merged.\n\n{runs}\n\n"
+                       f"The factory never merges this PR. Merge it, or fix {BASE} forward, "
+                       "then run `factory/bin/job resume`.").strip()
+    m = re.search(r"/pull/(\d+)$", url)
+    require(m, f"gh pr create printed {url!r}, not a PR URL")
+    return int(m.group(1))
+
+
 def revert_for(job, failed):
-    """Replaced in Task 6."""
-    raise Refused("revert isn't implemented yet")
+    """The base branch went red after this job merged: pause, try a revert PR, tell the human."""
+    w = job["watch"]
+    names = ", ".join(sorted({r["workflowName"] for r in failed}))
+    pause(f"{BASE} failed after #{job['pr']} ({names})", job["id"], w["sha"])
+    try:
+        revert_pr, why = open_revert_pr(job, failed), None
+    except Refused as e:
+        revert_pr, why = None, str(e).splitlines()[0]
+    job["watch"] = {**w, "state": "red", "revert_pr": revert_pr}
+    save(job)
+    runs = "\n".join(f"- {r['workflowName']}: {r['url']}" for r in failed)
+    body = (f"### Factory: {BASE} failed after this merged\n\n{runs}\n\n"
+            + (f"Revert PR: #{revert_pr} (not merged automatically).\n\n" if revert_pr
+               else f"No revert PR: {why}.\n\n")
+            + "The queue is paused; run `factory/bin/job resume` when the base branch is green.")
+    for kind, number in (("pr", job["pr"]), ("issue", job["issue"])):
+        try:
+            comment(kind, number, body)
+        except Refused as e:
+            print(f"NOTE: couldn't comment on {kind} #{number}: {str(e).splitlines()[0]}")
+    try:
+        label("issue", job["issue"], add=LABELS["needs_human"])
+    except Refused as e:
+        print(f"NOTE: couldn't label issue #{job['issue']}: {str(e).splitlines()[0]}")
+    print(f"WATCH: {job['id']} red; queue paused; " + (f"revert PR #{revert_pr}" if revert_pr else f"no revert PR: {why}"))
 
 
 # ---- Learning ---------------------------------------------------------------
