@@ -18,6 +18,8 @@ class QueueDependsTest(BudgetCase):
 
         def gh_json(*args):
             if args[:2] == ("issue", "view"):
+                if isinstance(self.dep_state, Exception):
+                    raise self.dep_state
                 return {"state": self.dep_state}
             return base(*args)
 
@@ -55,6 +57,22 @@ class QueueDependsTest(BudgetCase):
     def test_closed_without_a_merged_job_is_failed(self):
         self.dep_state = "CLOSED"
         self.assertEqual(self.job.dependency_state(7, {}), "failed")
+
+    def test_a_missing_dependency_issue_is_failed_and_the_queue_goes_on(self):
+        self.dep_state = self.job.Refused(
+            "`gh issue view 7 --json state` failed after 3 attempts: GraphQL: Could not resolve to an issue "
+            "or pull request with the number of 7. (repository.issue)")
+        self.assertEqual(self.job.dependency_state(7, {}), "failed")
+        self.assertEqual(self.row(9)[0], "new")
+
+    def test_a_pull_request_number_is_failed(self):
+        self.dep_state = "MERGED"
+        self.assertEqual(self.job.dependency_state(7, {}), "failed")
+
+    def test_other_lookup_errors_propagate(self):
+        self.dep_state = self.job.Refused("`gh issue view 7 --json state` failed after 3 attempts: timed out")
+        with self.assertRaises(self.job.Refused):
+            self.job.dependency_state(7, {})
 
 
 PLAN = "# Widget plan\n\n### Task 1: Spin\n\n### Task 2: Stop\n\n### Task 3: Wobble\n"
@@ -95,6 +113,12 @@ class PlannedPartTest(BudgetCase):
         self.dep["stage"] = "failed"
         out, job = self.planned("part: 2/2\ntasks: 2-3\ndepends: #5\n")
         self.assertIn("part 1 (#5) didn't merge; re-plan or remove the dependency", out)
+        self.assertEqual(job["stage"], "needs-human")
+
+    def test_pending_dependency_is_refused(self):
+        self.dep["stage"] = "pending"
+        out, job = self.planned("part: 2/2\ntasks: 2-3\ndepends: #5\n")
+        self.assertIn("PLANNED: REFUSED part 1 (#5) hasn't merged yet", out)
         self.assertEqual(job["stage"], "needs-human")
 
 
