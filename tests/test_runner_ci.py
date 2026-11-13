@@ -164,6 +164,45 @@ class StateTest(CiCase):
         self.assertFalse(self.call(self.runner.save_state))
         self.assertEqual(git(self.tmp, "--git-dir", str(self.origin), "branch", "--list", "factory-state"), "")
 
+    def ext_rewrite(self, marker):
+        """Config a session could set so that talking to origin runs `touch marker` through the ext transport."""
+        git(self.p.root, "config", "protocol.allow", "always")
+        git(self.p.root, "config", f"url.ext::sh -c touch% {marker}% #.insteadOf", str(self.origin))
+
+    def test_git_safe_disables_the_ext_transport_even_when_config_enables_it(self):
+        marker = self.tmp / "ext-ran"
+        self.ext_rewrite(marker)
+        self.runner.git("ls-remote", "--heads", "origin")
+        self.runner.git("push", "-q", "origin", "HEAD:refs/heads/factory-state")
+        self.assertFalse(marker.exists())
+
+    def test_save_refuses_transport_and_url_rewrites(self):
+        marker = self.tmp / "ext-ran"
+        self.write("001-a/job.json", "{}")
+        self.ext_rewrite(marker)
+        self.assertFalse(self.call(self.runner.save_state))
+        self.assertFalse(marker.exists())
+        git(self.p.root, "config", "--unset", "protocol.allow")
+        self.assertFalse(self.call(self.runner.save_state))  # the insteadOf alone is refused too
+        self.assertIn(".insteadof", (self.p.root / "factory/jobs/runner.log").read_text())
+        git(self.p.root, "config", "--remove-section", f"url.ext::sh -c touch% {marker}% #")
+        for key, value in (("remote.origin.pushurl", "ext::sh -c true"), ("remote.origin.vcs", "x"),
+                           ("url.https://example.com/.pushinsteadof", "git@example.com:")):
+            with self.subTest(key=key):
+                git(self.p.root, "config", key, value)
+                self.assertFalse(self.call(self.runner.save_state))
+                self.assertIn(f"sets {key}", (self.p.root / "factory/jobs/runner.log").read_text())
+                git(self.p.root, "config", "--unset", key)
+        self.assertTrue(self.call(self.runner.save_state))  # an https or path origin is fine
+
+    def test_save_refuses_when_factory_jobs_is_a_symlink(self):
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "config").write_text("not job state")
+        (self.p.root / "factory/jobs").symlink_to(elsewhere)
+        self.assertFalse(self.call(self.runner.save_state))
+        self.assertEqual(git(self.tmp, "--git-dir", str(self.origin), "branch", "--list", "factory-state"), "")
+
 
 FAKE_GH = f"#!{sys.executable}\nimport sys\nsys.stdout.write('[]')\n"
 
