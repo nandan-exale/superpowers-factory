@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import os
 import plistlib
@@ -306,11 +308,14 @@ class LaunchAgentTest(RunnerCase):
         self.assertIn("not loaded", res.stdout)
         self.assertIn(" idle", res.stdout)
 
-    @unittest.skipIf(sys.platform == "darwin", "non-macOS behavior")
-    def test_install_outside_macos_refuses(self):
-        res = self.runner("install")
-        self.assertEqual(res.returncode, 1)
-        self.assertIn("launchd only", res.stderr)
+    def test_install_without_a_scheduler_refuses(self):
+        module = load_script("runner_no_scheduler", self.p.root / "factory/bin/runner")
+        module.platform_name = lambda: "Windows"
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as exit_:
+            module.cmd_install(False)
+        self.assertEqual(exit_.exception.code, 1)
+        self.assertIn("no scheduler for Windows", err.getvalue())
 
 
 class SecurityTest(RunnerCase):
