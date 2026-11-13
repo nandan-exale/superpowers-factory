@@ -13,6 +13,15 @@ class DashboardTest(unittest.TestCase):
         self.assertIn("jobs/report.json", self.html)
         self.assertIn("$('strip').hidden = true", self.html)
 
+    def test_strip_says_day_for_a_one_day_report(self):
+        self.assertIn("day${r.days === 1 ? '' : 's'}", self.html)
+
+    def test_strip_lines_up_with_the_board_and_uses_the_line_token(self):
+        rule = self.html[self.html.index("  .strip {"):]
+        rule = rule[:rule.index("}")]
+        self.assertIn("padding: 6px 32px", rule)
+        self.assertIn("var(--line)", rule)
+
     def test_pause_toggle(self):
         self.assertIn('id="pause"', self.html)
         self.assertIn("if (paused) return", self.html)
