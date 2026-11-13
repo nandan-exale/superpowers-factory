@@ -2,6 +2,12 @@
   "concurrency": 3,
   "max_rounds": 3,
   "budgets": { "job_usd": 25, "job_hours": 6, "daily_usd": 100 },
+  "learning": {
+    "threshold": 3,
+    "window_days": 30,
+    "tags": ["missing-test", "weakened-test", "error-handling", "convention", "docs-not-updated",
+             "dead-code", "spec-gap", "input-validation", "secrets", "a11y", "ui-consistency"]
+  },
   "runner": { "interval_minutes": 15, "max_minutes": 120, "keychain_service": "factory-claude-token" },
   "base_branch": "main",
   "merge_method": "merge",
@@ -9,7 +15,8 @@
     "queue": "factory",
     "needs_info": "factory:needs-info",
     "needs_human": "factory:needs-human",
-    "planned": "factory:planned"
+    "planned": "factory:planned",
+    "learning": "factory:learning"
   },
   "pr_feedback": {
     "allowed": []
@@ -17,7 +24,8 @@
   "model_aliases": ["fable", "opus", "sonnet", "haiku"],
   "effort_levels": ["low", "medium", "high", "xhigh", "max"],
   "agents": {
-    "intake": { "model": "fable", "effort": "high" }
+    "intake": { "model": "fable", "effort": "high" },
+    "learner": { "model": "opus", "effort": "high" }
   },
   "routing": {
     "low": {
