@@ -1,4 +1,5 @@
 import contextlib
+import http.server
 import io
 import json
 import os
@@ -6,6 +7,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -65,10 +67,22 @@ class WorkflowTest(CiCase):
             self.out(self.runner.cmd_workflow, "latest")
 
 
+class AskForCredentials(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="r"')
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    do_POST = do_GET
+
+    def log_message(self, *args):
+        pass
+
+
 class StateTest(CiCase):
     def call(self, fn):
-        with mock.patch.dict(os.environ, {"GIT_TERMINAL_PROMPT": "0"}):
-            return fn()
+        return fn(str(self.origin))
 
     def state_log(self):
         return git(self.tmp, "--git-dir", str(self.origin), "log", "--format=%H %P", "factory-state").splitlines()
@@ -106,7 +120,7 @@ class StateTest(CiCase):
         self.assertEqual(len(log), 2)
         self.assertEqual(log[0].split()[1], log[1].split()[0])  # new commit's parent is the old one
 
-    def test_a_rejected_push_is_retried_on_the_new_parent(self):
+    def test_a_save_builds_on_whatever_origin_has_now(self):
         self.write("001-a/job.json", "{}")
         self.call(self.runner.restore_state)
         self.call(self.runner.save_state)
@@ -123,6 +137,18 @@ class StateTest(CiCase):
         self.assertEqual(parent, git(other, "rev-parse", "HEAD").strip())
         self.assertIn("002-b/job.json", self.state_files())
 
+    def test_a_rejected_push_is_fetched_rebuilt_and_retried_once(self):
+        hook = self.origin / "hooks" / "pre-receive"
+        hook.parent.mkdir(exist_ok=True)
+        hook.write_text(f"#!/bin/sh\n[ -e {self.tmp}/seen ] && exit 0\ntouch {self.tmp}/seen\nexit 1\n")
+        hook.chmod(0o755)
+        self.write("001-a/job.json", "{}")
+        self.assertTrue(self.call(self.runner.save_state))
+        self.assertTrue((self.tmp / "seen").exists())
+        self.assertEqual(self.state_files(), ["001-a/job.json"])
+        hook.write_text("#!/bin/sh\nexit 1\n")
+        self.assertFalse(self.call(self.runner.save_state))  # rejected twice
+
     def test_restore_refuses_unsafe_paths(self):
         bad = self.tmp / "bad.tar"
         with tarfile.open(bad, "w") as tar:
@@ -132,42 +158,102 @@ class StateTest(CiCase):
         with self.assertRaises(ValueError):
             self.runner.extract_state(bad.read_bytes(), self.p.root / "factory/jobs")
 
-    def test_state_commit_runs_no_filter_or_signing_program_from_local_config(self):
-        filter_ran, gpg_ran = self.tmp / "filter-ran", self.tmp / "gpg-ran"
-        fake_gpg = self.tmp / "fake-gpg"
-        fake_gpg.write_text(f"#!/bin/sh\ntouch {gpg_ran}\nexit 1\n")
-        fake_gpg.chmod(0o755)
-        git(self.p.root, "config", "filter.x.clean", f"touch {filter_ran}; cat")
-        git(self.p.root, "config", "commit.gpgsign", "true")
-        git(self.p.root, "config", "gpg.program", str(fake_gpg))
-        self.write(".gitattributes", "* filter=x\n")
-        self.write("001-a/job.json", "{}")
-        commit = self.runner.state_commit(self.runner.state_files(), "")
-        self.assertFalse(filter_ran.exists())
-        self.assertFalse(gpg_ran.exists())
-        self.assertEqual(git(self.p.root, "show", f"{commit}:001-a/job.json"), "{}")
-
     def test_symlinks_are_not_saved(self):
         secret = self.tmp / "outside.txt"
         secret.write_text("not job state")
         self.write("001-a/job.json", "{}")
         (self.p.root / "factory/jobs/001-a/link").symlink_to(secret)
         self.assertEqual(self.runner.state_files(), ["001-a/job.json"])
+        self.assertIsNone(self.runner.read_state_file("001-a/link"))
 
-    def test_save_refuses_when_the_clone_could_run_code_through_git(self):
-        self.write("001-a/job.json", "{}")
-        for key, value in (("filter.x.clean", "cat"), ("credential.helper", "!true")):
+    def test_odd_file_names_are_saved_as_they_are(self):
+        for name in ('a "quoted" name.md', "back\\slash.md", "new\nline.md", "caf\u00e9.md"):
+            self.write(f"001-a/{name}", name)
+        self.assertTrue(self.call(self.runner.save_state))
+        import shutil
+        shutil.rmtree(self.p.root / "factory/jobs")
+        self.assertTrue(self.call(self.runner.restore_state))
+        for name in ('a "quoted" name.md', "back\\slash.md", "new\nline.md", "caf\u00e9.md"):
+            self.assertEqual((self.p.root / "factory/jobs/001-a" / name).read_text(), name)
+
+    def plant(self, route, marker):
+        """Config a session could leave in the checkout so that git run there executes `touch marker`.
+        Returns the keys and sections to remove afterwards."""
+        script = self.tmp / "evil"
+        script.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+        script.chmod(0o755)
+        if route == "filter clean":
+            self.write(".gitattributes", "* filter=x\n")
+            keys = {"filter.x.clean": f"touch {marker}; cat", "filter.x.smudge": f"touch {marker}; cat"}
+        elif route == "credential helper":
+            server = http.server.HTTPServer(("127.0.0.1", 0), AskForCredentials)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.addCleanup(server.server_close)
+            self.addCleanup(server.shutdown)
+            keys = {"credential.helper": f"!touch {marker}", "protocol.allow": "always",
+                    f"url.http://127.0.0.1:{server.server_port}/r.git.insteadOf": str(self.origin)}
+        elif route == "ext:: via insteadOf":
+            keys = {"protocol.allow": "always", f"url.ext::sh -c touch% {marker}% #.insteadOf": str(self.origin)}
+        elif route == "core.gitProxy":
+            keys = {"core.gitProxy": str(script), "url.git://example.invalid/r.insteadOf": str(self.origin)}
+        else:  # core.alternateRefsCommand
+            alternate = self.tmp / "alternate-objects"
+            alternate.mkdir(exist_ok=True)
+            (self.p.git_dir / "objects" / "info").mkdir(exist_ok=True)
+            (self.p.git_dir / "objects" / "info" / "alternates").write_text(f"{alternate}\n")
+            keys = {"core.alternateRefsCommand": f"touch {marker}"}
+        for key, value in keys.items():
+            git(self.p.root, "config", key, value)
+        return keys
+
+    ROUTES = ("filter clean", "credential helper", "ext:: via insteadOf", "core.gitProxy", "core.alternateRefsCommand")
+
+    def test_no_route_in_the_checkout_runs_anything_during_save_or_restore(self):
+        for route in self.ROUTES:
+            with self.subTest(route=route):
+                marker = self.tmp / f"ran-{route.split()[0]}"
+                keys = self.plant(route, marker)
+                self.write("001-a/job.json", json.dumps(route))
+                self.assertTrue(self.call(self.runner.save_state))
+                self.assertTrue(self.call(self.runner.restore_state))
+                self.assertTrue(self.call(self.runner.save_state))  # a second save fetches a parent first
+                self.assertFalse(marker.exists())
+                self.assertEqual(git(self.tmp, "--git-dir", str(self.origin), "show", "factory-state:001-a/job.json"),
+                                 json.dumps(route))
+                for key in keys:
+                    git(self.p.root, "config", "--unset", key)
+
+    def test_state_git_reads_no_config_from_the_checkout(self):
+        for route in self.ROUTES:
+            self.plant(route, self.tmp / "ran")
+        with self.runner.state_repo(str(self.origin)) as g:
+            shown = g("config", "--list", "--show-origin").stdout.decode()
+            git_dir = g("rev-parse", "--absolute-git-dir").stdout.decode().strip()
+        self.assertNotIn(str(self.p.root), shown)
+        self.assertNotIn(str(self.p.root), git_dir)
+        for key in ("filter.", "credential.", "gpg.", "core.gitproxy", "core.alternaterefscommand", "url.",
+                    "protocol.allow=always"):
+            self.assertNotIn(key, shown)
+        self.assertIn("protocol.allow=never", shown)
+
+    def test_github_token_authenticates_an_https_origin_only(self):
+        with mock.patch.dict(os.environ, {"GH_TOKEN": "pat-123"}):
+            auth = self.runner.state_auth("https://github.com/o/r")
+            self.assertEqual(list(auth), ["http.https://github.com/o/r.extraheader"])
+            self.assertTrue(auth["http.https://github.com/o/r.extraheader"].startswith("AUTHORIZATION: basic "))
+            self.assertEqual(self.runner.state_auth(str(self.origin)), {})
+        self.assertEqual(self.runner.state_auth("https://github.com/o/r"), {})
+
+    def test_risky_local_key_flags_transport_proxy_and_url_rewrites(self):
+        for key, value in (("protocol.allow", "always"), ("url.ext::sh.insteadof", "x"),
+                           ("url.https://example.com/.pushinsteadof", "git@example.com:"),
+                           ("remote.origin.pushurl", "ext::sh -c true"), ("remote.origin.vcs", "x"),
+                           ("core.gitproxy", "/bin/true"), ("core.alternaterefscommand", "true")):
             with self.subTest(key=key):
                 git(self.p.root, "config", key, value)
-                self.assertFalse(self.call(self.runner.save_state))
-                self.assertIn(f"sets {key}", (self.p.root / "factory/jobs/runner.log").read_text())
+                self.assertEqual(self.runner.risky_local_key(), key)
                 git(self.p.root, "config", "--unset", key)
-        hook = self.p.git_dir / "hooks" / "pre-push"
-        hook.parent.mkdir(exist_ok=True)
-        hook.write_text("#!/bin/sh\nexit 0\n")
-        hook.chmod(0o755)
-        self.assertFalse(self.call(self.runner.save_state))
-        self.assertEqual(git(self.tmp, "--git-dir", str(self.origin), "branch", "--list", "factory-state"), "")
+        self.assertIsNone(self.runner.risky_local_key())
 
     def ext_rewrite(self, marker):
         """Config a session could set so that talking to origin runs `touch marker` through the ext transport."""
@@ -180,25 +266,6 @@ class StateTest(CiCase):
         self.runner.git("ls-remote", "--heads", "origin")
         self.runner.git("push", "-q", "origin", "HEAD:refs/heads/factory-state")
         self.assertFalse(marker.exists())
-
-    def test_save_refuses_transport_and_url_rewrites(self):
-        marker = self.tmp / "ext-ran"
-        self.write("001-a/job.json", "{}")
-        self.ext_rewrite(marker)
-        self.assertFalse(self.call(self.runner.save_state))
-        self.assertFalse(marker.exists())
-        git(self.p.root, "config", "--unset", "protocol.allow")
-        self.assertFalse(self.call(self.runner.save_state))  # the insteadOf alone is refused too
-        self.assertIn(".insteadof", (self.p.root / "factory/jobs/runner.log").read_text())
-        git(self.p.root, "config", "--remove-section", f"url.ext::sh -c touch% {marker}% #")
-        for key, value in (("remote.origin.pushurl", "ext::sh -c true"), ("remote.origin.vcs", "x"),
-                           ("url.https://example.com/.pushinsteadof", "git@example.com:")):
-            with self.subTest(key=key):
-                git(self.p.root, "config", key, value)
-                self.assertFalse(self.call(self.runner.save_state))
-                self.assertIn(f"sets {key}", (self.p.root / "factory/jobs/runner.log").read_text())
-                git(self.p.root, "config", "--unset", key)
-        self.assertTrue(self.call(self.runner.save_state))  # an https or path origin is fine
 
     def test_save_refuses_when_factory_jobs_is_a_symlink(self):
         elsewhere = self.tmp / "elsewhere"
