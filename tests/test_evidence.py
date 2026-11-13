@@ -173,6 +173,11 @@ class EvidenceTest(BudgetCase):
         self.assertIn("cost $10.00 of $25.00 since the last allowance ($30.00 total)", text)
         self.assertIn("since the last allowance", text.split("time ")[1])
 
+    def test_budget_line_ends_with_cost_by_model(self):
+        self.in_review()
+        text = self.job.evidence_md(self.current())
+        self.assertIn(" h since the last allowance · by model: none\n", text)
+
     def test_evidence_command_without_pr_writes_file_only(self):
         out = self.run_main("evidence", self.job_id)
         self.assertTrue((self.d / "evidence.md").exists())

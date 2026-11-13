@@ -54,6 +54,17 @@ gh issue list --label factory:planned --state open --search "\"<plan path>\" in:
 
 If it prints any issue, link it and stop.
 
+Check the plan for steps a factory job can't do: it works only on its own
+branch in its own worktree.
+
+```bash
+grep -nE 'git tag|git push|--force|git checkout (main|master|"?\$BASE)|git merge' <plan>
+```
+
+If anything matches other than pushing the plan's own feature branch, show
+the lines and say the factory will skip them and list them for the human
+under `## Deviations`. Ask whether to file anyway or fix the plan first.
+
 Then record the commit: `SHA=$(git rev-parse HEAD)`.
 
 ## 3. Propose risk and surfaces
@@ -69,6 +80,12 @@ Read the spec and plan and propose:
 
 Give one line of reasoning for each and ask your human partner to confirm or
 change them. Don't file anything until they confirm.
+
+Then read the ESCALATE lists in `.claude/agents/approver.md` (the general
+list and any "In this project" list). If the plan clearly changes something
+on them, tell your human partner which rule, and that the approver will
+escalate, so the job will stop at needs-human for you to merge. This is
+information only; it doesn't stop the handoff.
 
 ## 4. File the issue
 

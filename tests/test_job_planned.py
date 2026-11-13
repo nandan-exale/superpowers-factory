@@ -87,6 +87,12 @@ class PlannedSuccessTest(PlannedTestCase):
         self.assertEqual(self.load()["agents"]["reviewers"], {"code": {"model": "haiku", "effort": "medium"}})
         self.assertEqual(self.load()["agents"]["builder"], {"model": "opus", "effort": "medium"})
 
+    def test_planned_job_records_its_spec_and_plan_paths(self):
+        self.job.cmd_planned(self.load())
+        self.assertEqual(self.load()["plan_paths"],
+                         ["docs/superpowers/specs/2026-11-12-widget-design.md",
+                          "docs/superpowers/plans/2026-11-12-widget.md"])
+
 
 class PlannedRefusalTest(PlannedTestCase):
     def assert_refused(self, fragment):
