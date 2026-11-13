@@ -96,6 +96,11 @@ def check_config():
             days = digest.get("days", 1)
             if isinstance(days, bool) or not isinstance(days, int) or days <= 0:
                 problems.append(fail("digest.days must be a positive integer"))
+    handoff = cfg.get("handoff")
+    if handoff is not None:
+        cap = handoff.get("max_tasks_per_part") if isinstance(handoff, dict) else None
+        if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
+            problems.append(fail("handoff.max_tasks_per_part must be a positive integer"))
     if not isinstance(cfg.get("agents", {}).get("learner"), dict):
         problems.append(fail("agents.learner missing; expected {model, effort}"))
     return problems

@@ -10,6 +10,7 @@
   },
   "digest": { "enabled": true, "hour": 9, "days": 1 },
   "runner": { "interval_minutes": 15, "max_minutes": 120, "keychain_service": "factory-claude-token" },
+  "handoff": { "max_tasks_per_part": 8 },
   "base_branch": "main",
   "merge_method": "merge",
   "labels": {

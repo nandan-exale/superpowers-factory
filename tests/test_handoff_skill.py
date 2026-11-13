@@ -14,6 +14,12 @@ class HandoffSkillTest(unittest.TestCase):
         self.assertIn(".claude/agents/approver.md", SKILL)
         self.assertIn("will stop at needs-human for you to merge", SKILL)
 
+    def test_splits_large_plans_into_parts(self):
+        text = (Path(__file__).resolve().parents[1] / "skills/factory-handoff/SKILL.md").read_text()
+        for needle in ("handoff.max_tasks_per_part", "part: <k>/<n>", "tasks: <first>-<last>",
+                       "depends: #<previous part's issue>", "(part <k>/<n>)", "one issue per part, in order"):
+            self.assertIn(needle, text)
+
 
 if __name__ == "__main__":
     unittest.main()
