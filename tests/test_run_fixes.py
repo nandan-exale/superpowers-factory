@@ -134,6 +134,14 @@ class MergeTest(BudgetCase):
             self.job.cmd_merge(self.job.load(self.job_id))
         return self.job.load(self.job_id)
 
+    def test_merge_pulls_the_main_checkout(self):
+        self.to_approve()
+        pulled = []
+        self.job.sync_main = lambda: pulled.append(True)
+        job = self.merge()
+        self.assertEqual(job["stage"], "merged")
+        self.assertEqual(pulled, [True])
+
     def test_merge_republishes_evidence_with_the_final_cost_before_merging(self):
         self.cost = 1.0
         self.to_approve()
