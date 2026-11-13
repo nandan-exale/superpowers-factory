@@ -144,5 +144,16 @@ class SessionHookTest(unittest.TestCase):
         self.assertIsNone(self.hook(FACTORY_VENDOR_DIR=str(self.root / "no-such-dir")))
 
 
+class UninstallHintTest(unittest.TestCase):
+    def test_installed_projects_hear_about_uninstall(self):
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader("factory_session_hint", str(HOOK))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        mod = importlib.util.module_from_spec(spec)
+        loader.exec_module(mod)
+        self.assertIn("/factory-uninstall", mod.HANDOFF)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -29,7 +29,8 @@ HANDOFF = (
     "superpowers-factory: this project has the software factory. When superpowers:writing-plans "
     "offers its execution choice, add a third option: \"3. Factory — file this plan as a "
     "factory:planned issue and let the factory build it unattended (/factory-handoff)\". If the user "
-    "picks it, invoke the factory-handoff skill. factory/bin/doctor checks the install."
+    "picks it, invoke the factory-handoff skill. factory/bin/doctor checks the install; "
+    "/factory-uninstall removes it."
 )
 
 
