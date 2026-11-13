@@ -25,6 +25,8 @@ Usage:
   job learn-file <tag>           learner's proposal.md → a factory:learning issue (add `factory` to build it)
   job summary [<job>...]         table of jobs: issue, stage, PR, cost, time
   job costs <job>                cost of the job's agents by model
+  job pause <reason>             stop the queue: nothing starts and nothing merges until `job resume`
+  job resume                     clear the pause (a human runs this once the base branch is fixed)
 
 <job> is a job id (004-dark-mode) or an issue number (12).
 """
@@ -337,6 +339,48 @@ def round_dir(job, n=None):
 
 def reviewers(job):
     return list(job["agents"]["reviewers"])
+
+
+# ---- Pause -----------------------------------------------------------------
+
+PAUSE_FILE = JOBS / "paused.json"
+
+
+def paused():
+    """The pause record, or None. An unreadable file still pauses: only `job resume` clears it."""
+    try:
+        return json.loads(PAUSE_FILE.read_text())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return {"reason": "paused.json is unreadable; run factory/bin/job resume", "job": None, "sha": None,
+                "time": "?"}
+
+
+def pause(reason, job_id=None, sha=None):
+    JOBS.mkdir(parents=True, exist_ok=True)
+    tmp = JOBS / "paused.json.tmp"
+    tmp.write_text(json.dumps({"reason": reason, "job": job_id, "sha": sha, "time": now()}) + "\n")
+    tmp.replace(PAUSE_FILE)
+
+
+def paused_line(p):
+    return f"PAUSED: {p['reason']} (since {p['time']}; run factory/bin/job resume after fixing)"
+
+
+def cmd_pause(reason):
+    require(reason.strip(), "give a reason: factory/bin/job pause <reason>")
+    pause(reason.strip())
+    print(paused_line(paused()))
+
+
+def cmd_resume():
+    p = paused()
+    if not p:
+        print("RESUME: not paused")
+        return
+    PAUSE_FILE.unlink(missing_ok=True)
+    print(f"RESUME: cleared {p['reason']} (since {p['time']})")
 
 
 # ---- Learning ---------------------------------------------------------------
@@ -1118,6 +1162,9 @@ def advance(job, stage):
     old = job["stage"]
     require(stage in TRANSITIONS.get(old, set()) or (stage == "merged" and old not in TERMINAL),
             f"{job['id']}: {old} → {stage} is not a legal transition")
+    if stage == "merging":
+        p = paused()
+        require(not p, f"the queue is paused: {p['reason'] if p else ''}; run factory/bin/job resume first")
     if budgeted_move(old, stage):
         daily = daily_problem()
         require(daily is None, f"{daily}; the job resumes when it drops")
@@ -1362,8 +1409,12 @@ def cmd_queue():
             slots -= 1
         else:
             rows.append(("hold",) + row[1:4] + (f"concurrency {CONCURRENCY} reached",))
-    if daily:
-        rows = [("wait",) + row[1:4] + (daily,) if row[0] in {"resume", "new"} else row for row in rows]
+    hold = paused()
+    if hold:
+        print(paused_line(hold))
+    why = "paused" if hold else daily
+    if why:
+        rows = [("wait",) + row[1:4] + (why,) if row[0] in {"resume", "new"} else row for row in rows]
     for row in rows + other_rows:
         print("\t".join(str(c) for c in row))
 
@@ -1385,6 +1436,8 @@ def sync_main():
 
 
 def cmd_merge(job):
+    p = paused()
+    require(not p, f"the queue is paused: {p['reason'] if p else ''}; run factory/bin/job resume first")
     sync(job)
     if job["stage"] == "approve":
         save(advance(job, "merging"))
@@ -1560,6 +1613,9 @@ def cost_cell(job):
 
 
 def cmd_summary(args):
+    p = paused()
+    if p:
+        print(paused_line(p))
     jobs = [resolve(a) for a in args] if args else all_jobs()
     rows = [("job", "issue", "stage", "round", "pr", "cost", "time")]
     for j in jobs:
@@ -1628,6 +1684,10 @@ def main(argv):
             cmd_summary(args)
         elif cmd == "costs" and len(args) == 1:
             cmd_costs(resolve(args[0]))
+        elif cmd == "pause" and args:
+            cmd_pause(" ".join(args))
+        elif cmd == "resume" and not args:
+            cmd_resume()
         else:
             die(f"bad arguments: {' '.join(argv)}\n\n{__doc__.strip()}")
     except Refused as e:
