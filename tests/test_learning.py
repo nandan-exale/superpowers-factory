@@ -109,5 +109,80 @@ class LearnTest(LearningCase):
         self.assertIn("> The spec was vague.", evidence)
 
 
+class LearnFileTest(LearningCase):
+    def setUp(self):
+        super().setUp()
+        self.issue_calls = []
+
+        def fake_gh(*args):
+            self.issue_calls.append(args)
+            return "https://github.com/o/r/issues/42\n" if args[:2] == ("issue", "create") else ""
+        self.job.gh = fake_gh
+        self.learner_cost = 0.0
+        self.job.cost_for_needle = lambda needle: self.learner_cost
+        d = self.job.tag_dir("missing-test")
+        d.mkdir(parents=True)
+        (d / "evidence.md").write_text("# Recurring finding: missing-test\n\n> a.py:1 add a test @someone\n")
+
+    def propose(self, text):
+        (self.job.tag_dir("missing-test") / "proposal.md").write_text(text)
+
+    def file(self):
+        return self.run_main("learn-file", "missing-test").strip()
+
+    def test_files_issue_with_label_and_evidence(self):
+        self.propose("PROPOSAL: Require a test file per new module\n\n## Problem\nx\n")
+        self.assertEqual(self.file(), "LEARN-FILE: missing-test #42")
+        [call] = [c for c in self.issue_calls if c[:2] == ("issue", "create")]
+        args = dict(zip(call[2::2], call[3::2]))
+        self.assertEqual(args["--title"], "Factory learning: Require a test file per new module")
+        self.assertEqual(args["--label"], "factory:learning")
+        self.assertIn("## Problem", args["--body"])
+        self.assertIn("a.py:1 add a test", args["--body"])
+        self.assertNotIn("@someone", args["--body"])
+        self.assertIn("add the `factory` label", args["--body"])
+        self.assertEqual(self.job.learn_state()["missing-test"]["issue"], 42)
+
+    def test_human_only_proposal(self):
+        self.propose("PROPOSAL: Add a lint step to checks.sh\nHUMAN-ONLY\n\n## Problem\nx\n")
+        self.file()
+        body = dict(zip(self.issue_calls[-1][2::2], self.issue_calls[-1][3::2]))["--body"]
+        self.assertIn("make it by hand", body)
+        self.assertNotIn("add the `factory` label", body)
+
+    def test_proposal_none_records_without_issue(self):
+        self.propose("PROPOSAL: NONE\n\nNo mechanical check would catch these.\n")
+        self.assertEqual(self.file(), "LEARN-FILE: missing-test none")
+        self.assertEqual([c for c in self.issue_calls if c[:2] == ("issue", "create")], [])
+        self.assertTrue(self.job.learn_state()["missing-test"]["none"])
+
+    def test_malformed_proposal_dies_and_files_nothing(self):
+        self.propose("Here is my idea\n")
+        with self.assertRaises(SystemExit):
+            self.file()
+        self.assertEqual(self.job.learn_state(), {})
+
+    def test_learner_cost_is_logged_once_and_counted_daily(self):
+        self.learner_cost = 2.5
+        self.propose("PROPOSAL: X\n\n## Problem\nx\n")
+        self.file()
+        lines = self.job.read_log(self.job.LEARNING / "log.jsonl")
+        self.assertEqual([e["delta_usd"] for e in lines], [2.5])
+        self.assertAlmostEqual(self.job.daily_spend(), 2.5)
+
+    def test_gh_failure_records_nothing(self):
+        def failing_gh(*args):
+            raise self.job.Refused("gh failed")
+        self.job.gh = failing_gh
+        self.propose("PROPOSAL: X\n\n## Problem\nx\n")
+        with self.assertRaises(SystemExit):
+            self.file()
+        self.assertEqual(self.job.learn_state(), {})
+
+    def test_agent_settings_for_learner(self):
+        out = self.run_main("agent", "missing-test", "learner").strip()
+        self.assertEqual(out, "model=opus effort=high")
+
+
 if __name__ == "__main__":
     unittest.main()
