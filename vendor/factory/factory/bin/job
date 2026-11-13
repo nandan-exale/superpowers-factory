@@ -1341,6 +1341,22 @@ def cmd_queue():
         print("\t".join(str(c) for c in row))
 
 
+def sync_main():
+    """Fast-forward the main checkout to origin/<base> after a merge, when that's safe.
+    Otherwise print a NOTE: a stale checkout must never fail a merge that already happened."""
+    try:
+        branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], check=False).stdout.strip()
+        if branch != BASE:
+            print(f"NOTE: main checkout is on {branch or 'an unknown branch'}, not {BASE}; not pulled")
+        elif run(["git", "status", "--porcelain", "--untracked-files=no"], check=False).stdout.strip():
+            print("NOTE: main checkout has local changes; not pulled")
+        elif (run_net(["git", "fetch", "origin", BASE], check=False).returncode != 0
+              or run(["git", "merge", "--ff-only", "-q", f"origin/{BASE}"], check=False).returncode != 0):
+            print(f"NOTE: {BASE} can't fast-forward to origin/{BASE}; not pulled")
+    except OSError as e:
+        print(f"NOTE: main checkout not pulled: {e}")
+
+
 def cmd_merge(job):
     sync(job)
     if job["stage"] == "approve":
@@ -1387,6 +1403,7 @@ def cmd_merge(job):
     run(["git", "push", "origin", "--delete", job["branch"]], check=False)
     save(advance(sync(job), "merged"))
     print(f"{job['id']}: merged PR #{job['pr']}")
+    sync_main()
 
 
 def cmd_escalate(job, why):
