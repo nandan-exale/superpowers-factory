@@ -386,6 +386,26 @@ file say so, and are yours to make.
 - **Credentials.** The runner's token stays in your Keychain and is kept away
   from the commands agents run.
 
+### After the merge
+
+- **Watching the base branch.** After each merge the factory watches the
+  workflow runs on the merged commit (`watch` in `factory/config.json`). If
+  one fails, it pauses the queue, opens a `Revert "<title>"` PR labeled
+  `factory:revert`, and comments on the original PR and issue. It never merges
+  the revert. Merge it or fix forward, then run `factory/bin/job resume`.
+- **Pausing by hand.** `factory/bin/job pause <reason>` stops new work and
+  merges; `factory/bin/job resume` clears it. `doctor`, `job summary` and the
+  dashboard show the pause.
+- **Risky changes.** A PR that changes files matching `risky_paths`
+  (dependencies, lock files, CI workflows, Dockerfiles, Terraform) is reviewed
+  as usual but stops before merging. Review it, add `factory:risk-ok` to the
+  issue and run `/factory run` again, or merge it yourself. The label covers
+  the commit you reviewed: if the branch changes again, it stops again.
+- **Secrets.** The builder pushes with `factory/bin/job push`, which refuses
+  to push added lines that look like private keys or tokens. The gate scans
+  again; a hit there stops the job and asks you to rotate the secret. This is a
+  backstop, not a replacement for GitHub secret scanning.
+
 Good to know:
 
 - Your project's tests run with full network and disk access when the gate

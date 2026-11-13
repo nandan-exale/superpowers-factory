@@ -259,8 +259,8 @@ CHORE_SECONDS = 120
 
 
 def chores():
-    """Report and digest: no Claude session, so they run every tick. Their failures never fail the tick."""
-    for args in (["report", "--write"], ["digest"]):
+    """Watch, report and digest: no Claude session, so they run every tick. Their failures never fail the tick."""
+    for args in (["watch"], ["report", "--write"], ["digest"]):
         try:
             subprocess.run([sys.executable, str(FACTORY / "bin" / "job"), *args], cwd=REPO,
                            capture_output=True, text=True, timeout=CHORE_SECONDS)
