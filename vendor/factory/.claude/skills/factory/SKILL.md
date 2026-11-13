@@ -193,7 +193,11 @@ then moves the job to `merged`; stop any agents still running for it.
 
 ## /factory run
 
-1. Run `factory/bin/job queue`. Each line is `action  issue  job  stage  note`:
+1. Run `factory/bin/job watch`. Report every line except `WATCH: off`. A
+   `WATCH: <id> red` line means the base branch failed after that job merged:
+   the script has paused the queue and opened a revert PR (or said why not).
+   Tell the user; never merge the revert PR yourself.
+2. Run `factory/bin/job queue`. Each line is `action  issue  job  stage  note`:
    `resume` (pick it up from its stage), `new` (no job yet), `hold` (no free
    slot), `wait` (needs the author or you) or `skip`. The script enforces
    `concurrency`: every job in a running stage holds a slot, and only as many
@@ -201,13 +205,17 @@ then moves the job to `merged`; stop any agents still running for it.
    `new` or `resume`; the rest are `hold`. `job create` and the
    `needs-info → intake` move refuse when no slot is free. A failing `gh`
    call stops `job queue`; fix it and run again. `wait` lines whose note starts with `daily budget` mean the daily cap is reached: start nothing.
-2. Start every `resume` and `new` line, nothing else. Don't judge issues
+   If its first line starts with `PAUSED:`, start nothing: tell the user the
+   reason and that `factory/bin/job resume` clears it once the base branch is
+   fixed. Finish any agents already running, but `job merge` refuses while
+   paused.
+3. Start every `resume` and `new` line, nothing else. Don't judge issues
    yourself: every new issue goes to intake, which decides whether it gets
    built. For a new issue, `factory/bin/job create <n>` prints the job id;
    start it at **intake**.
-3. Each time a job finishes, run `factory/bin/job queue` again and start its
+4. Each time a job finishes, run `factory/bin/job queue` again and start its
    `resume` lines you aren't already running and its `new` lines.
-4. **Learning.** When nothing is queued or running, and the run didn't end on
+5. **Learning.** When nothing is queued or running, and the run didn't end on
    a daily-budget wait, run `factory/bin/job learn`. For each
    `LEARN: <tag> (<n> jobs) <path>` line, spawn `learner` with the model and
    effort from `factory/bin/job agent <tag> learner`, and a prompt that starts
@@ -216,7 +224,7 @@ then moves the job to `merged`; stop any agents still running for it.
    learner's cost is found), then the tag. When it replies, run
    `factory/bin/job learn-file <tag>`. `factory:learning` issues wait for a
    human to add the `factory` label; never add it yourself.
-5. Print `factory/bin/job summary <ids>` for the jobs this run touched, with
+6. Print `factory/bin/job summary <ids>` for the jobs this run touched, with
    each `LEARN-FILE:` line, then list what waits on a human: PRs to
    review (merge one to approve it, or give feedback with `/factory`) and
    questions waiting on authors.
@@ -236,6 +244,9 @@ A `needs-human` job with `PR feedback` shows as `resume`: run
 **build** with `PR comments arrived: read <every file pr-feedback printed> and address them, push, and update build.md for round <N>.`
 `job merge` refuses to merge past unhandled PR comments: it moves the job to
 `needs-human`, and the next `job queue` shows it as `resume`.
+A `needs-human` job with the note `factory:risk-ok added` was stopped at merge
+for risky changes, and a human has since approved them: run
+`factory/bin/job advance <id> merging`, then `factory/bin/job merge <id>`.
 
 ## /factory run <n>
 
@@ -285,6 +296,8 @@ new feature, ask.
 - **An answer to a `needs-info` question**: post their words on the issue with
   `gh issue comment <n> --body "<their answer>"`, then
   `factory/bin/job advance <id> intake` and go to **intake**.
+- **Resuming the queue** after a pause: only when the user asks, run
+  `factory/bin/job resume` and show its `RESUME:` line.
 - **A new feature**: create the issue, then do **/factory run <n>** with the
   new number:
 
