@@ -172,3 +172,30 @@ class TickCiTest(CiCase):
         run_claude.assert_not_called()
         self.assertIn("CLAUDE_CODE_OAUTH_TOKEN isn't set; add the FACTORY_CLAUDE_TOKEN secret",
                       (self.p.root / "factory/jobs/runner.log").read_text())
+
+
+class DoctorCiTest(CiCase):
+    def setUp(self):
+        super().setUp()
+        self.doctor = load_script(f"doctor_ci_{id(self)}", self.p.root / "factory/bin/doctor")
+        self.doctor.CI = True
+        self.answers = {}
+        self.doctor.gh_api = lambda gh, path: self.answers.get(path.rsplit("/", 1)[-1])
+
+    def test_unprotected_state_branch_and_workflow_present_pass(self):
+        self.p.write(".github/workflows/factory-runner.yml", "name: factory-runner\n")
+        self.assertEqual(self.doctor.ci_state_checks(), [])
+
+    def test_protection_and_blocking_rules_fail(self):
+        self.answers = {"protection": {"url": "x"}, "factory-state": [{"type": "non_fast_forward"}]}
+        problems = self.doctor.ci_state_checks()
+        self.assertIn(("FAIL", "factory-state is protected; the Actions runner must be able to push it"), problems)
+        self.assertIn(("FAIL", "rules on factory-state block the runner (non_fast_forward)"), problems)
+        self.assertIn(("WARN", "no Actions workflow; /factory-install writes it"), problems)
+
+    def test_check_runner_swaps_token_and_scheduler_checks_for_state_checks(self):
+        with mock.patch.object(self.doctor, "platform_name", return_value="Linux"), \
+                mock.patch.dict(os.environ, {"PATH": str(self.tmp / "nothing")}):
+            messages = [message for _, message in self.doctor.check_runner()]
+        self.assertIn("no Actions workflow; /factory-install writes it", messages)
+        self.assertFalse([m for m in messages if "token" in m or "timer" in m or "linger" in m or "bwrap" in m], messages)
