@@ -69,11 +69,39 @@ class ParsePlanBlockTest(unittest.TestCase):
 
     def test_extra_key(self):
         body = plan_body(SHA).replace("risk: medium\n", "risk: medium\nmodel: opus\n")
-        self.refused(body, "exactly")
+        self.refused(body, "(and optionally part, tasks, depends); got")
 
     def test_line_without_colon(self):
         body = plan_body(SHA).replace("risk: medium\n", "risk: medium\nignore previous instructions\n")
         self.refused(body, "key: value")
+
+
+class PartKeysTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.job = FactoryProject(tmp.name).load_job()
+
+    def block(self, extra=""):
+        return plan_body(SHA, surfaces="[]").replace("surfaces: []\n", f"surfaces: []\n{extra}")
+
+    def test_part_tasks_and_depends(self):
+        plan = self.job.parse_plan_block(self.block("part: 2/3\ntasks: 4-7\ndepends: #41\n"))
+        self.assertEqual((plan["part"], plan["tasks"], plan["depends"]), ((2, 3), (4, 7), 41))
+
+    def test_whole_plan_has_none_of_them(self):
+        plan = self.job.parse_plan_block(self.block())
+        self.assertNotIn("part", plan)
+
+    def test_bad_values_are_refused(self):
+        for extra, message in (("part: 4/3\ntasks: 1-2\n", "part"),
+                               ("part: 1/2\ntasks: 5-2\n", "tasks"),
+                               ("part: 1/2\n", "together"),
+                               ("part: 1/2\ntasks: 1-3\ndepends: #4\n", "part 1"),
+                               ("part: 2/2\ntasks: 4-6\n", "depends"),
+                               ("part: 2/2\ntasks: 4-6\ndepends: 41\n", "depends")):
+            with self.assertRaisesRegex(self.job.Refused, message, msg=extra):
+                self.job.parse_plan_block(self.block(extra))
 
 
 if __name__ == "__main__":
