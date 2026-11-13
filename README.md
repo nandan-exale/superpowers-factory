@@ -92,6 +92,22 @@ deletion); `factory/bin/doctor` warns when it's missing. Know what's left:
   the base branch, so review those changes like any other; it runs on the
   next tick.
 
+## Learning loop
+
+Reviewers tag every finding (`[missing-test]`, `[error-handling]`, …; the list
+is `learning.tags` in `factory/config.json`). At the end of a run,
+`factory/bin/job learn` finds tags raised in `learning.threshold` or more jobs
+within `learning.window_days`; the `learner` agent drafts the smallest
+mechanical fix (a lint rule, a structural test, a check script, or an
+AGENTS.md rule), and `job learn-file` files it as a `factory:learning` issue.
+Add the `factory` label to have the factory build it. Proposals that need a
+protected file say so and are yours to make.
+
+The plugin ships the
+[agents-best-practices](https://github.com/DenisSergeevitch/agents-best-practices)
+skill (MIT, by Denis Sergeevitch), vendored unmodified in
+`skills/agents-best-practices/`; the learner uses it.
+
 ## PR comments
 
 Comments on a factory PR reach the job's builder without `/factory`. The

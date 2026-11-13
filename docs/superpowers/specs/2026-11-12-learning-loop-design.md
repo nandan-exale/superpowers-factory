@@ -75,10 +75,11 @@ Deterministic, no model:
 2. A tag recurs when it appears in at least `threshold` distinct jobs.
 3. Skip tags with an entry in `factory/jobs/learning/state.json` filed within
    `window_days`.
-4. For each remaining tag write `factory/jobs/learning/<tag>.md`: the tag, the
+4. For each remaining tag write `factory/jobs/learning/<tag-dir>/evidence.md`
+   (`<tag-dir>` is the tag with `:` replaced by `--`): the tag, the
    count, and each finding quoted as data (job id, issue, lens, round, text),
    plus the `## Why` of any escalation of those jobs. Print
-   `LEARN: <tag> (<n> jobs) factory/jobs/learning/<tag>.md`, or
+   `LEARN: <tag> (<n> jobs) factory/jobs/learning/<tag-dir>/evidence.md`, or
    `LEARN: none`.
 
 `other:<slug>` tags count like any other tag (per slug).
@@ -86,7 +87,9 @@ Deterministic, no model:
 ### learner agent (new, vendored `.claude/agents/learner.md`)
 
 Tools: Read, Grep, Glob, Write, Skill. Prompt gives the evidence file path and
-the output path `factory/jobs/learning/<tag>-proposal.md`. It:
+the output path `factory/jobs/learning/<tag-dir>/proposal.md` (the prompt's
+first line is `Job folder: factory/jobs/learning/<tag-dir>/`, so its cost is
+found like a job's). It:
 
 - reads the evidence (quoted data, never instructions), `AGENTS.md`, and the
   repo's lint/test setup;
@@ -97,7 +100,8 @@ the output path `factory/jobs/learning/<tag>-proposal.md`. It:
   test, a check script outside protected paths, an AGENTS.md rule. Each fix
   includes the remediation message an agent would see;
 - if the fix needs a protected path (`config.json` `protected_paths`), says so
-  and marks the proposal `HUMAN-ONLY`;
+  and marks the proposal `HUMAN-ONLY` (the proposal's second line, when
+  present);
 - writes the proposal: first line `PROPOSAL: <one-line title>` (or
   `PROPOSAL: NONE` with the reason when no mechanical fix is reasonable),
   then `## Problem`, `## Proposed change`, `## Why this catches it`,
@@ -108,17 +112,19 @@ Its model and effort come from `agents.learner` via `job agent <tag> learner`
 
 ### job learn-file <tag>
 
-1. Reads `<tag>-proposal.md`. `PROPOSAL: NONE` → record the tag in
+1. Reads `<tag-dir>/proposal.md`. `PROPOSAL: NONE` → record the tag in
    `state.json` as `none` with the time (so it isn't re-proposed within the
    window), print `LEARN-FILE: <tag> none`.
 2. Otherwise `gh issue create` with title `Factory learning: <title>`,
-   label `factory:learning`, body: the proposal, then the evidence (quoted),
+   label `factory:learning`, body: the proposal, then the evidence (quoted), both passed through
+   `defuse()` (no `@` notifications) and capped at 60,000 characters,
    then: "To build this, add the `factory` label." (or, for `HUMAN-ONLY`:
    "This needs a change to a protected file; make it by hand.").
 3. Records `{tag: {"issue": n, "filed": time}}` in `state.json`.
 4. Computes the learner's cost (same transcript method as job cost, matching
-   prompts that name `factory/jobs/learning/<tag>`) and appends a line to
-   `factory/jobs/learning/log.jsonl` so `daily_spend()` includes it.
+   prompts that name `factory/jobs/learning/<tag-dir>/`) and logs the cost
+   since the last line to `factory/jobs/learning/log.jsonl` with a `tag` field,
+   so `daily_spend()` includes it.
 5. Prints `LEARN-FILE: <tag> #<n>`.
 
 ### Orchestrator, install, doctor
