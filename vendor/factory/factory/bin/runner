@@ -217,6 +217,19 @@ def cost_of(path):
         return "?"
 
 
+CHORE_SECONDS = 120
+
+
+def chores():
+    """Watch: no Claude session, so it runs every tick. Its failures never fail the tick."""
+    for args in (["watch"],):
+        try:
+            subprocess.run([sys.executable, str(FACTORY / "bin" / "job"), *args], cwd=REPO,
+                           capture_output=True, text=True, timeout=CHORE_SECONDS)
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # the next tick tries again
+
+
 def cmd_tick():
     try:
         base, runner = load_config()
@@ -249,6 +262,7 @@ def cmd_tick():
     if pull.returncode != 0:
         log(f"skipped: pull failed: {first_line(pull.stderr)}")
         return 0
+    chores()
     try:
         work = has_work()
     except RuntimeError as exc:
