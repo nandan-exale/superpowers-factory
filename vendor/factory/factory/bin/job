@@ -90,6 +90,7 @@ NET_WAITS = (0, 2, 5)
 NET_TIMEOUT = 120
 READ_ONLY_GH = {"view", "list", "status", "checks", "diff"}
 GH_API_WRITE_FLAGS = {"-X", "--method", "-f", "-F", "--field", "--raw-field", "--input"}
+GH_API_WRITE_SHORT = ("-X", "-f", "-F")  # also glued to their value: -XPOST, -fkey=val
 NET_GIT = {"fetch", "push", "ls-remote"}
 
 
@@ -112,7 +113,8 @@ def run_net(cmd, cwd=REPO, check=True):
 def gh_read_only(args):
     """True for gh calls that only read, so repeating one can't create or change anything."""
     if args[:1] == ("api",):  # gh api defaults to POST once a field is given
-        return not any(a.split("=", 1)[0] in GH_API_WRITE_FLAGS or a.startswith("-X") for a in args[1:])
+        return not any(a.split("=", 1)[0] in GH_API_WRITE_FLAGS or a.startswith(GH_API_WRITE_SHORT)
+                       for a in args[1:])
     return len(args) > 1 and args[1] in READ_ONLY_GH
 
 
