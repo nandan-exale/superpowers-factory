@@ -1,0 +1,9 @@
+{
+  "title": "Document the --help output in the README",
+  "issue_body": "The README doesn't show what `--help` prints. Add a short usage section with the current output.",
+  "labels": ["factory"],
+  "config_patch": {},
+  "drive": "runner",
+  "expect": {"stage_not": ["intake"], "runner_log_contains": "ran exit="},
+  "timeout_minutes": 45
+}

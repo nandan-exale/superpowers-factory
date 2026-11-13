@@ -26,6 +26,10 @@ RESULTS = PLUGIN / "e2e-results"
 NUMBERED = re.compile(r"\s*\d+\.\s+(.*)")
 TAGGED = re.compile(r"\[([^\]\s]+)\]\s*(.*)", re.S)
 TAG_NAME = re.compile(r"(?:other:)?[a-z0-9]+(?:-[a-z0-9]+)*")
+SCENARIO_KEYS = {"title", "issue_body", "labels", "config_patch", "expect", "timeout_minutes", "drive"}
+EXPECT_KEYS = {"stage", "stage_not", "decision_prefix", "budget_stopped", "review_tags_valid", "min_findings",
+               "tags_any", "issue_labels", "pr_state", "files", "first_lines", "stdout_contains",
+               "learning_issue", "runner_log_contains"}
 
 
 class Refused(Exception):
@@ -243,3 +247,37 @@ def outside_checks(expect, ctx):
 def check_expect(expect, ctx):
     """Failure messages, empty when every `expect` key holds."""
     return job_checks(expect, ctx) + review_checks(expect, ctx) + file_checks(expect, ctx) + outside_checks(expect, ctx)
+
+
+def validate(scenario):
+    problems = [f"unknown key {k!r}" for k in sorted(set(scenario) - SCENARIO_KEYS)]
+    expect = scenario.get("expect")
+    if not isinstance(expect, dict) or not expect:
+        problems.append("expect must be a non-empty object")
+    else:
+        problems += [f"unknown expect key {k!r}" for k in sorted(set(expect) - EXPECT_KEYS)]
+    minutes = scenario.get("timeout_minutes")
+    if not isinstance(minutes, int) or minutes <= 0:
+        problems.append("timeout_minutes must be a positive integer")
+    if scenario.get("drive", "factory") not in ("factory", "runner"):
+        problems.append("drive must be 'factory' or 'runner'")
+    if "title" in scenario and not scenario.get("issue_body"):
+        problems.append("a title needs an issue_body")
+    return problems
+
+
+def load_scenarios(root, only=None):
+    """[(name, scenario)] sorted by name. Raises Refused on a missing or invalid scenario."""
+    names = sorted(p.name for p in root.iterdir() if (p / "scenario.json").is_file())
+    if only:
+        if only not in names:
+            raise Refused(f"no scenario {only!r}; there are {', '.join(names)}")
+        names = [only]
+    out = []
+    for name in names:
+        scenario = json.loads((root / name / "scenario.json").read_text())
+        problems = validate(scenario)
+        if problems:
+            raise Refused(f"tests/e2e/{name}/scenario.json: {'; '.join(problems)}")
+        out.append((name, scenario))
+    return out

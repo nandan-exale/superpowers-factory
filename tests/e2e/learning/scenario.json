@@ -1,0 +1,6 @@
+{
+  "config_patch": {"learning": {"threshold": 3}},
+  "expect": {"learning_issue": true, "files": ["learning/convention/proposal.md"],
+             "first_lines": {"learning/convention/proposal.md": "PROPOSAL:"}},
+  "timeout_minutes": 30
+}

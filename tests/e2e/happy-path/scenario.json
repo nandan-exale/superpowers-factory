@@ -1,0 +1,8 @@
+{
+  "title": "Add a --version flag",
+  "issue_body": "The CLI has no way to print its version. Add a `--version` flag that prints the version and exits 0, with a test.",
+  "labels": ["factory"],
+  "config_patch": {},
+  "expect": {"stage": "merged", "pr_state": "MERGED", "review_tags_valid": true},
+  "timeout_minutes": 60
+}

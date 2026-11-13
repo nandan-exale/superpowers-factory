@@ -195,3 +195,28 @@ class ExpectTest(E2ECase):
         self.assertEqual(self.e2e.check_expect(expect, ctx), [])
         ctx.update(issue_labels=[], pr_state="MERGED", learning_issues=[], runner_log="", stdout="")
         self.assertEqual(len(self.e2e.check_expect(expect, ctx)), 5)
+
+
+class ScenarioLoadTest(E2ECase):
+    def write(self, name, scenario):
+        d = self.tmp / "scenarios" / name
+        d.mkdir(parents=True)
+        (d / "scenario.json").write_text(json.dumps(scenario))
+
+    def test_validate_names_every_problem(self):
+        problems = self.e2e.validate({"title": "t", "bogus": 1, "expect": {"nope": 1},
+                                      "timeout_minutes": 0, "drive": "cron"})
+        self.assertEqual(len(problems), 5, problems)
+
+    def test_load_sorts_filters_and_refuses_bad_files(self):
+        good = {"title": "t", "issue_body": "b", "expect": {"stage": "merged"}, "timeout_minutes": 5}
+        self.write("b-two", good)
+        self.write("a-one", good)
+        root = self.tmp / "scenarios"
+        self.assertEqual([n for n, _ in self.e2e.load_scenarios(root)], ["a-one", "b-two"])
+        self.assertEqual([n for n, _ in self.e2e.load_scenarios(root, "b-two")], ["b-two"])
+        with self.assertRaisesRegex(self.e2e.Refused, "no scenario 'c'"):
+            self.e2e.load_scenarios(root, "c")
+        self.write("c-bad", {"expect": {}, "timeout_minutes": 5})
+        with self.assertRaisesRegex(self.e2e.Refused, "c-bad"):
+            self.e2e.load_scenarios(root)

@@ -1,0 +1,8 @@
+{
+  "title": "Add a --verbose flag",
+  "issue_body": "Add a `--verbose` flag that prints each step the CLI takes, with a test.",
+  "labels": ["factory"],
+  "config_patch": {"budgets": {"job_usd": 0.05}},
+  "expect": {"stage": "needs-human", "budget_stopped": true, "decision_prefix": "ESCALATE"},
+  "timeout_minutes": 40
+}
