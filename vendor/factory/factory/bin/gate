@@ -62,6 +62,22 @@ def protected_changes(worktree, patterns):
     return hits
 
 
+def path_matches(path, pattern):
+    """fnmatch (whose * also crosses /), plus `**/x` matching `x` at the root."""
+    return fnmatch.fnmatch(path, pattern) or (pattern.startswith("**/") and fnmatch.fnmatch(path, pattern[3:]))
+
+
+def risky_changes(worktree, patterns):
+    """Changed files (added, modified, deleted or renamed) matching config risky_paths."""
+    diff = git(worktree, "diff", "--name-status", f"origin/{CONFIG['base_branch']}...HEAD")
+    hits = []
+    for line in diff.splitlines():
+        status, *paths = line.split("\t")
+        if any(path_matches(p, pattern) for p in paths for pattern in patterns):
+            hits.append(f"{status[0]} {paths[-1]}")
+    return hits
+
+
 def run_checks(worktree):
     start = time.monotonic()
     env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
@@ -77,6 +93,7 @@ def gate(job_id, merge):
     round_dir = FACTORY / "jobs" / job_id / f"round-{job['round']}"
     commit = git(worktree, "rev-parse", "HEAD").strip()
     protected = protected_changes(worktree, protected_patterns(job))
+    risky = risky_changes(worktree, CONFIG.get("risky_paths", []))
     code, log, seconds = run_checks(worktree)
     verdict = "PASS" if code == 0 and not protected else "FAIL"
     name = "merge-checks" if merge else "checks"
@@ -85,6 +102,7 @@ def gate(job_id, merge):
     summary = [
         f"checks.sh {'passed' if code == 0 else f'failed with exit {code}'} in {seconds}s",
         f"Protected paths: {'changed: ' + ', '.join(protected) if protected else 'none changed'}",
+        f"Risky changes: {', '.join(risky) if risky else 'none'}",
         f"Commit {commit[:7]}" + (", synced with the latest main before merging" if merge else ""),
     ]
     (round_dir / f"{name}.md").write_text(
@@ -92,6 +110,8 @@ def gate(job_id, merge):
         "## Summary\n" + "\n".join(f"- {s}" for s in summary) + "\n\n"
         "## Protected paths\n"
         + ("\n".join(f"- {p}" for p in protected) if protected else "None changed.")
+        + "\n\n## Risky changes\n"
+        + ("\n".join(f"- {r}" for r in risky) if risky else "None.")
         + f"\n\n## checks.sh\nExit {code} in {seconds}s. Last {TAIL} lines of {name}.log:\n\n```\n{tail}\n```\n"
     )
     print(f"GATE: {verdict} ({job_id} round {job['round']}, checks.sh exit {code} in {seconds}s"
