@@ -3,9 +3,9 @@
 
 Usage:
   runner tick                  one scheduled run: lock, preflight, pull, check the queue, run /factory run headless
-  runner install [--dry-run]   install the launchd LaunchAgent that runs `tick` every runner.interval_minutes
-  runner uninstall             unload and delete the LaunchAgent
-  runner status                LaunchAgent state and the last lines of factory/jobs/runner.log
+  runner install [--dry-run]   install the scheduler: a launchd LaunchAgent on macOS, a systemd user timer on Linux
+  runner uninstall             remove it
+  runner status                scheduler state and the last lines of factory/jobs/runner.log
 
 The Claude token comes from the macOS Keychain item named by
 runner.keychain_service (store it with
@@ -310,22 +310,68 @@ def plist_bytes(runner):
     })
 
 
-def require_launchd():
-    if platform.system() != "Darwin":
-        die("launchd only (macOS); elsewhere run `factory/bin/runner tick` from cron or systemd")
+def platform_name():
+    return platform.system()
+
+
+def unit_name():
+    return f"factory-{hashlib.sha256(str(REPO).encode()).hexdigest()[:12]}"
+
+
+def units_dir():
+    return Path.home() / ".config" / "systemd" / "user"
+
+
+def systemd_units(runner):
+    service = (f"[Unit]\nDescription=Software factory runner for {REPO}\n\n"
+               f"[Service]\nType=oneshot\nWorkingDirectory={REPO}\n"
+               f"ExecStart={sys.executable} {FACTORY / 'bin' / 'runner'} tick\n"
+               f"Environment=PATH={os.environ.get('PATH', '/usr/bin:/bin')}\n")
+    timer = (f"[Unit]\nDescription=Run the software factory for {REPO} every {runner['interval_minutes']} min\n\n"
+             f"[Timer]\nOnBootSec=5min\nOnUnitActiveSec={runner['interval_minutes']}min\nPersistent=true\n\n"
+             "[Install]\nWantedBy=timers.target\n")
+    return service, timer
+
+
+def systemctl(*args):
+    return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True)
+
+
+def require_scheduler():
+    name = platform_name()
+    if name not in ("Darwin", "Linux"):
+        die(f"no scheduler for {name}; run `factory/bin/runner tick` from your own scheduler")
+    return name
+
+
+def install_systemd(runner, dry_run):
+    service, timer = systemd_units(runner)
+    if dry_run:
+        sys.stdout.write(f"# {unit_name()}.service\n{service}\n# {unit_name()}.timer\n{timer}")
+        return 0
+    d = units_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    JOBS.mkdir(parents=True, exist_ok=True)
+    (d / f"{unit_name()}.service").write_text(service)
+    (d / f"{unit_name()}.timer").write_text(timer)
+    for args in (("daemon-reload",), ("enable", "--now", f"{unit_name()}.timer")):
+        res = systemctl(*args)
+        if res.returncode != 0:
+            die(f"systemctl --user {' '.join(args)} failed: {first_line(res.stderr)}")
+    print(f"installed {d / unit_name()}.timer; runs every {runner['interval_minutes']} min. "
+          "Run `loginctl enable-linger $USER` so it also runs while you're logged out.")
+    return 0
 
 
 def launchctl(*args):
     return subprocess.run(["launchctl", *args], capture_output=True, text=True)
 
 
-def cmd_install(dry_run):
-    _, runner = load_config()
+def install_launchd(runner, dry_run):
     data = plist_bytes(runner)
     if dry_run:
         sys.stdout.write(data.decode())
         return 0
-    require_launchd()
     path = plist_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     JOBS.mkdir(parents=True, exist_ok=True)
@@ -346,20 +392,46 @@ def cmd_install(dry_run):
     return 0
 
 
-def cmd_uninstall():
-    require_launchd()
+def uninstall_launchd():
     launchctl("bootout", f"{domain()}/{label()}")
     plist_path().unlink(missing_ok=True)
     print(f"uninstalled {label()}")
     return 0
 
 
-def cmd_status():
-    require_launchd()
+def status_launchd():
     loaded = launchctl("print", f"{domain()}/{label()}").returncode == 0
     path = plist_path()
     print(f"{label()}: {'loaded' if loaded else 'not loaded'}")
     print(f"plist: {path}{'' if path.exists() else ' (missing)'}")
+    lines = LOG.read_text().splitlines()[-10:] if LOG.exists() else ["(no runner.log yet)"]
+    print("\n".join(lines))
+    return 0
+
+
+def cmd_install(dry_run):
+    _, runner = load_config()
+    if dry_run and platform_name() != "Linux":
+        return install_launchd(runner, dry_run)
+    name = require_scheduler()
+    return install_systemd(runner, dry_run) if name == "Linux" else install_launchd(runner, dry_run)
+
+
+def cmd_uninstall():
+    if require_scheduler() == "Darwin":
+        return uninstall_launchd()
+    systemctl("disable", "--now", f"{unit_name()}.timer")
+    for suffix in ("service", "timer"):
+        (units_dir() / f"{unit_name()}.{suffix}").unlink(missing_ok=True)
+    systemctl("daemon-reload")
+    print(f"uninstalled {unit_name()}")
+    return 0
+
+
+def cmd_status():
+    if require_scheduler() == "Darwin":
+        return status_launchd()
+    print(systemctl("list-timers", "--all", f"{unit_name()}.timer").stdout.rstrip())
     lines = LOG.read_text().splitlines()[-10:] if LOG.exists() else ["(no runner.log yet)"]
     print("\n".join(lines))
     return 0
