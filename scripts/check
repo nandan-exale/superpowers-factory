@@ -123,7 +123,8 @@ def check_compile(root, opts):
         except (OSError, SyntaxError) as exc:
             problems.append(f"bin/{name}: {exc}")
     for rel in ("bin/factory_files.py", "bin/factory-manifest", "bin/factory-state",
-                "bin/factory-update-plan", "hooks/factory-session"):
+                "bin/factory-update-plan", "bin/factory-uninstall-settings", "hooks/factory-session",
+                "scripts/known-hashes", "scripts/release"):
         path = root / rel
         if not path.exists():
             continue  # added by later tasks; JSON and test checks cover their absence
@@ -135,6 +136,14 @@ def check_compile(root, opts):
     if res.returncode != 0:
         problems.append(f"checks.sh: {res.stderr.strip()}")
     return problems
+
+
+def check_hashes(root, opts):
+    res = subprocess.run([sys.executable, str(REPO / "scripts" / "known-hashes"), "--root", str(root), "--check"],
+                         capture_output=True, text=True)
+    if res.returncode == 0:
+        return []
+    return res.stdout.strip().splitlines() or [res.stderr.strip() or "known-hashes --check failed"]
 
 
 # SHA-256 of lowercase tokens that must never appear in a tracked file
@@ -180,6 +189,7 @@ CHECKS = [
     ("config", check_config),
     ("frontmatter", check_frontmatter),
     ("compile", check_compile),
+    ("hashes", check_hashes),
     ("branding", check_branding),
     ("tests", check_tests),
 ]

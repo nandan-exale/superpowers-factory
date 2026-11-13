@@ -61,6 +61,11 @@ class CheckTest(RepoCopyTest):
         )
         return res.returncode, res.stdout
 
+    def refresh_hashes(self):
+        """List the copy's edited vendored files, as scripts/known-hashes does after a vendored edit."""
+        subprocess.run([sys.executable, str(REPO / "scripts" / "known-hashes"), "--root", str(self.root)],
+                       capture_output=True, check=True)
+
     def assertFails(self, name, needle, *extra):
         code, out = self.run_check(*extra)
         self.assertEqual(code, 1, out)
@@ -118,6 +123,7 @@ class CheckTest(RepoCopyTest):
     def test_nested_model_key_is_ignored(self):
         self.edit("vendor/factory/.claude/agents/approver.md",
                   lambda text: text.replace("tools:", "extra:\n  model: nested\ntools:", 1))
+        self.refresh_hashes()
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
 
@@ -152,6 +158,7 @@ class CheckTest(RepoCopyTest):
 
     def test_bom_does_not_hide_frontmatter(self):
         self.edit("vendor/factory/.claude/agents/intake.md", lambda text: "\ufeff" + text)
+        self.refresh_hashes()
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
 
