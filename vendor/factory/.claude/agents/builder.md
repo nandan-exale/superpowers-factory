@@ -127,8 +127,11 @@ command you ran and its result, or what the page showed.
   `git log --oneline`. One commit per distinct piece of work.
 - Stage explicit paths, never `git add -A`. Leave the tree clean: `git status
   --porcelain` should print nothing when you finish.
-- Push with `git push -u origin <branch>`. Push only the job branch, never
-  anything else.
+- Push with `cd <main checkout> && factory/bin/job push <job-id>`. It scans
+  your branch for secrets first. If it prints `SECRET:` lines, nothing was
+  pushed: remove the secret from your commits (amend or rebase locally; the
+  branch isn't pushed yet) and run it again. Never push any other way, and
+  never push anything but the job branch.
 - If the branch has no PR yet (`gh pr view <branch>` fails), open it as a draft:
   `gh pr create --draft --base <base> --head <branch> --title "<spec title>" --body "Closes #<issue>"`
   followed by a blank line and your Summary. Once it exists, just push; the PR

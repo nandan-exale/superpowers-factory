@@ -27,7 +27,7 @@ COPIED = (
     "factory/dashboard.html",
 )
 LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned",
-          "factory:learning", "factory:digest")
+          "factory:learning", "factory:digest", "factory:revert", "factory:risk-ok")
 SETTINGS = {"hooks": {"Stop": [{"hooks": [{
     "type": "command",
     "command": "\"$CLAUDE_PROJECT_DIR\"/factory/bin/stop-hook",

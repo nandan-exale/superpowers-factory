@@ -27,11 +27,17 @@ Usage:
   job costs <job>                cost of the job's agents by model
   job report [--days N] [--json] [--write]   spend, throughput, what needs you, findings; --write → jobs/report.json
   job digest                     post the report on the factory:digest issue, once a day after digest.hour
+  job pause <reason>             stop the queue: nothing starts and nothing merges until `job resume`
+  job resume                     clear the pause (a human runs this once the base branch is fixed)
+  job scan <job-id>              secret patterns in the branch's added lines; exit 1 on a hit
+  job push <job>                 the builder's push: scan, then push the job branch (nothing is pushed on a hit)
+  job watch                      check base-branch CI for merged jobs; red → revert PR and pause
 
 <job> is a job id (004-dark-mode) or an issue number (12).
 """
 
 import fcntl
+import fnmatch
 import json
 import os
 import re
@@ -59,7 +65,7 @@ TRANSITIONS = {
     "review": {"approve", "build", "needs-human"},
     "approve": {"merging", "needs-human"},
     "merging": {"needs-human"},
-    "needs-human": {"build", "rejected"},
+    "needs-human": {"build", "rejected", "merging"},
 }
 TERMINAL = {"merged", "rejected"}
 # Any unfinished job can move to merged once its PR is merged on GitHub,
@@ -339,6 +345,294 @@ def round_dir(job, n=None):
 
 def reviewers(job):
     return list(job["agents"]["reviewers"])
+
+
+# ---- Pause -----------------------------------------------------------------
+
+PAUSE_FILE = JOBS / "paused.json"
+
+
+def paused():
+    """The pause record, or None. An unreadable file still pauses: only `job resume` clears it."""
+    try:
+        return json.loads(PAUSE_FILE.read_text())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return {"reason": "paused.json is unreadable; run factory/bin/job resume", "job": None, "sha": None,
+                "time": "?"}
+
+
+def pause(reason, job_id=None, sha=None):
+    JOBS.mkdir(parents=True, exist_ok=True)
+    tmp = JOBS / "paused.json.tmp"
+    tmp.write_text(json.dumps({"reason": reason, "job": job_id, "sha": sha, "time": now()}) + "\n")
+    tmp.replace(PAUSE_FILE)
+
+
+def paused_line(p):
+    return f"PAUSED: {p['reason']} (since {p['time']}; run factory/bin/job resume after fixing)"
+
+
+def cmd_pause(reason):
+    require(reason.strip(), "give a reason: factory/bin/job pause <reason>")
+    pause(reason.strip())
+    print(paused_line(paused()))
+
+
+def cmd_resume():
+    p = paused()
+    if not p:
+        print("RESUME: not paused")
+        return
+    PAUSE_FILE.unlink(missing_ok=True)
+    print(f"RESUME: cleared {p['reason']} (since {p['time']})")
+
+
+def risk_ok_label():
+    return LABELS.get("risk_ok", "factory:risk-ok")
+
+
+def risky_listed(job):
+    """`- <status> <path>` lines under `## Risky changes` in the current round's checks.md."""
+    path = round_dir(job) / "checks.md"
+    body = section(path, "Risky changes") if path.exists() else None
+    return [line[2:].strip() for line in (body or "").splitlines() if line.startswith("- ")]
+
+
+def has_risk_ok(job):
+    return risk_ok_label() in {l["name"] for l in fetch_issue(job["issue"])["labels"]}
+
+
+def risk_approved(job):
+    """The label covers only the commit a human saw stopped: the one recorded on needs-human → merging."""
+    sha = job.get("risk_ok_sha")
+    return bool(sha) and has_risk_ok(job) and git(job, "rev-parse", "HEAD").stdout.strip() == sha
+
+
+# ---- Secret scan -------------------------------------------------------------
+
+SECRET_RULES = (
+    ("private key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("aws access key", re.compile(r"AKIA[0-9A-Z]{16}")),
+    ("github token", re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,}")),
+    ("anthropic key", re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}")),
+    ("slack token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}")),
+    ("assigned secret", re.compile(r"(api[_-]?key|secret|token|password)\s*[:=]\s*[\"'][^\"']{16,}[\"']", re.I)),
+)
+HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+SECRET_WHY = ("A possible secret reached the remote branch (see `## Secrets` in this round's checks.md). "
+              "Rotate it, then remove it from the branch history before giving feedback.")
+
+
+def path_matches(path, pattern):
+    """fnmatch (whose * also crosses /), plus `**/x` matching `x` at the root. Same as the gate's."""
+    return fnmatch.fnmatch(path, pattern) or (pattern.startswith("**/") and fnmatch.fnmatch(path, pattern[3:]))
+
+
+def added_lines(diff):
+    """(path, new line number, text) for every added line of a unified diff.
+    Hunk bodies are read by their line counts, so an added line that looks like a header is still scanned,
+    and a path git couldn't print plainly is kept as printed rather than skipped."""
+    path, line, old_left, new_left = "?", 0, 0, 0
+    for text in diff.split("\n"):
+        if old_left > 0 or new_left > 0:
+            if text.startswith("+"):
+                yield path, line, text[1:]
+                line, new_left = line + 1, new_left - 1
+            elif text.startswith("-"):
+                old_left -= 1
+            elif text.startswith(" "):
+                line, old_left, new_left = line + 1, old_left - 1, new_left - 1
+            continue
+        if text.startswith("+++ "):
+            path = text[6:] if text.startswith("+++ b/") else text[4:]
+            continue
+        m = HUNK.match(text)
+        if m:
+            old_left, line, new_left = int(m.group(1) or 1), int(m.group(2)), int(m.group(3) or 1)
+
+
+def mask(value):
+    return f"{value[:4]}… ({len(value)} chars)"
+
+
+def secret_hits(worktree):
+    """`path:line rule: masked` for each line any branch commit adds that matches a secret rule.
+    Every commit is scanned, because a secret deleted in a later commit is still pushed in history."""
+    allow = (CONFIG.get("secret_scan") or {}).get("allow", ["**/*.test.*", "**/fixtures/**"])
+    diff = run(["git", "-c", "core.quotePath=false", "log", "-p", "--no-merges", "--no-color", "--no-ext-diff",
+                "--format=", "--unified=0", f"origin/{BASE}..HEAD"], cwd=worktree).stdout
+    hits = {}
+    for path, n, text in added_lines(diff):
+        if any(path_matches(path, pattern) for pattern in allow):
+            continue
+        for name, rule in SECRET_RULES:
+            m = rule.search(text)
+            if m:
+                hits.setdefault((path, name, m.group(0)), f"{path}:{n} {name}: {mask(m.group(0))}")
+                break
+    return list(hits.values())
+
+
+def cmd_scan(job):
+    hits = secret_hits(job["worktree"])
+    for hit in hits:
+        print(f"SECRET: {hit}")
+    if hits:
+        sys.exit(1)
+    print("SCAN: clean")
+
+
+def cmd_push(job):
+    require(job["stage"] == "build", f"{job['id']} is in {job['stage']}; only the builder pushes, in build")
+    git(job, "fetch", "origin", BASE)
+    hits = secret_hits(job["worktree"])
+    if hits:
+        for hit in hits:
+            print(f"SECRET: {hit}")
+        print("Nothing was pushed. Remove the secret from your commits (amend or rebase; the branch "
+              "isn't pushed yet), then run factory/bin/job push again.")
+        sys.exit(1)
+    git(job, "push", "-u", "origin", job["branch"])
+    print(f"PUSHED: {job['branch']}")
+
+
+def gate_found_secrets(job):
+    body = section(round_dir(job) / "checks.md", "Secrets") if (round_dir(job) / "checks.md").exists() else None
+    return bool(body) and body != "None found."
+
+
+# ---- Watching the base branch -------------------------------------------------
+
+WATCH_DEFAULTS = {"enabled": True, "max_minutes": 60, "ignore_workflows": []}
+RED_CONCLUSIONS = {"failure", "timed_out", "cancelled"}
+
+
+def watch_config():
+    return {**WATCH_DEFAULTS, **(CONFIG.get("watch") or {})}
+
+
+def record_watch(job):
+    """After a merge: remember the commit that landed on the base branch, to watch its CI."""
+    if not watch_config()["enabled"]:
+        return
+    try:
+        sha = gh_json("pr", "view", str(job["pr"]), "--json", "mergeCommit")["mergeCommit"]["oid"]
+    except (Refused, KeyError, TypeError) as e:
+        print(f"NOTE: not watching {BASE} after #{job['pr']}: {str(e).splitlines()[0] if str(e) else e!r}")
+        return
+    job["watch"] = {"sha": sha, "since": now(), "state": "watching"}
+
+
+def watch_verdict(runs, cfg, since):
+    """(state, failed runs) for a merge commit's workflow runs on the base branch."""
+    runs = [r for r in runs if r.get("workflowName") not in cfg["ignore_workflows"]]
+    failed = [r for r in runs if r.get("conclusion") in RED_CONCLUSIONS]
+    if failed:
+        return "red", failed
+    if runs and all(r.get("status") == "completed" for r in runs):
+        return "green", []
+    minutes = (datetime.now(timezone.utc) - parse_time(since)).total_seconds() / 60
+    if not runs and minutes > cfg["max_minutes"]:
+        return "no-ci", []
+    return "watching", []
+
+
+def cmd_watch():
+    cfg = watch_config()
+    if not cfg["enabled"]:
+        print("WATCH: off")
+        return
+    for job in all_jobs():
+        w = job.get("watch") or {}
+        if w.get("state") != "watching":
+            continue
+        try:
+            runs = gh_json("run", "list", "--branch", BASE, "--commit", w["sha"], "--limit", "50",
+                           "--json", "status,conclusion,workflowName,url")
+        except Refused as e:
+            print(f"NOTE: {job['id']}: {BASE} checks unknown, still watching: {str(e).splitlines()[0]}")
+            continue
+        state, failed = watch_verdict(runs, cfg, w["since"])
+        if state == "watching":
+            continue
+        if state == "red":
+            revert_for(job, failed)
+            continue
+        job["watch"] = {**w, "state": state}
+        save(job)
+        print(f"WATCH: {job['id']} {state}" + (f"; no CI runs on {BASE} within {cfg['max_minutes']} min" if state == "no-ci" else ""))
+
+
+def revert_label():
+    return LABELS.get("revert", "factory:revert")
+
+
+def revert_command(method, sha, count):
+    """git args that undo a PR as it landed: a merge commit, a squash commit, or `count` rebased commits."""
+    if method == "merge":
+        return ["revert", "--no-edit", "-m", "1", sha]
+    if method == "rebase" and count > 1:
+        return ["revert", "--no-edit", f"{sha}~{count}..{sha}"]
+    return ["revert", "--no-edit", sha]
+
+
+def open_revert_pr(job, failed):
+    """Revert the merge on factory/revert-<id> in a throwaway worktree, push it, open a PR. Never merges."""
+    sha, method = job["watch"]["sha"], CONFIG["merge_method"]
+    branch = f"factory/revert-{job['id']}"
+    path = REPO / ".worktrees" / f"revert-{job['id']}"
+    run_net(["git", "fetch", "origin", BASE])
+    run(["git", "worktree", "add", "-q", "-b", branch, str(path), f"origin/{BASE}"])
+    try:
+        count = len(gh_json("pr", "view", str(job["pr"]), "--json", "commits")["commits"]) if method == "rebase" else 1
+        res = run(["git", *revert_command(method, sha, count)], cwd=path, check=False)
+        if res.returncode != 0:
+            run(["git", "revert", "--abort"], cwd=path, check=False)
+            raise Refused("the revert didn't apply cleanly")
+        run_net(["git", "push", "-u", "origin", branch], cwd=path)
+    finally:
+        run(["git", "worktree", "remove", "--force", str(path)], check=False)
+    gh("label", "create", revert_label(), "--color", "B60205",
+       "--description", "Reverts a factory merge that broke the base branch", "--force")
+    runs = "\n".join(f"- {r['workflowName']}: {r['url']}" for r in failed)
+    url = gh("pr", "create", "--base", BASE, "--head", branch, "--label", revert_label(),
+             "--title", f'Revert "{job["title"]}"',
+             "--body", f"{MARKER}\nReverts #{job['pr']} ({sha[:7]}): {BASE} failed after it merged.\n\n{runs}\n\n"
+                       f"The factory never merges this PR. Merge it, or fix {BASE} forward, "
+                       "then run `factory/bin/job resume`.").strip()
+    m = re.search(r"/pull/(\d+)$", url)
+    require(m, f"gh pr create printed {url!r}, not a PR URL")
+    return int(m.group(1))
+
+
+def revert_for(job, failed):
+    """The base branch went red after this job merged: pause, try a revert PR, tell the human."""
+    w = job["watch"]
+    names = ", ".join(sorted({r["workflowName"] for r in failed}))
+    pause(f"{BASE} failed after #{job['pr']} ({names})", job["id"], w["sha"])
+    try:
+        revert_pr, why = open_revert_pr(job, failed), None
+    except Refused as e:
+        revert_pr, why = None, str(e).splitlines()[0]
+    job["watch"] = {**w, "state": "red", "revert_pr": revert_pr}
+    save(job)
+    runs = "\n".join(f"- {r['workflowName']}: {r['url']}" for r in failed)
+    body = (f"### Factory: {BASE} failed after this merged\n\n{runs}\n\n"
+            + (f"Revert PR: #{revert_pr} (not merged automatically).\n\n" if revert_pr
+               else f"No revert PR: {why}.\n\n")
+            + "The queue is paused; run `factory/bin/job resume` when the base branch is green.")
+    for kind, number in (("pr", job["pr"]), ("issue", job["issue"])):
+        try:
+            comment(kind, number, body)
+        except Refused as e:
+            print(f"NOTE: couldn't comment on {kind} #{number}: {str(e).splitlines()[0]}")
+    try:
+        label("issue", job["issue"], add=LABELS["needs_human"])
+    except Refused as e:
+        print(f"NOTE: couldn't label issue #{job['issue']}: {str(e).splitlines()[0]}")
+    print(f"WATCH: {job['id']} red; queue paused; " + (f"revert PR #{revert_pr}" if revert_pr else f"no revert PR: {why}"))
 
 
 # ---- Learning ---------------------------------------------------------------
@@ -1151,6 +1445,12 @@ def advance(job, stage):
     old = job["stage"]
     require(stage in TRANSITIONS.get(old, set()) or (stage == "merged" and old not in TERMINAL),
             f"{job['id']}: {old} → {stage} is not a legal transition")
+    if stage == "merging":
+        p = paused()
+        require(not p, f"the queue is paused: {p['reason'] if p else ''}; run factory/bin/job resume first")
+    if old == "gate" and stage in {"build", "needs-human"} and gate_found_secrets(job):
+        stop_for_human(job, SECRET_WHY)
+        return job
     if budgeted_move(old, stage):
         daily = daily_problem()
         require(daily is None, f"{daily}; the job resumes when it drops")
@@ -1281,6 +1581,13 @@ def advance(job, stage):
         line = first_line(d / "decision.md")
         require(line == want, f"decision.md starts with {line!r}, not {want}")
 
+    elif old == "needs-human" and stage == "merging":
+        require(job.get("risk_stopped"), "only a job stopped for risky changes can go back to merging")
+        require(has_risk_ok(job), f"add the {risk_ok_label()} label to issue #{job['issue']} first")
+        job.pop("risk_stopped")
+        job["risk_ok_sha"] = git(job, "rev-parse", "HEAD").stdout.strip()
+        label("issue", job["issue"], remove=LABELS["needs_human"])
+
     elif old == "needs-human":
         require(Path(job["worktree"]).exists(),
                 f"{job['id']} never reached build; reject it and hand off a fixed plan instead")
@@ -1292,6 +1599,8 @@ def advance(job, stage):
         job["budget_base_usd"] = job["cost_usd"]
         job["budget_base_time"] = now()
         job.pop("budget_stopped", None)
+        job.pop("risk_stopped", None)
+        job.pop("risk_ok_sha", None)
         next_round(job)
         label("issue", job["issue"], remove=LABELS["needs_human"])
 
@@ -1656,6 +1965,8 @@ def cmd_queue():
                 other_rows.append(("wait", n, j["id"], j["stage"], "waiting for the author"))
         elif j["stage"] == "needs-human" and j["pr"] and (j.get("feedback_pending") or pr_comments(j)):
             replied_rows.append(("resume", n, j["id"], j["stage"], "PR feedback"))
+        elif j["stage"] == "needs-human" and j.get("risk_stopped") and has_risk_ok(j):
+            replied_rows.append(("resume", n, j["id"], j["stage"], f"{risk_ok_label()} added"))
         elif j["stage"] == "needs-human":
             other_rows.append(("wait", n, j["id"], j["stage"], f"merge PR #{j['pr']}, or give feedback"
                                if j["pr"] else "give feedback" if Path(j["worktree"]).exists()
@@ -1678,8 +1989,12 @@ def cmd_queue():
             slots -= 1
         else:
             rows.append(("hold",) + row[1:4] + (f"concurrency {CONCURRENCY} reached",))
-    if daily:
-        rows = [("wait",) + row[1:4] + (daily,) if row[0] in {"resume", "new"} else row for row in rows]
+    hold = paused()
+    if hold:
+        print(paused_line(hold))
+    why = "paused" if hold else daily
+    if why:
+        rows = [("wait",) + row[1:4] + (why,) if row[0] in {"resume", "new"} else row for row in rows]
     for row in rows + other_rows:
         print("\t".join(str(c) for c in row))
 
@@ -1701,6 +2016,8 @@ def sync_main():
 
 
 def cmd_merge(job):
+    p = paused()
+    require(not p, f"the queue is paused: {p['reason'] if p else ''}; run factory/bin/job resume first")
     sync(job)
     if job["stage"] == "approve":
         save(advance(job, "merging"))
@@ -1720,6 +2037,17 @@ def cmd_merge(job):
                  "The next `/factory run` sends them to the builder.")
     if job.get("feedback_pending") or pr_comments(job):
         return fail(unhandled)
+    risky = risky_listed(job)
+    if risky and not risk_approved(job):
+        job["risk_stopped"] = True
+        job.pop("risk_ok_sha", None)
+        stale = ""
+        if has_risk_ok(job):
+            label("issue", job["issue"], remove=risk_ok_label())
+            stale = (f"\n\nThe `{risk_ok_label()}` label was removed: it was added before this commit stopped, "
+                     "so it didn't cover these changes.")
+        return fail(f"This PR changes dependencies or CI: {', '.join(risky)}. Review it, then add "
+                    f"`{risk_ok_label()}` to the issue and run the factory again, or merge it yourself.{stale}")
     git(job, "fetch", "origin", BASE)
     merged = git(job, "merge", "--no-edit", f"origin/{BASE}", check=False)
     if merged.returncode != 0:
@@ -1744,6 +2072,7 @@ def cmd_merge(job):
         return fail(unhandled)
     # GitHub may already have deleted the branch on merge.
     run(["git", "push", "origin", "--delete", job["branch"]], check=False)
+    record_watch(job)
     save(advance(sync(job), "merged"))
     print(f"{job['id']}: merged PR #{job['pr']}")
     sync_main()
@@ -1901,6 +2230,9 @@ def cost_cell(job):
 
 
 def cmd_summary(args):
+    p = paused()
+    if p:
+        print(paused_line(p))
     jobs = [resolve(a) for a in args] if args else all_jobs()
     rows = [("job", "issue", "stage", "round", "pr", "cost", "time")]
     for j in jobs:
@@ -1973,6 +2305,20 @@ def main(argv):
             cmd_report(args)
         elif cmd == "digest" and not args:
             cmd_digest()
+        elif cmd == "pause" and args:
+            cmd_pause(" ".join(args))
+        elif cmd == "resume" and not args:
+            cmd_resume()
+        elif cmd == "scan" and len(args) == 1:
+            # The gate runs this while `job merge` holds the job's lock; a scan only reads.
+            path = job_dir(args[0]) / "job.json"
+            if not path.exists():
+                die(f"no job {args[0]}")
+            cmd_scan(json.loads(path.read_text()))
+        elif cmd == "push" and len(args) == 1:
+            cmd_push(resolve(args[0]))
+        elif cmd == "watch" and not args:
+            cmd_watch()
         else:
             die(f"bad arguments: {' '.join(argv)}\n\n{__doc__.strip()}")
     except Refused as e:

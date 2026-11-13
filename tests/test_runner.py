@@ -180,6 +180,15 @@ class TickTest(RunnerCase):
         self.assertEqual(report["days"], 7)
         self.assertEqual(len(self.log_lines()), 1)
 
+    def test_paused_tick_is_idle_and_does_not_call_claude(self):
+        self.set_issues([{"number": 7, "title": "x"}])
+        (self.p.root / "factory/jobs").mkdir(parents=True, exist_ok=True)
+        (self.p.root / "factory/jobs/paused.json").write_text(json.dumps({"reason": "red", "time": "t"}))
+        res = self.runner("tick")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(self.calls("claude"), [])
+        self.assertTrue(self.log_lines()[-1].endswith("idle"))
+
     def test_work_runs_claude_headless_with_token_and_no_api_vars(self):
         self.set_issues(self.WORK)
         res = self.runner("tick")
