@@ -16,7 +16,7 @@ class ShippedScenariosTest(unittest.TestCase):
         e2e = load_script(PLUGIN / "scripts" / "e2e", "e2e_shipped")
         names = [n for n, _ in e2e.load_scenarios(PLUGIN / "tests" / "e2e")]
         self.assertEqual(names, ["budget-stop", "happy-path", "learning", "needs-info",
-                                 "runner-tick", "tagged-finding"])
+                                 "risky-change", "runner-tick", "tagged-finding"])
 
 
 class LearningSeedTest(unittest.TestCase):

@@ -1,0 +1,8 @@
+{
+  "title": "Pin the test runner in requirements-dev.txt",
+  "issue_body": "Add a `requirements-dev.txt` that pins the test tooling this project uses, and mention it in the README.",
+  "labels": ["factory"],
+  "config_patch": {},
+  "expect": {"stage": "needs-human", "decision_prefix": "ESCALATE", "pr_state": "OPEN"},
+  "timeout_minutes": 60
+}
