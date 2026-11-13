@@ -83,6 +83,12 @@ is wrong: stop that job and show the user the error. Each agent replies with one
 you are notified when it finishes, and you advance that job then. While agents
 run, don't poll and don't wait: end your turn with a one-line status.
 
+Before the first spawn for a job in this session (any stage from `spec` on),
+run `factory/bin/job ensure-worktree <id>`. It prints `WORKTREE: <id> …`, or
+moves the job to `needs-human` (its line says so) when the worktree can't be
+recreated: then stop that job. Runs on a fresh machine (GitHub Actions) have
+no `.worktrees/` until this recreates them.
+
 Every prompt starts with the job's header, built from `job.json` and `base_branch` in `factory/config.json`:
 
 ```
