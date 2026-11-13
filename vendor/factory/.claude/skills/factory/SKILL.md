@@ -15,6 +15,7 @@ tell the user; never work around it.
 ```
 /factory run          drain the queue: every open `factory` issue, `concurrency` at a time; also resumes
 /factory run <n>      run one issue now
+/factory report       print factory/bin/job report; posts nothing
 /factory <anything>   talk to the factory: ask about jobs, give feedback, file a feature
 ```
 
@@ -220,6 +221,9 @@ then moves the job to `merged`; stop any agents still running for it.
    each `LEARN-FILE:` line, then list what waits on a human: PRs to
    review (merge one to approve it, or give feedback with `/factory`) and
    questions waiting on authors.
+   Then run `factory/bin/job report --write` (it refreshes the dashboard's
+   strip) and `factory/bin/job digest`, and report its `DIGEST:` or `NOTE:`
+   line.
 
 **Resuming.** State lives in files, so a new session picks up where a dead one
 stopped. For a `resume` job, run its stage's step again: `intake` runs the
@@ -243,6 +247,11 @@ Run one issue with the same steps. If `factory/bin/job queue` shows a job for
 it, resume that job; otherwise `factory/bin/job create <n>`. Finish with the
 summary line for that job.
 
+## /factory report
+
+Run `factory/bin/job report` (add `--days <n>` when the user names a
+period) and show its output as it is. It posts nothing and changes nothing.
+
 ## /factory <anything>
 
 Anything else after `/factory` is the user talking to the factory. Work out
@@ -255,7 +264,8 @@ new feature, ask.
   you may read a file in full when the answer is in it.
 - **What needs them**: run `factory/bin/job queue`. For each `wait` line, say
   what the job is waiting for: the question in `decision.md` for `needs-human`,
-  the question in `intake.md` for `needs-info`.
+  the question in `intake.md` for `needs-info`. The digest issue (label
+  `factory:digest`) has the same list each day.
 - **Feedback on a `needs-human` job**: pass their words verbatim on stdin:
 
   ```bash
