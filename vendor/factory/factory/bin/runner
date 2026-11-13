@@ -2,7 +2,7 @@
 """Run the software factory unattended.
 
 Usage:
-  runner tick                  one scheduled run: lock, preflight, pull, check the queue, run /factory run headless
+  runner tick                  one scheduled run: lock, preflight, pull, report and digest, check the queue, run /factory run headless
   runner install [--dry-run]   install the scheduler: a launchd LaunchAgent on macOS, a systemd user timer on Linux
   runner uninstall             remove it
   runner status                scheduler state and the last lines of factory/jobs/runner.log
@@ -255,6 +255,19 @@ def cost_of(path):
         return "?"
 
 
+CHORE_SECONDS = 120
+
+
+def chores():
+    """Report and digest: no Claude session, so they run every tick. Their failures never fail the tick."""
+    for args in (["report", "--write"], ["digest"]):
+        try:
+            subprocess.run([sys.executable, str(FACTORY / "bin" / "job"), *args], cwd=REPO,
+                           capture_output=True, text=True, timeout=CHORE_SECONDS)
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # the next tick tries again
+
+
 def cmd_tick():
     try:
         base, runner = load_config()
@@ -287,6 +300,7 @@ def cmd_tick():
     if pull.returncode != 0:
         log(f"skipped: pull failed: {first_line(pull.stderr)}")
         return 0
+    chores()
     try:
         work = has_work()
     except RuntimeError as exc:

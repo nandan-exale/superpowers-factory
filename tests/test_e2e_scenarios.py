@@ -15,7 +15,7 @@ class ShippedScenariosTest(unittest.TestCase):
     def test_every_shipped_scenario_is_valid(self):
         e2e = load_script(PLUGIN / "scripts" / "e2e", "e2e_shipped")
         names = [n for n, _ in e2e.load_scenarios(PLUGIN / "tests" / "e2e")]
-        self.assertEqual(names, ["budget-stop", "happy-path", "learning", "needs-info",
+        self.assertEqual(names, ["budget-stop", "happy-path", "learning", "needs-info", "report",
                                  "runner-tick", "tagged-finding"])
 
 

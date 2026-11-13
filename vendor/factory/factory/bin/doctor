@@ -25,7 +25,7 @@ AGENT_KEYS = {"name", "description", "tools"}
 EXECUTABLES = ("factory/checks.sh", "factory/bin/job", "factory/bin/gate", "factory/bin/route",
                "factory/bin/stop-hook", "factory/bin/doctor", "factory/bin/runner")
 LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned",
-          "factory:learning")
+          "factory:learning", "factory:digest")
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):")
 CHECKS_TAIL = 20
 # Checks run project code, so they never see the runner's Claude credentials.
@@ -84,6 +84,19 @@ def check_config():
         if not isinstance(tags, list) or not tags or not all(
                 isinstance(t, str) and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", t) for t in tags):
             problems.append(fail("learning.tags must be a non-empty list of lowercase-hyphenated names"))
+    digest = cfg.get("digest")
+    if digest is not None:
+        if not isinstance(digest, dict):
+            problems.append(fail("digest must be an object with enabled, hour and days"))
+        else:
+            if not isinstance(digest.get("enabled", True), bool):
+                problems.append(fail("digest.enabled must be true or false"))
+            hour = digest.get("hour", 9)
+            if isinstance(hour, bool) or not isinstance(hour, int) or not 0 <= hour <= 23:
+                problems.append(fail("digest.hour must be an integer from 0 to 23"))
+            days = digest.get("days", 1)
+            if isinstance(days, bool) or not isinstance(days, int) or days <= 0:
+                problems.append(fail("digest.days must be a positive integer"))
     handoff = cfg.get("handoff")
     if handoff is not None:
         cap = handoff.get("max_tasks_per_part") if isinstance(handoff, dict) else None

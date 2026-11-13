@@ -175,6 +175,13 @@ class TickTest(RunnerCase):
         self.assertEqual(self.calls("claude"), [])
         self.assertTrue(self.log_lines()[-1].endswith(" idle"))
 
+    def test_tick_writes_the_report_even_when_idle(self):
+        res = self.runner("tick")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        report = json.loads((self.p.root / "factory/jobs/report.json").read_text())
+        self.assertEqual(report["days"], 7)
+        self.assertEqual(len(self.log_lines()), 1)
+
     def test_work_runs_claude_headless_with_token_and_no_api_vars(self):
         self.set_issues(self.WORK)
         res = self.runner("tick")
