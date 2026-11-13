@@ -115,6 +115,34 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   and paste the token at its prompt; (3) in that clone, run
   `factory/bin/runner install`. Never ask for, read or store the token.
 
+- **Step 2 (Adapt), GitHub Actions runner (optional, off by default):** ask
+  whether to run the factory on a schedule in GitHub Actions. Skip this unless
+  they say yes.
+  1. `gh repo view --json visibility --jq .visibility`. If it's `PUBLIC`,
+     warn: "Scheduled workflows run with this repo's secrets. Forks can't
+     reach them, but anyone with write access can change the workflow." Go on
+     only if they confirm.
+  2. Write the workflow, pinned to the installed Claude Code:
+
+     ```bash
+     mkdir -p .github/workflows
+     factory/bin/runner workflow --claude-version "$(claude --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" \
+       > .github/workflows/factory-runner.yml
+     ```
+
+  3. Tell them to create two repository secrets themselves (never ask for
+     their values, and never run `gh secret set` with a value yourself):
+     - `FACTORY_CLAUDE_TOKEN`: the output of `claude setup-token`;
+     - `FACTORY_GH_TOKEN`: a fine-grained personal access token (or GitHub
+       App token) for this repo only, with Contents, Issues and Pull
+       requests read/write and Actions read. `GITHUB_TOKEN` isn't enough:
+       pushes and PRs it makes don't trigger the project's CI.
+
+     `gh secret set FACTORY_CLAUDE_TOKEN` prompts for the value, so they can
+     paste it there.
+  4. Run `factory/bin/doctor --ci` and report any FAIL or WARN. The workflow
+     keeps job state on the `factory-state` branch; don't protect it.
+
 - **Step 3 (Verify):** instead of upstream's list, run `factory/bin/doctor`.
   It must exit 0. It checks the config, agent frontmatter (the builder's
   `tools` includes `Skill`, which is expected), files and permissions,
