@@ -23,6 +23,9 @@ from urllib.parse import urlparse
 PLUGIN = Path(__file__).resolve().parents[1]
 SCENARIOS = PLUGIN / "tests" / "e2e"
 RESULTS = PLUGIN / "e2e-results"
+NUMBERED = re.compile(r"\s*\d+\.\s+(.*)")
+TAGGED = re.compile(r"\[([^\]\s]+)\]\s*(.*)", re.S)
+TAG_NAME = re.compile(r"(?:other:)?[a-z0-9]+(?:-[a-z0-9]+)*")
 
 
 class Refused(Exception):
@@ -133,3 +136,110 @@ class Spend:
 
     def remaining(self):
         return max(0.0, round(self.cap - self.total(), 2))
+
+
+def first_line(path):
+    try:
+        text = path.read_text()
+    except OSError:
+        return ""
+    return next((line.strip() for line in text.splitlines() if line.strip()), "")
+
+
+def section_lines(text, heading):
+    """The lines under `## <heading>`, up to the next `## `."""
+    out, inside = [], False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            inside = line[3:].strip() == heading
+        elif inside:
+            out.append(line)
+    return out
+
+
+def review_findings(job_dir):
+    """Every numbered finding under `## Findings` in every round's review files."""
+    items = []
+    for path in sorted(job_dir.glob("round-*/review-*.md")):
+        lines = section_lines(path.read_text(), "Findings")
+        items += [m.group(1).strip() for m in map(NUMBERED.fullmatch, lines) if m]
+    return items
+
+
+def finding_tag(text, known):
+    """The finding's tag when it starts with a valid [tag] (as `job learn` reads it), else None."""
+    m = TAGGED.fullmatch(text)
+    if not m:
+        return None
+    tag = m.group(1)
+    return tag if tag in known or (tag.startswith("other:") and TAG_NAME.fullmatch(tag)) else None
+
+
+def job_checks(expect, ctx):
+    job = ctx.get("job")
+    stage = job["stage"] if job else None
+    fails = []
+    if "stage" in expect:
+        allowed = expect["stage"] if isinstance(expect["stage"], list) else [expect["stage"]]
+        if stage not in allowed:
+            fails.append(f"stage is {stage}, expected {allowed}")
+    if "stage_not" in expect and (stage is None or stage in expect["stage_not"]):
+        fails.append(f"stage is {stage}, expected a job not in {expect['stage_not']}")
+    if "decision_prefix" in expect:
+        line = first_line(ctx["job_dir"] / "decision.md") if ctx.get("job_dir") else ""
+        if not line.startswith(expect["decision_prefix"]):
+            fails.append(f"decision.md starts {line!r}, expected {expect['decision_prefix']!r}")
+    if expect.get("budget_stopped") and not (job and job.get("budget_stopped")):
+        fails.append("the job wasn't stopped by a budget")
+    return fails
+
+
+def review_checks(expect, ctx):
+    found = review_findings(ctx["job_dir"]) if ctx.get("job_dir") else []
+    tags = [finding_tag(f, ctx.get("tags", set())) for f in found]
+    fails = []
+    if expect.get("review_tags_valid") and None in tags:
+        fails.append(f"{tags.count(None)} of {len(tags)} review findings have no valid tag")
+    if "min_findings" in expect and len(found) < expect["min_findings"]:
+        fails.append(f"{len(found)} review findings, expected at least {expect['min_findings']}")
+    patterns = expect.get("tags_any")
+    if patterns and not any(t and any(fnmatch(t, p) for p in patterns) for t in tags):
+        fails.append(f"no review finding tagged {patterns}")
+    return fails
+
+
+def file_checks(expect, ctx):
+    jobs_dir = ctx["jobs_dir"]
+    job_id = ctx["job"]["id"] if ctx.get("job") else ""
+    fails = []
+    for pattern in expect.get("files", []):
+        if not any(jobs_dir.glob(pattern.format(job=job_id))):
+            fails.append(f"no file matches factory/jobs/{pattern}")
+    for pattern, prefix in expect.get("first_lines", {}).items():
+        matches = sorted(jobs_dir.glob(pattern.format(job=job_id)))
+        line = first_line(matches[0]) if matches else ""
+        if not line.startswith(prefix):
+            fails.append(f"factory/jobs/{pattern} starts {line!r}, expected {prefix!r}")
+    return fails
+
+
+def outside_checks(expect, ctx):
+    fails = []
+    if "issue_labels" in expect:
+        missing = sorted(set(expect["issue_labels"]) - set(ctx.get("issue_labels", [])))
+        if missing:
+            fails.append(f"the issue lacks labels {missing}")
+    if "pr_state" in expect and ctx.get("pr_state") != expect["pr_state"]:
+        fails.append(f"PR state is {ctx.get('pr_state')}, expected {expect['pr_state']}")
+    if "stdout_contains" in expect and expect["stdout_contains"] not in ctx.get("stdout", ""):
+        fails.append(f"factory output lacks {expect['stdout_contains']!r}")
+    if expect.get("learning_issue") and not ctx.get("learning_issues"):
+        fails.append("no factory:learning issue was filed")
+    if "runner_log_contains" in expect and expect["runner_log_contains"] not in ctx.get("runner_log", ""):
+        fails.append(f"runner.log lacks {expect['runner_log_contains']!r}")
+    return fails
+
+
+def check_expect(expect, ctx):
+    """Failure messages, empty when every `expect` key holds."""
+    return job_checks(expect, ctx) + review_checks(expect, ctx) + file_checks(expect, ctx) + outside_checks(expect, ctx)

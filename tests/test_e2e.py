@@ -123,3 +123,75 @@ class SpendTest(E2ECase):
         self.assertEqual(spend.remaining(), 1.25)
         spend.add_session(5)
         self.assertEqual(spend.remaining(), 0.0)
+
+
+REVIEW = """VERDICT: CHANGES
+
+## Summary
+- one
+
+## Findings
+1. [missing-test] app.py:3 add a test
+2. [other:naming] app.py:9 rename x
+3. no tag here
+
+## Notes
+1. [secrets] a note, not a finding
+"""
+
+
+class ExpectTest(E2ECase):
+    def ctx(self, stage="merged", review=REVIEW, **extra):
+        jobs = self.tmp / "jobs"
+        job_dir = jobs / "001-e2e"
+        (job_dir / "round-1").mkdir(parents=True, exist_ok=True)
+        (job_dir / "round-1" / "review-code.md").write_text(review)
+        job = {"id": "001-e2e", "stage": stage}
+        return {"job": job, "job_dir": job_dir, "jobs_dir": jobs,
+                "tags": {"missing-test", "secrets"}, "stdout": "", **extra}
+
+    def test_stage_as_value_or_list(self):
+        self.assertEqual(self.e2e.check_expect({"stage": "merged"}, self.ctx()), [])
+        self.assertEqual(self.e2e.check_expect({"stage": ["needs-human", "merged"]}, self.ctx()), [])
+        self.assertEqual(len(self.e2e.check_expect({"stage": "rejected"}, self.ctx())), 1)
+
+    def test_stage_not_needs_a_job(self):
+        self.assertEqual(self.e2e.check_expect({"stage_not": ["intake"]}, self.ctx(stage="build")), [])
+        self.assertEqual(len(self.e2e.check_expect({"stage_not": ["intake"]}, self.ctx(job=None))), 1)
+
+    def test_findings_and_tags(self):
+        ctx = self.ctx()
+        self.assertEqual(self.e2e.check_expect({"min_findings": 3, "tags_any": ["other:*"]}, ctx), [])
+        self.assertEqual(len(self.e2e.check_expect({"min_findings": 4}, ctx)), 1)
+        self.assertEqual(len(self.e2e.check_expect({"review_tags_valid": True}, ctx)), 1)
+        self.assertEqual(len(self.e2e.check_expect({"tags_any": ["secrets"]}, ctx)), 1)
+        clean = REVIEW.replace("3. no tag here\n", "")
+        self.assertEqual(self.e2e.check_expect({"review_tags_valid": True}, self.ctx(review=clean)), [])
+
+    def test_decision_and_budget(self):
+        ctx = self.ctx(stage="needs-human")
+        (ctx["job_dir"] / "decision.md").write_text("\nESCALATE\n\n## Why\nbudget\n")
+        ctx["job"]["budget_stopped"] = "job_usd 0.05 reached"
+        self.assertEqual(self.e2e.check_expect({"decision_prefix": "ESCALATE", "budget_stopped": True}, ctx), [])
+        del ctx["job"]["budget_stopped"]
+        self.assertEqual(len(self.e2e.check_expect({"budget_stopped": True}, ctx)), 1)
+
+    def test_files_and_first_lines_under_the_jobs_folder(self):
+        ctx = self.ctx()
+        proposal = ctx["jobs_dir"] / "learning" / "convention" / "proposal.md"
+        proposal.parent.mkdir(parents=True)
+        proposal.write_text("PROPOSAL: lint rule for x\n")
+        expect = {"files": ["{job}/round-1/review-code.md", "learning/*/proposal.md"],
+                  "first_lines": {"learning/*/proposal.md": "PROPOSAL:"}}
+        self.assertEqual(self.e2e.check_expect(expect, ctx), [])
+        self.assertEqual(len(self.e2e.check_expect({"files": ["{job}/decision.md"]}, ctx)), 1)
+        self.assertEqual(len(self.e2e.check_expect({"first_lines": {"learning/*/proposal.md": "NOPE"}}, ctx)), 1)
+
+    def test_github_and_output_keys(self):
+        ctx = self.ctx(issue_labels=["factory", "factory:needs-info"], pr_state="OPEN",
+                       learning_issues=[12], runner_log="2026 ran exit=0 3s cost=$1.00\n", stdout="LEARN: none")
+        expect = {"issue_labels": ["factory:needs-info"], "pr_state": "OPEN", "learning_issue": True,
+                  "runner_log_contains": "ran exit=", "stdout_contains": "LEARN:"}
+        self.assertEqual(self.e2e.check_expect(expect, ctx), [])
+        ctx.update(issue_labels=[], pr_state="MERGED", learning_issues=[], runner_log="", stdout="")
+        self.assertEqual(len(self.e2e.check_expect(expect, ctx)), 5)
