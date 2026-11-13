@@ -1,6 +1,6 @@
 {
-  "name": "superpowers-factory-dev",
-  "description": "Local marketplace for the superpowers-factory plugin",
+  "name": "superpowers-factory",
+  "description": "Design with Superpowers, then let an unattended software factory build each plan as one pull request",
   "owner": {
     "name": "Nandan Thakur"
   },

@@ -94,7 +94,7 @@ In Claude Code:
 
 ```text
 /plugin marketplace add nandan-exale/superpowers-factory
-/plugin install superpowers-factory@superpowers-factory-dev
+/plugin install superpowers-factory@superpowers-factory
 ```
 
 Restart Claude Code (or open a new session) so the plugin's skills and hooks
@@ -103,12 +103,22 @@ load.
 To update later:
 
 ```text
-/plugin marketplace update superpowers-factory-dev
-/plugin update superpowers-factory@superpowers-factory-dev
+/plugin marketplace update superpowers-factory
+/plugin update superpowers-factory@superpowers-factory
 ```
 
 If you installed it for a single project (`--scope project`), run the update
 from that project with the same scope.
+
+Installed it before the marketplace was renamed (as
+`superpowers-factory@superpowers-factory-dev`)? Remove the old marketplace and
+install again:
+
+```text
+/plugin marketplace remove superpowers-factory-dev
+/plugin marketplace add nandan-exale/superpowers-factory
+/plugin install superpowers-factory@superpowers-factory
+```
 
 ---
 
