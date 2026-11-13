@@ -17,6 +17,8 @@ comes from `secret-tool lookup service <service>`, or from
 through its environment, never in arguments, files or logs.
 """
 
+import base64
+import contextlib
 import fcntl
 import hashlib
 import io
@@ -28,8 +30,10 @@ import re
 import shutil
 import signal
 import subprocess
+import stat
 import sys
 import tarfile
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -114,7 +118,8 @@ def git(*args):
                           env={**os.environ, **GIT_ENV})
 
 
-RISKY_KEYS = ("credential.helper", "core.askpass", "core.sshcommand")
+RISKY_KEYS = ("credential.helper", "core.askpass", "core.sshcommand", "core.gitproxy",
+              "core.alternaterefscommand")
 
 
 def risky_local_key():
@@ -286,26 +291,60 @@ def chores():
 
 
 STATE_BRANCH = "factory-state"
-STATE_REF = f"refs/remotes/origin/{STATE_BRANCH}"
 STATE_MAX_BYTES = 1_000_000
+STATE_IDENTITY = "factory-runner <factory-runner@users.noreply.github.com>"
+# factory-state is fetched, built and pushed in a fresh bare repository outside the checkout, with no
+# system or global config and only these settings. A session can write the checkout's .git (config,
+# hooks, alternates, attributes), so nothing there may steer git run after it, outside the sandbox.
+STATE_CONFIG = {"core.hooksPath": "/dev/null", "core.fsmonitor": "false", "gc.auto": "0",
+                "maintenance.auto": "false", "protocol.allow": "never", "protocol.https.allow": "always",
+                "protocol.ssh.allow": "always", "protocol.file.allow": "always"}
 
 
-def git_dir():
-    return Path(subprocess.run(["git", "rev-parse", "--absolute-git-dir"], cwd=REPO, capture_output=True,
-                               text=True).stdout.strip())
+def origin_url():
+    """origin's URL. Read before the session runs: in CI the checkout is still fresh then."""
+    return git("config", "--get", "remote.origin.url").stdout.strip()
 
 
-def fetch_state():
-    """True when origin has a factory-state branch (now fetched)."""
-    heads = git("ls-remote", "--heads", "origin", STATE_BRANCH)
-    if heads.returncode != 0:
-        raise RuntimeError(first_line(heads.stderr))
-    if not heads.stdout.strip():
-        return False
-    res = git("fetch", "-q", "origin", f"+refs/heads/{STATE_BRANCH}:{STATE_REF}")
-    if res.returncode != 0:
-        raise RuntimeError(first_line(res.stderr))
-    return True
+def state_auth(url):
+    """GH_TOKEN as the header actions/checkout sends, scoped to an https origin; nothing otherwise."""
+    token = os.environ.get("GH_TOKEN")
+    if not token or not url.startswith("https://"):
+        return {}
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return {f"http.{url}.extraheader": f"AUTHORIZATION: basic {basic}"}
+
+
+@contextlib.contextmanager
+def state_repo(url):
+    """A throwaway bare repository; yields g(*args, stdin=b"", check=True) that runs git in it."""
+    path = Path(tempfile.mkdtemp(prefix="factory-state-"))
+    config = {**STATE_CONFIG, **state_auth(url)}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_ENV, GIT_DIR=str(path), GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+               GIT_CONFIG_COUNT=str(len(config)))
+    for i, (key, value) in enumerate(config.items()):
+        env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = key, value
+
+    def g(*args, stdin=b"", check=True):
+        res = subprocess.run(["git", *args], cwd=path, input=stdin, capture_output=True, env=env)
+        if check and res.returncode != 0:
+            raise RuntimeError(f"git {args[0]}: {first_line(res.stderr.decode(errors='replace'))}")
+        return res
+
+    try:
+        g("init", "-q", "--bare", "--template=")
+        yield g
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def fetch_state(g, url):
+    """origin's factory-state commit, fetched into the state repository, or "" when there is none."""
+    if not g("ls-remote", "--heads", url, STATE_BRANCH).stdout.strip():
+        return ""
+    g("fetch", "-q", url, f"+refs/heads/{STATE_BRANCH}:refs/heads/{STATE_BRANCH}")
+    return g("rev-parse", f"refs/heads/{STATE_BRANCH}").stdout.decode().strip()
 
 
 def extract_state(tar_bytes, target):
@@ -320,20 +359,17 @@ def extract_state(tar_bytes, target):
         tar.extractall(target, members=members)
 
 
-def restore_state():
-    """Copy factory-state into factory/jobs. True when restored or when there's nothing to restore."""
+def restore_state(url):
+    """Copy origin's factory-state into factory/jobs. True when restored or when there's nothing to restore."""
     try:
-        if not fetch_state():
-            return True
+        with state_repo(url) as g:
+            if not fetch_state(g, url):
+                return True
+            archive = g("archive", "--format=tar", f"refs/heads/{STATE_BRANCH}").stdout
     except RuntimeError as exc:
-        log(f"error: fetching {STATE_BRANCH}: {exc}")
+        log(f"error: restoring {STATE_BRANCH}: {exc}")
         return False
-    archive = subprocess.run(["git", *GIT_SAFE, "archive", "--format=tar", STATE_REF], cwd=REPO,
-                             capture_output=True)
-    if archive.returncode != 0:
-        log(f"error: reading {STATE_BRANCH}: {first_line(archive.stderr.decode(errors='replace'))}")
-        return False
-    extract_state(archive.stdout, JOBS)
+    extract_state(archive, JOBS)
     return True
 
 
@@ -346,66 +382,73 @@ def state_files():
             and p.stat().st_size <= STATE_MAX_BYTES]
 
 
-def state_commit(files, parent):
-    """A commit of `files` (relative to factory/jobs) on `parent`, built in a temporary index so the
-    main checkout's index and tree are untouched. Blobs are hashed with --no-filters and the commit
-    is unsigned, so no filter or gpg program from .git/config runs outside the sandbox."""
-    index = git_dir() / "factory-state.index"
-    index.unlink(missing_ok=True)
-    env = {**os.environ, **GIT_ENV, "GIT_INDEX_FILE": str(index), "GIT_DIR": str(git_dir()),
-           "GIT_WORK_TREE": str(JOBS)}
-
-    def g(*args, stdin=None):
-        res = subprocess.run(["git", *GIT_SAFE, *args], cwd=JOBS, capture_output=True, text=True, env=env,
-                             input=stdin)
-        if res.returncode != 0:
-            raise RuntimeError(f"git {args[0]}: {first_line(res.stderr)}")
-        return res.stdout.strip()
-
+def read_state_file(rel):
+    """The bytes of factory/jobs/<rel>, opened without following a symlink at any step, or None when it
+    isn't a regular file of at most STATE_MAX_BYTES."""
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    fds = []
     try:
-        blobs = []
-        for i in range(0, len(files), 200):
-            blobs += g("hash-object", "-w", "--no-filters", "--", *files[i:i + 200]).split()
-        if files:
-            g("update-index", "-z", "--add", "--index-info",
-              stdin="".join(f"100644 {blob}\t{path}\0" for blob, path in zip(blobs, files)))
-        tree = g("write-tree")
-        return g("commit-tree", "--no-gpg-sign", tree, *(["-p", parent] if parent else []),
-                 "-m", f"factory state {stamp()}")
+        fds.append(os.open(JOBS, flags | os.O_DIRECTORY))
+        *dirs, name = rel.split("/")
+        for d in dirs:
+            fds.append(os.open(d, flags | os.O_DIRECTORY, dir_fd=fds[-1]))
+        fds.append(os.open(name, flags | os.O_NONBLOCK, dir_fd=fds[-1]))  # a FIFO must not block the open
+        st = os.fstat(fds[-1])
+        if not stat.S_ISREG(st.st_mode) or st.st_size > STATE_MAX_BYTES:
+            return None
+        data = b""
+        while chunk := os.read(fds[-1], STATE_MAX_BYTES + 1 - len(data)):
+            data += chunk
+            if len(data) > STATE_MAX_BYTES:
+                return None
+        return data
+    except OSError:
+        return None
     finally:
-        index.unlink(missing_ok=True)
+        for fd in fds:
+            os.close(fd)
 
 
-def save_state():
-    """Commit factory/jobs on top of origin's factory-state and push it; one retry after a rejection.
-    Refuses, like a local tick's preflight, when the session left config that would run code through git."""
+def fast_import_path(rel):
+    """rel as a C-style quoted path for git fast-import."""
+    escaped = "".join("\\\\" if c == "\\" else '\\"' if c == '"' else "\\n" if c == "\n"
+                      else f"\\{ord(c):03o}" if ord(c) < 32 or ord(c) == 127 else c for c in rel)
+    return f'"{escaped}"'.encode("utf-8", "surrogateescape")
+
+
+def state_stream(ref, contents, parent):
+    """A git fast-import stream: one commit on `ref` (child of `parent`, if any) whose tree is exactly
+    `contents`. fast-import applies no attributes, filters or signing."""
+    message = f"factory state {stamp()}".encode()
+    out = [f"commit {ref}\ncommitter {STATE_IDENTITY} {int(time.time())} +0000\ndata {len(message)}\n".encode(),
+           message, b"\n"]
+    if parent:
+        out.append(f"from {parent}\n".encode())
+    out.append(b"deleteall\n")
+    for rel, data in contents.items():
+        out += [b"M 100644 inline ", fast_import_path(rel), f"\ndata {len(data)}\n".encode(), data, b"\n"]
+    return b"".join(out)
+
+
+def save_state(url):
+    """Commit factory/jobs on top of origin's factory-state and push it; one retry after a rejection."""
     if JOBS.resolve() != REPO.resolve() / "factory" / "jobs":
         log(f"error: factory/jobs is a symlink; not saving {STATE_BRANCH}")
         return False
-    if hooks_or_fsmonitor_configured():
-        log(f"error: git hooks or fsmonitor configured in this clone; not saving {STATE_BRANCH}")
-        return False
-    key = risky_local_key()
-    if key:
-        log(f"error: git config in this clone sets {key}; not saving {STATE_BRANCH}")
-        return False
-    JOBS.mkdir(parents=True, exist_ok=True)
-    files = state_files()
-    for _ in range(2):
-        parent = git("rev-parse", "-q", "--verify", STATE_REF).stdout.strip()
-        try:
-            commit = state_commit(files, parent)
-        except RuntimeError as exc:
-            log(f"error: saving {STATE_BRANCH}: {exc}")
-            return False
-        if git("push", "-q", "origin", f"{commit}:refs/heads/{STATE_BRANCH}").returncode == 0:
-            git("update-ref", STATE_REF, commit)
-            return True
-        try:
-            fetch_state()
-        except RuntimeError as exc:
-            log(f"error: fetching {STATE_BRANCH}: {exc}")
-            return False
+    contents = {}
+    for rel in state_files():
+        data = read_state_file(rel)
+        if data is not None:
+            contents[rel] = data
+    try:
+        with state_repo(url) as g:
+            for attempt in range(2):
+                ref = f"refs/factory/save-{attempt}"
+                g("fast-import", "--quiet", stdin=state_stream(ref, contents, fetch_state(g, url)))
+                if g("push", "-q", url, f"{ref}:refs/heads/{STATE_BRANCH}", check=False).returncode == 0:
+                    return True
+    except RuntimeError as exc:
+        log(f"error: saving {STATE_BRANCH}: {exc}")
     return False
 
 
@@ -427,13 +470,17 @@ def cmd_tick(ci=False):
         return tick_body(base, runner, None)
     signal.signal(signal.SIGTERM, on_sigterm)
     token = ci_token()
-    if not restore_state():
+    url = origin_url()
+    if not url:
+        log(f"error: no origin remote; {STATE_BRANCH} can't be restored or saved")
+        return 1
+    if not restore_state(url):
         return 1
     code = 1
     try:
         code = tick_body(base, runner, token or "")
     finally:
-        if not save_state():
+        if not save_state(url):
             log(f"error: {STATE_BRANCH} not saved; this run's state is in the workflow artifact")
             code = 1
     return code
