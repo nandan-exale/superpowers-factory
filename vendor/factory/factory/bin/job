@@ -1353,8 +1353,15 @@ def dependency_state(issue, jobs):
         return "merged"
     if job and job["stage"] == "rejected":
         return "failed"
-    state = gh_json("issue", "view", str(issue), "--json", "state")["state"]
-    return "failed" if state == "CLOSED" else "pending"
+    try:
+        state = gh_json("issue", "view", str(issue), "--json", "state")["state"]
+    except Refused as e:
+        # A mistyped `depends` must not break the queue for every other issue.
+        if "Could not resolve to an issue" not in str(e):
+            raise
+        return "failed"
+    # MERGED means the number is a pull request, not a part's issue.
+    return "pending" if state == "OPEN" else "failed"
 
 
 def planned_depends(issue):
