@@ -381,5 +381,37 @@ calling a change done; CI runs the same script.
   `git log -- vendor/factory` is the unmodified import; every later commit is a
   modification (see `vendor/factory/NOTICE`).
 
+### Proving changes with real agents
+
+Two maintainer tools spend real money, so they never run in CI. Run them by hand
+before a release that changes agent prompts or the job state machine.
+
+**Prompt evals** run each agent prompt against small fixtures in `tests/evals/`
+and compare pass rates with `tests/evals/baseline.json`:
+
+```bash
+scripts/eval --samples 3 --max-usd 5
+```
+
+Add `--agent reviewer-code` to run one agent. A case fails when its pass rate
+falls more than one sample below its baseline. After a prompt change you mean,
+run with `--update-baseline` and review the diff before committing it.
+
+**End-to-end scenarios** run the whole factory on a disposable GitHub repo.
+Make the sandbox once: a new private repo whose name contains `e2e` or
+`sandbox` (for example `factory-e2e`), holding a tiny Python CLI (`app.py`
+with an argparse entry point, a `VERSION` file and one unittest), with the
+factory installed (`/factory-install`) and committed. Then, from this repo:
+
+```bash
+scripts/e2e --sandbox ~/src/factory-e2e --max-usd 10
+```
+
+`--only <scenario>` runs one, and `--keep` leaves its issue, PR and branch open
+for a look. Results are in `e2e-results/<timestamp>/`. The tool refuses
+any repo that isn't on github.com, is this plugin's repo, or lacks `e2e` or
+`sandbox` in its name. The `runner-tick` scenario needs the runner's Keychain
+token and is skipped without it.
+
 Licensed under **GPLv3**, because `vendor/factory/` is a modified copy of
 GPLv3-licensed code.
