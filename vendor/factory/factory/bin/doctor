@@ -102,6 +102,11 @@ def check_config():
     allow = (cfg.get("secret_scan") or {}).get("allow", []) if isinstance(cfg.get("secret_scan", {}), dict) else None
     if not isinstance(allow, list) or not all(isinstance(p, str) and p for p in allow):
         problems.append(fail("secret_scan.allow must be a list of glob strings"))
+    handoff = cfg.get("handoff")
+    if handoff is not None:
+        cap = handoff.get("max_tasks_per_part") if isinstance(handoff, dict) else None
+        if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
+            problems.append(fail("handoff.max_tasks_per_part must be a positive integer"))
     if not isinstance(cfg.get("agents", {}).get("learner"), dict):
         problems.append(fail("agents.learner missing; expected {model, effort}"))
     return problems

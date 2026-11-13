@@ -54,7 +54,9 @@ rewrites files, such as `--fix`.
 - **Plan** (only when `plan.md` exists): every task in it is done, each entry
   under build.md's `## Deviations` has a reason that keeps the task's intent,
   and the behaviour each task adds has a test. A missing task, an unexplained
-  deviation or an untested task is a CHANGES finding.
+  deviation or an untested task is a CHANGES finding. When the header has
+  `Tasks: N-M of T.`, judge only the tasks in `Tasks:`; earlier ones are
+  already on the base branch and later ones belong to other parts.
 - **Commits**: short one-line messages and nothing stray committed. Trailers
   and attribution (`Co-Authored-By` and the like) are the builder's, not
   yours: the builder runs on a different model than you, so never compare

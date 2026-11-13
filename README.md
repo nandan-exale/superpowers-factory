@@ -165,6 +165,14 @@ install again:
 A live dashboard: `cd factory && python3 -m http.server`, then open
 <http://localhost:8000/dashboard.html>.
 
+**Large plans.** When a plan has more tasks than
+`handoff.max_tasks_per_part` (8 by default), `/factory-handoff` proposes
+splitting it into parts and files one issue per part, in order. Each part is
+its own PR, carrying out only its task range. A part waits
+(`wait … depends #N` in `job queue`) until the part before it has merged; if
+that part is rejected or its issue is closed unmerged, the next part stops at
+`needs-human` so you can re-plan.
+
 ### Approving and steering
 
 - **To approve** an escalated PR, merge it on GitHub.

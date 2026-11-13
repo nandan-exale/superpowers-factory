@@ -85,6 +85,10 @@ the build order, not a suggestion.
   opens a PR, pushes anything other than your job branch, or changes files
   outside your worktree. List each skipped step under `## Deviations` as
   `For the human: <step>`.
+- When the header has `Tasks: N-M of T.`, this job is one part of the plan:
+  carry out only the tasks in `Tasks:`. Earlier tasks are already merged on
+  the base branch; don't start later ones. `## Plan tasks` in build.md lists
+  only your range.
 - Never edit the spec or plan files the job was planned from (`intake.md`
   names them); the gate fails the round if you do. If a task asks you to,
   skip that step and record it under `## Deviations`.

@@ -91,6 +91,23 @@ class DoctorTest(unittest.TestCase):
                      "secret_scan.allow"):
             self.assertIn(text, out)
 
+    def test_bad_handoff_cap_fails(self):
+        for cap in (0, "8", True):
+            def change(text, cap=cap):
+                cfg = json.loads(text)
+                cfg["handoff"] = {"max_tasks_per_part": cap}
+                return json.dumps(cfg)
+            self.edit("factory/config.json", change)
+            self.assertFails("config", "handoff.max_tasks_per_part must be a positive integer")
+
+    def test_config_without_handoff_passes(self):
+        def change(text):
+            cfg = json.loads(text)
+            cfg.pop("handoff", None)
+            return json.dumps(cfg)
+        self.edit("factory/config.json", change)
+        self.assertIn("PASS config", self.doctor("--fast").stdout)
+
     def runner_settings(self, change):
         path = self.p.root / "factory/runner-settings.json"
         data = json.loads(path.read_text())

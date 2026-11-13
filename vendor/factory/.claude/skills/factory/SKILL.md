@@ -88,6 +88,10 @@ Every prompt starts with the job's header, built from `job.json` and `base_branc
 Job: <id>. Job folder: <repo>/factory/jobs/<id>/. Main checkout: <repo>. Worktree: <worktree>. Branch: <branch>. Base: origin/<base>. Issue: #<issue>.
 ```
 
+When `job.json` has `tasks` (a part of a larger plan), append
+` Tasks: <tasks> of <plan_tasks>.` to the header, for example
+`Tasks: 4-7 of 12.`
+
 `<header>` below means that line. Keep `Job folder: <path>/` exactly as shown:
 the job's cost is found by that string.
 
