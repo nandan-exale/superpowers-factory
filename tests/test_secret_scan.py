@@ -55,6 +55,10 @@ class SecretScanTest(ScanCase):
                      "app.test.js": SAMPLES["github token"] + "\n"})
         self.assertEqual(self.job.secret_hits(self.wt), [])
 
+    def test_the_factorys_own_scripts_do_not_trip_the_scan(self):
+        self.commit({f"copy/{name}": (VENDOR / "factory/bin" / name).read_text() for name in ("job", "gate")})
+        self.assertEqual(self.job.secret_hits(self.wt), [])
+
     def test_push_refuses_on_a_hit_and_pushes_when_clean(self):
         job = {"id": "001-x", "stage": "build", "worktree": str(self.wt), "branch": "factory/001-x"}
         self.commit({"conf.py": SAMPLES["aws access key"] + "\n"})
