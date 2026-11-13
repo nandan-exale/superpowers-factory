@@ -1,7 +1,7 @@
 # Phase 2: prove it — Design
 
 Date: 2026-11-13
-Status: draft for review. Phase 2 of 5 (see `2026-11-13-roadmap.md`).
+Status: approved design. Phase 2 of 5 (see `2026-11-13-roadmap.md`).
 
 ## Goal
 
@@ -59,10 +59,13 @@ Per scenario the harness:
    branch (only artifacts whose numbers it recorded in step 3–4).
 
 `expect` keys (all optional): `stage` (final stage or list of allowed
-stages), `decision_prefix` (`BUDGET:` etc.), `review_tags_valid` (every
+stages), `stage_not`, `decision_prefix` (first line of
+`decision.md`), `budget_stopped` (`job.json` records a budget stop), `review_tags_valid` (every
 finding in every review parses with a valid tag), `min_findings`,
-`issue_labels`, `pr_state`, `files` (glob → must exist in the job folder),
-`stdout_contains` (in the factory run's output).
+`issue_labels`, `pr_state`, `files` (globs under the sandbox's `factory/jobs/`,
+`{job}` = the job id, each must match), `first_lines` (`{glob: prefix}`),
+`stdout_contains` (in the factory run's output), `learning_issue` (a
+`factory:learning` issue was filed), `runner_log_contains`.
 
 Scenarios shipped:
 
@@ -70,7 +73,7 @@ Scenarios shipped:
 |---|---|---|
 | `happy-path` | small, clear issue ("add a `--version` flag") | `stage: merged`, valid review tags |
 | `tagged-finding` | issue that asks for code but says "no tests needed" | `min_findings: 1`, `review_tags_valid`, a `missing-test` or `other:*` tag |
-| `budget-stop` | `config_patch.budgets.job_usd: 0.05` | `stage: needs-human`, `decision_prefix: "BUDGET:"` |
+| `budget-stop` | `config_patch.budgets.job_usd: 0.05` | `stage: needs-human`, `budget_stopped: true` |
 | `needs-info` | ambiguous one-line issue | `stage: needs-info`, `issue_labels` has `factory:needs-info` |
 | `learning` | `setup.py` seeds 3 finished job folders with the same tag; `learning.threshold: 3` | `factory:learning` issue filed, `proposal.md` first line `PROPOSAL:` |
 | `runner-tick` | requires the Keychain token; runs `factory/bin/runner tick` once instead of step 4 | `runner.log` shows a run, job leaves `intake` |
@@ -93,7 +96,7 @@ Fixtures live in `tests/evals/<agent>/<case>/`:
 - `files/`: a tiny repo snapshot the agent may read (copied to a temp dir
   that becomes the cwd);
 - `expect.json`: `{"first_line": "DECISION: REJECT"}` or
-  `{"verdict": "REQUEST-CHANGES", "tags_any": ["missing-test"]}` or
+  `{"verdict": "CHANGES", "tags_any": ["missing-test"]}` or
   `{"regex": "..."}`.
 
 For each case and sample, it runs
