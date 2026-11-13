@@ -11,6 +11,8 @@ upstream file, keeping the domains the project added; upstream's own domains are
 always kept in sync with upstream, so one the project removed comes back; a settings file
 the project changed beyond domains is a merge, or unchanged if upstream didn't
 change it either). config and settings are unchanged when applying would not change the file.
+A file with no manifest entry that matches a version listed in the plugin's
+vendor/known-hashes.json is safe.
 --apply-safe copies new and safe files, merges config and settings, and
 rewrites factory/manifest.json. merge files are left for the user and keep
 their old manifest entry and the old vendor_hash, so the update stays pending.
@@ -27,8 +29,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from factory_files import (FILES, MANIFEST, SETTINGS, manifest_data, settings_core, sha256_file,  # noqa: E402
-                           vendor_dir, write_json)
+from factory_files import (FILES, MANIFEST, SETTINGS, known_hashes, manifest_data, settings_core,  # noqa: E402
+                           sha256_file, vendor_dir, write_json)
 
 OWNED = {"factory/checks.sh"}
 CONFIG = "factory/config.json"
@@ -97,6 +99,7 @@ def classify_settings(project, vendor, manifest):
 
 
 def classify(project, vendor, manifest):
+    known = known_hashes()
     base = (manifest or {}).get("files")
     rows = []
     for rel in FILES:
@@ -116,7 +119,8 @@ def classify(project, vendor, manifest):
             if mine == upstream:
                 rows.append(("unchanged", rel))
             elif was is None:
-                rows.append(("merge", rel))
+                # No record of what was installed: an exact old upstream version is unedited.
+                rows.append(("safe" if mine in known.get(rel, ()) else "merge", rel))
             elif upstream == was:
                 rows.append(("unchanged", rel))
             elif mine == was:
