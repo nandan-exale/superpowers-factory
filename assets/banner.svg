@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 480" width="1200" height="480" role="img" aria-labelledby="t d">
+  <title id="t">superpowers-factory</title>
+  <desc id="d">You design with Superpowers: brainstorm, then plan. A handoff files one GitHub issue. The factory builds it unattended: intake, build, gate, review, approve, then a pull request. Recurring review findings loop back as proposed checks.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f1222"/>
+      <stop offset="1" stop-color="#1a1036"/>
+    </linearGradient>
+    <linearGradient id="design" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#f97316"/>
+    </linearGradient>
+    <linearGradient id="build" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ffffff" stroke-opacity="0.04"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrowLoop" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="#a78bfa"/>
+    </marker>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="480" rx="24" fill="url(#bg)"/>
+  <rect width="1200" height="480" rx="24" fill="url(#grid)"/>
+
+  <!-- Title -->
+  <text x="64" y="86" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="44" font-weight="800" fill="#f8fafc" letter-spacing="-1">superpowers<tspan fill="url(#build)">-factory</tspan></text>
+  <text x="66" y="122" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" fill="#cbd5e1">You design with Superpowers. The factory builds, checks, reviews and ships — unattended.</text>
+
+  <!-- Phase labels -->
+  <text x="64" y="186" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="700" fill="#fbbf24" letter-spacing="2">DESIGN · WITH YOU</text>
+  <text x="452" y="186" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="700" fill="#67e8f9" letter-spacing="2">BUILD · UNATTENDED</text>
+
+  <!-- Design lane -->
+  <g font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle">
+    <rect x="64" y="206" width="132" height="64" rx="14" fill="#1f2937" stroke="url(#design)" stroke-width="2"/>
+    <text x="130" y="236" font-size="17" font-weight="700" fill="#fde68a">brainstorm</text>
+    <text x="130" y="256" font-size="12" fill="#cbd5e1">→ spec</text>
+
+    <rect x="224" y="206" width="132" height="64" rx="14" fill="#1f2937" stroke="url(#design)" stroke-width="2"/>
+    <text x="290" y="236" font-size="17" font-weight="700" fill="#fde68a">plan</text>
+    <text x="290" y="256" font-size="12" fill="#cbd5e1">→ tasks</text>
+  </g>
+  <path d="M198 238H220" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Handoff: issue -->
+  <path d="M358 238H392" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <g font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle">
+    <circle cx="420" cy="238" r="24" fill="#111827" stroke="#e2e8f0" stroke-width="2"/>
+    <circle cx="420" cy="238" r="8" fill="#e2e8f0"/>
+    <text x="420" y="286" font-size="12" fill="#cbd5e1">issue</text>
+  </g>
+  <path d="M446 238H470" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Factory belt -->
+  <rect x="474" y="196" width="566" height="84" rx="18" fill="#0b1020" stroke="url(#build)" stroke-width="2" filter="url(#glow)" opacity="0.95"/>
+  <g font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle" font-size="15" font-weight="700" fill="#e0f2fe">
+    <rect x="490" y="214" width="92" height="48" rx="10" fill="#172554"/>
+    <text x="536" y="243">intake</text>
+    <rect x="600" y="214" width="92" height="48" rx="10" fill="#1e1b4b"/>
+    <text x="646" y="243">build</text>
+    <rect x="710" y="214" width="92" height="48" rx="10" fill="#172554"/>
+    <text x="756" y="243">gate</text>
+    <rect x="820" y="214" width="92" height="48" rx="10" fill="#1e1b4b"/>
+    <text x="866" y="243">review</text>
+    <rect x="930" y="214" width="96" height="48" rx="10" fill="#172554"/>
+    <text x="978" y="243">approve</text>
+  </g>
+  <g stroke="#38bdf8" stroke-width="2">
+    <path d="M582 238H598"/>
+    <path d="M692 238H708"/>
+    <path d="M802 238H818"/>
+    <path d="M912 238H928"/>
+  </g>
+
+  <!-- PR out -->
+  <path d="M1042 238H1070" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <g font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle">
+    <rect x="1074" y="210" width="66" height="56" rx="12" fill="#052e16" stroke="#22c55e" stroke-width="2"/>
+    <text x="1107" y="244" font-size="17" font-weight="800" fill="#86efac">PR</text>
+    <text x="1107" y="290" font-size="12" fill="#cbd5e1">merged or</text>
+    <text x="1107" y="306" font-size="12" fill="#cbd5e1">your call</text>
+  </g>
+
+  <!-- Learning loop -->
+  <path d="M866 284C866 350 770 366 650 366C530 366 452 344 432 300" fill="none" stroke="#a78bfa" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#arrowLoop)"/>
+  <text x="650" y="396" text-anchor="middle" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#c4b5fd">recurring findings → proposed checks (you approve)</text>
+
+  <!-- Guardrails strip -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#94a3b8">
+    <text x="64" y="448">budgets &amp; evidence</text>
+    <text x="236" y="448">·</text>
+    <text x="254" y="448">sandboxed headless runner</text>
+    <text x="466" y="448">·</text>
+    <text x="484" y="448">auto setup &amp; updates</text>
+    <text x="662" y="448">·</text>
+    <text x="680" y="448">learning loop</text>
+    <text x="1136" y="448" text-anchor="end" fill="#64748b">GPLv3</text>
+  </g>
+</svg>

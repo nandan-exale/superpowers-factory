@@ -1,5 +1,7 @@
 # superpowers-factory
 
+![superpowers-factory: design with Superpowers, then the factory builds, gates, reviews and ships each plan as one PR](assets/banner.svg)
+
 Design with [Superpowers](https://github.com/obra/superpowers).
 
 You brainstorm and plan interactively. `/factory-handoff` turns the committed
