@@ -61,6 +61,11 @@ class CheckTest(RepoCopyTest):
         )
         return res.returncode, res.stdout
 
+    def refresh_hashes(self):
+        """List the copy's edited vendored files, as scripts/known-hashes does after a vendored edit."""
+        subprocess.run([sys.executable, str(REPO / "scripts" / "known-hashes"), "--root", str(self.root)],
+                       capture_output=True, check=True)
+
     def assertFails(self, name, needle, *extra):
         code, out = self.run_check(*extra)
         self.assertEqual(code, 1, out)
@@ -72,6 +77,18 @@ class CheckTest(RepoCopyTest):
         self.assertEqual(code, 0, out)
         self.assertNotIn("FAIL", out)
         self.assertIn("PASS license", out)
+
+    def test_mismatched_plugin_and_marketplace_versions_fail(self):
+        def change(text):
+            data = json.loads(text)
+            data["plugins"][0]["version"] = "9.9.9"
+            return json.dumps(data, indent=2) + "\n"
+        self.edit(".claude-plugin/marketplace.json", change)
+        self.assertFails("json", "marketplace.json version 9.9.9")
+
+    def test_stale_known_hashes_fail(self):
+        self.edit("vendor/factory/factory/bin/gate", lambda text: text + "# edited\n")
+        self.assertFails("hashes", "factory/bin/gate")
 
     def test_syntax_error_in_stop_hook_fails(self):
         self.edit("vendor/factory/factory/bin/stop-hook", lambda text: text + "\ndef broken(:\n")
@@ -118,6 +135,7 @@ class CheckTest(RepoCopyTest):
     def test_nested_model_key_is_ignored(self):
         self.edit("vendor/factory/.claude/agents/approver.md",
                   lambda text: text.replace("tools:", "extra:\n  model: nested\ntools:", 1))
+        self.refresh_hashes()
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
 
@@ -152,6 +170,7 @@ class CheckTest(RepoCopyTest):
 
     def test_bom_does_not_hide_frontmatter(self):
         self.edit("vendor/factory/.claude/agents/intake.md", lambda text: "\ufeff" + text)
+        self.refresh_hashes()
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
 

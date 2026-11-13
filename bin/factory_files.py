@@ -9,6 +9,7 @@ from pathlib import Path
 PLUGIN = Path(__file__).resolve().parents[1]
 VENDOR = PLUGIN / "vendor" / "factory"
 MANIFEST = "factory/manifest.json"
+KNOWN_HASHES = PLUGIN / "vendor" / "known-hashes.json"
 SETTINGS = "factory/runner-settings.json"
 AGENTS = ("intake", "spec-writer", "builder", "reviewer-code",
           "reviewer-security", "reviewer-ux", "reviewer-ui", "approver", "learner")
@@ -31,6 +32,17 @@ FILES = (
 def vendor_dir():
     """The vendored factory, or $FACTORY_VENDOR_DIR (tests stand in a changed upstream)."""
     return Path(os.environ.get("FACTORY_VENDOR_DIR") or VENDOR)
+
+
+def known_hashes():
+    """{rel: [sha256, ...]}: every version each vendored file has had, from the plugin's history.
+    {} when the list is missing or unreadable. $FACTORY_KNOWN_HASHES points elsewhere (tests)."""
+    path = Path(os.environ.get("FACTORY_KNOWN_HASHES") or KNOWN_HASHES)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def sha256_file(path):

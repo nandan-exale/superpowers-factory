@@ -153,6 +153,7 @@ install again:
 |---|---|---|
 | `/factory-install` | Claude Code, in a project | Sets the factory up in the current project. |
 | `/factory-update` | Claude Code, in a project | Updates an installed factory to the plugin's version. Keeps your changes, shows every diff, never commits. |
+| `/factory-uninstall` | Claude Code, in a project | Removes the factory from this project (keeps job history and labels). |
 | `/factory-handoff` | Claude Code, after a plan | Files the committed spec and plan as one `factory:planned` issue. |
 | `/factory run` | Claude Code | Builds every open `factory` issue, `concurrency` at a time. |
 | `/factory run <n>` | Claude Code | Builds only issue `#n`. |
@@ -179,6 +180,14 @@ When the plugin is newer than a project's factory, Claude offers
 changed, adds new config keys while keeping your values, never touches
 `factory/checks.sh`, and asks you about any file both you and the plugin
 changed.
+
+### Removing the factory
+
+Run `/factory-uninstall` in the project. It stops the runner, removes the
+factory's files, Stop hook, CI workflow and AGENTS.md section, and shows you
+the diff to commit. It keeps `factory/jobs/` (your job history), your own
+`factory/checks.sh` and the GitHub labels, and prints the commands to delete
+them if you want to. It refuses while a job still has a worktree.
 
 ---
 

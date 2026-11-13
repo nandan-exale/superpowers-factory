@@ -17,6 +17,13 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
   **installed** in this repo to build it (see "Software factory" below). Not the
   source: change `vendor/factory/` instead. The installed copy changes only
   through `/factory-update`, by a human.
+- `scripts/known-hashes`: writes `vendor/known-hashes.json`, every hash each
+  vendored file has had, so `/factory-update` recognises unedited old copies.
+  `--check` (run by `scripts/check`) fails when a current version is missing.
+- `scripts/release`: bumps the version, writes `CHANGELOG.md`, commits and tags.
+- `bin/factory-uninstall-settings`: removes only the factory's Stop hook from a
+  project's `.claude/settings.json`; `skills/factory-uninstall/` is the
+  `/factory-uninstall` skill that uses it.
 - `docs/superpowers/specs`, `docs/superpowers/plans`: approved designs and plans.
 
 ## Invariants
@@ -44,6 +51,13 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
 - Interactive sessions: don't commit or push unless asked. Factory jobs (in a
   `.worktrees/<job-id>` worktree) commit and push their job branch as their
   agent instructions say. Nobody force-pushes without a human's confirmation.
+- Edited a vendored file? Run `scripts/known-hashes` and commit
+  `vendor/known-hashes.json` with your plugin-side changes (`scripts/check`
+  fails until you do).
+- Releasing: `scripts/release X.Y.Z` on a clean `main`. It bumps both
+  manifests, refreshes the known hashes, adds a CHANGELOG section from the
+  commit subjects since the last `v*` tag, runs `scripts/check`, commits and
+  tags. It never pushes; it prints the push command.
 
 ## Software factory
 

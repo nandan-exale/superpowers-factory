@@ -79,6 +79,7 @@ class FactoryProject:
         spec = importlib.util.spec_from_loader(loader.name, loader)
         mod = importlib.util.module_from_spec(spec)
         loader.exec_module(mod)
+        mod.NET_WAITS = (0, 0, 0)  # a failing network call in a test must not sleep
 
         def fake_gh(*args):
             self.gh_calls.append(args)

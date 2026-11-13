@@ -36,8 +36,9 @@ Five small, independent changes:
   path in `bin/factory_files.py` `FILES`, collects the SHA-256 of each version
   the file has had (`git show <commit>:<path>`). It writes
   `vendor/known-hashes.json`: `{"<rel path>": ["<sha256>", ...]}`, sorted, with
-  the current version included. `--check` exits 1 if the file on disk differs
-  from what it would write.
+  the current version included. `--check` exits 1 if a current vendored
+  file's hash is missing from the list (a full comparison would fail in
+  shallow CI clones and repo copies).
 - `bin/factory_files.py` gains `known_hashes()` (reads the JSON; `{}` when
   missing).
 - `bin/factory-update-plan` `classify()`: in the branch where the manifest has
@@ -62,7 +63,7 @@ At the end of the merge path, after the job is saved as `merged`, call
 `sync_main()` never raises. The runner already pulls at the start of each
 tick, so this matters mostly for interactive `/factory run`.
 
-### 3. Retried network calls (vendored `job`, same commit as 2)
+### 3. Retried network calls (vendored `job`, its own commit)
 
 `run_net(cmd, cwd=REPO, check=True)` wraps `run()`: up to 3 attempts, each
 with `timeout=120`, sleeping 2 s then 5 s between attempts. It retries on a
@@ -70,8 +71,10 @@ non-zero exit or a `subprocess.TimeoutExpired`; after the last attempt it
 raises `Refused` with the last error (as `run()` does). Sleep is
 `time.sleep`, patched in tests.
 
-Used for: `git fetch`, `git push` (branch push and branch delete),
-`git ls-remote`, and `gh` calls whose subcommand is `view`, `list`, `status`,
+Used for: `git fetch`, `git push` of the job branch (the best-effort branch
+delete after a merge stays on `run`: once GitHub has deleted the branch it
+fails every time), `git ls-remote`, and `gh` calls whose subcommand is
+`view`, `list`, `status`,
 `checks`, or `api` without `-X`/`--method`. `gh()` decides by its arguments:
 read-only calls go through `run_net`, all others through `run`. The `git(job,
 ...)` helper does the same for `fetch` and `push`.
