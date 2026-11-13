@@ -55,6 +55,24 @@ class SecretScanTest(ScanCase):
                      "app.test.js": SAMPLES["github token"] + "\n"})
         self.assertEqual(self.job.secret_hits(self.wt), [])
 
+    def test_a_secret_added_then_deleted_is_still_in_history(self):
+        self.commit({"conf.py": "x = 1\n" + SAMPLES["aws access key"] + "\n"})
+        self.commit({"conf.py": "x = 1\n"})
+        self.assertEqual([h.split(": ")[0] for h in self.job.secret_hits(self.wt)], ["conf.py:2 aws access key"])
+
+    def test_a_non_ascii_file_name_is_scanned(self):
+        self.commit({"caf\u00e9.py": SAMPLES["github token"] + "\n"})
+        self.assertEqual([h.split(": ")[0] for h in self.job.secret_hits(self.wt)], ["caf\u00e9.py:1 github token"])
+
+    def test_an_added_line_that_looks_like_a_file_header_is_scanned(self):
+        self.commit({"notes.txt": "++ " + SAMPLES["slack token"] + "\n"})
+        self.assertEqual([h.split(": ")[0] for h in self.job.secret_hits(self.wt)], ["notes.txt:1 slack token"])
+
+    def test_a_secret_kept_across_commits_is_reported_once(self):
+        self.commit({"conf.py": SAMPLES["aws access key"] + "\n"})
+        self.commit({"other.py": "y = 2\n"})
+        self.assertEqual(len(self.job.secret_hits(self.wt)), 1)
+
     def test_the_factorys_own_scripts_do_not_trip_the_scan(self):
         self.commit({f"copy/{name}": (VENDOR / "factory/bin" / name).read_text() for name in ("job", "gate")})
         self.assertEqual(self.job.secret_hits(self.wt), [])
