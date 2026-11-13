@@ -412,7 +412,7 @@ SECRET_RULES = (
     ("slack token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}")),
     ("assigned secret", re.compile(r"(api[_-]?key|secret|token|password)\s*[:=]\s*[\"'][^\"']{16,}[\"']", re.I)),
 )
-HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 SECRET_WHY = ("A possible secret reached the remote branch (see `## Secrets` in this round's checks.md). "
               "Rotate it, then remove it from the branch history before giving feedback.")
 
@@ -423,23 +423,26 @@ def path_matches(path, pattern):
 
 
 def added_lines(diff):
-    """(path, new line number, text) for every added line of a unified diff."""
-    path, line = None, 0
-    for text in diff.splitlines():
+    """(path, new line number, text) for every added line of a unified diff.
+    Hunk bodies are read by their line counts, so an added line that looks like a header is still scanned,
+    and a path git couldn't print plainly is kept as printed rather than skipped."""
+    path, line, old_left, new_left = "?", 0, 0, 0
+    for text in diff.split("\n"):
+        if old_left > 0 or new_left > 0:
+            if text.startswith("+"):
+                yield path, line, text[1:]
+                line, new_left = line + 1, new_left - 1
+            elif text.startswith("-"):
+                old_left -= 1
+            elif text.startswith(" "):
+                line, old_left, new_left = line + 1, old_left - 1, new_left - 1
+            continue
         if text.startswith("+++ "):
-            path = text[6:] if text.startswith("+++ b/") else None
+            path = text[6:] if text.startswith("+++ b/") else text[4:]
             continue
         m = HUNK.match(text)
         if m:
-            line = int(m.group(1))
-            continue
-        if path is None or text.startswith("--- "):
-            continue
-        if text.startswith("+"):
-            yield path, line, text[1:]
-            line += 1
-        elif text.startswith(" "):
-            line += 1
+            old_left, line, new_left = int(m.group(1) or 1), int(m.group(2)), int(m.group(3) or 1)
 
 
 def mask(value):
@@ -447,19 +450,21 @@ def mask(value):
 
 
 def secret_hits(worktree):
-    """`path:line rule: masked` for each added line on the branch that matches a secret rule."""
+    """`path:line rule: masked` for each line any branch commit adds that matches a secret rule.
+    Every commit is scanned, because a secret deleted in a later commit is still pushed in history."""
     allow = (CONFIG.get("secret_scan") or {}).get("allow", ["**/*.test.*", "**/fixtures/**"])
-    diff = run(["git", "diff", "--no-color", "--unified=0", f"origin/{BASE}...HEAD"], cwd=worktree).stdout
-    hits = []
+    diff = run(["git", "-c", "core.quotePath=false", "log", "-p", "--no-merges", "--no-color", "--no-ext-diff",
+                "--format=", "--unified=0", f"origin/{BASE}..HEAD"], cwd=worktree).stdout
+    hits = {}
     for path, n, text in added_lines(diff):
         if any(path_matches(path, pattern) for pattern in allow):
             continue
         for name, rule in SECRET_RULES:
             m = rule.search(text)
             if m:
-                hits.append(f"{path}:{n} {name}: {mask(m.group(0))}")
+                hits.setdefault((path, name, m.group(0)), f"{path}:{n} {name}: {mask(m.group(0))}")
                 break
-    return hits
+    return list(hits.values())
 
 
 def cmd_scan(job):
