@@ -59,7 +59,7 @@ TRANSITIONS = {
     "review": {"approve", "build", "needs-human"},
     "approve": {"merging", "needs-human"},
     "merging": {"needs-human"},
-    "needs-human": {"build", "rejected"},
+    "needs-human": {"build", "rejected", "merging"},
 }
 TERMINAL = {"merged", "rejected"}
 # Any unfinished job can move to merged once its PR is merged on GitHub,
@@ -381,6 +381,21 @@ def cmd_resume():
         return
     PAUSE_FILE.unlink(missing_ok=True)
     print(f"RESUME: cleared {p['reason']} (since {p['time']})")
+
+
+def risk_ok_label():
+    return LABELS.get("risk_ok", "factory:risk-ok")
+
+
+def risky_listed(job):
+    """`- <status> <path>` lines under `## Risky changes` in the current round's checks.md."""
+    path = round_dir(job) / "checks.md"
+    body = section(path, "Risky changes") if path.exists() else None
+    return [line[2:].strip() for line in (body or "").splitlines() if line.startswith("- ")]
+
+
+def has_risk_ok(job):
+    return risk_ok_label() in {l["name"] for l in fetch_issue(job["issue"])["labels"]}
 
 
 # ---- Learning ---------------------------------------------------------------
@@ -1295,6 +1310,12 @@ def advance(job, stage):
         line = first_line(d / "decision.md")
         require(line == want, f"decision.md starts with {line!r}, not {want}")
 
+    elif old == "needs-human" and stage == "merging":
+        require(job.get("risk_stopped"), "only a job stopped for risky changes can go back to merging")
+        require(has_risk_ok(job), f"add the {risk_ok_label()} label to issue #{job['issue']} first")
+        job.pop("risk_stopped")
+        label("issue", job["issue"], remove=LABELS["needs_human"])
+
     elif old == "needs-human":
         require(Path(job["worktree"]).exists(),
                 f"{job['id']} never reached build; reject it and hand off a fixed plan instead")
@@ -1306,6 +1327,7 @@ def advance(job, stage):
         job["budget_base_usd"] = job["cost_usd"]
         job["budget_base_time"] = now()
         job.pop("budget_stopped", None)
+        job.pop("risk_stopped", None)
         next_round(job)
         label("issue", job["issue"], remove=LABELS["needs_human"])
 
@@ -1387,6 +1409,8 @@ def cmd_queue():
                 other_rows.append(("wait", n, j["id"], j["stage"], "waiting for the author"))
         elif j["stage"] == "needs-human" and j["pr"] and (j.get("feedback_pending") or pr_comments(j)):
             replied_rows.append(("resume", n, j["id"], j["stage"], "PR feedback"))
+        elif j["stage"] == "needs-human" and j.get("risk_stopped") and has_risk_ok(j):
+            replied_rows.append(("resume", n, j["id"], j["stage"], f"{risk_ok_label()} added"))
         elif j["stage"] == "needs-human":
             other_rows.append(("wait", n, j["id"], j["stage"], f"merge PR #{j['pr']}, or give feedback"
                                if j["pr"] else "give feedback" if Path(j["worktree"]).exists()
@@ -1457,6 +1481,11 @@ def cmd_merge(job):
                  "The next `/factory run` sends them to the builder.")
     if job.get("feedback_pending") or pr_comments(job):
         return fail(unhandled)
+    risky = risky_listed(job)
+    if risky and not has_risk_ok(job):
+        job["risk_stopped"] = True
+        return fail(f"This PR changes dependencies or CI: {', '.join(risky)}. Review it, then add "
+                    f"`{risk_ok_label()}` to the issue and run the factory again, or merge it yourself.")
     git(job, "fetch", "origin", BASE)
     merged = git(job, "merge", "--no-edit", f"origin/{BASE}", check=False)
     if merged.returncode != 0:
