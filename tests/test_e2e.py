@@ -84,3 +84,42 @@ class GuardTest(E2ECase):
     def test_refuses_when_doctor_fails(self):
         with self.assertRaisesRegex(self.e2e.Refused, "doctor"):
             self.guard(FAKE_DOCTOR_EXIT=1)
+
+
+class ConfigTest(E2ECase):
+    def test_deep_merge_recurses_and_leaves_inputs_alone(self):
+        base = {"budgets": {"job_usd": 25, "daily_usd": 100}, "base_branch": "main"}
+        merged = self.e2e.deep_merge(base, {"budgets": {"job_usd": 0.05}, "x": [1]})
+        self.assertEqual(merged, {"budgets": {"job_usd": 0.05, "daily_usd": 100}, "base_branch": "main", "x": [1]})
+        self.assertEqual(base["budgets"]["job_usd"], 25)
+
+    def test_scenario_config_forces_the_daily_budget(self):
+        cfg = self.e2e.scenario_config({"budgets": {"daily_usd": 100}}, {"budgets": {"daily_usd": 999}}, 7.456)
+        self.assertEqual(cfg["budgets"]["daily_usd"], 7.46)
+
+
+class SpendTest(E2ECase):
+    def write_log(self, job, *entries):
+        d = self.sb.repo / "factory" / "jobs" / job
+        d.mkdir(parents=True, exist_ok=True)
+        with (d / "log.jsonl").open("a") as f:
+            for t, usd in entries:
+                f.write(json.dumps({"t": t.strftime("%Y-%m-%dT%H:%M:%SZ"), "delta_usd": usd}) + "\n")
+
+    def test_log_spend_counts_lines_since_a_time_in_every_log(self):
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        self.write_log("001-a", (now - timedelta(hours=2), 5.0), (now, 1.25))
+        self.write_log("learning", (now, 0.5))
+        with (self.sb.repo / "factory/jobs/001-a/log.jsonl").open("a") as f:
+            f.write('{"t": "2026-')  # a torn line being written right now
+        self.assertEqual(self.e2e.log_spend(self.sb.repo / "factory" / "jobs", now), 1.75)
+
+    def test_spend_adds_sessions_to_logs_and_counts_down_the_cap(self):
+        jobs = self.sb.repo / "factory" / "jobs"
+        spend = self.e2e.Spend(jobs, 2.0)
+        self.write_log("001-a", (spend.start, 0.5))
+        spend.add_session(0.25)
+        self.assertEqual(spend.total(), 0.75)
+        self.assertEqual(spend.remaining(), 1.25)
+        spend.add_session(5)
+        self.assertEqual(spend.remaining(), 0.0)

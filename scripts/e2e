@@ -77,3 +77,59 @@ def guard(sandbox):
     if run([str(sandbox / "factory" / "bin" / "doctor")], sandbox).returncode != 0:
         raise Refused("factory/bin/doctor failed in the sandbox; fix what it reports")
     return repo
+
+
+def deep_merge(base, patch):
+    """A new dict: patch's values over base's, recursing where both sides are dicts."""
+    out = dict(base)
+    for key, value in patch.items():
+        both = isinstance(value, dict) and isinstance(out.get(key), dict)
+        out[key] = deep_merge(out[key], value) if both else value
+    return out
+
+
+def scenario_config(original, patch, daily_usd):
+    """The sandbox config for a scenario: its patch, then the daily budget the cap allows."""
+    return deep_merge(deep_merge(original, patch), {"budgets": {"daily_usd": round(daily_usd, 2)}})
+
+
+def utcnow():
+    """Whole seconds, like the factory's log timestamps, so `>= start` counts the first line."""
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+def parse_time(text):
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def log_spend(jobs_dir, since):
+    """Cost the sandbox's job and learning logs added at or after `since`."""
+    total = 0.0
+    for path in sorted(jobs_dir.rglob("log.jsonl")):
+        for line in path.read_text().splitlines():
+            try:
+                entry = json.loads(line)
+                if parse_time(entry["t"]) >= since:
+                    total += float(entry["delta_usd"])
+            except (ValueError, KeyError, TypeError):
+                continue  # a line the factory is still writing; the next read counts it
+    return round(total, 6)
+
+
+class Spend:
+    """What this e2e run has spent. Job logs miss the orchestrator session, and a session's own
+    total may include its subagents, so both are added: the cap errs towards stopping early."""
+
+    def __init__(self, jobs_dir, cap):
+        self.jobs_dir, self.cap = jobs_dir, cap
+        self.start = utcnow()
+        self.sessions = 0.0
+
+    def add_session(self, usd):
+        self.sessions += usd
+
+    def total(self):
+        return round(log_spend(self.jobs_dir, self.start) + self.sessions, 2)
+
+    def remaining(self):
+        return max(0.0, round(self.cap - self.total(), 2))
