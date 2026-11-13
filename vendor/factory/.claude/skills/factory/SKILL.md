@@ -114,7 +114,9 @@ run. Tell the user the fix is a new handoff. When they ask to reject it, use
 reason on stdin), then close the issue (`gh issue close <issue>`).
 If it exits non-zero without a `PLANNED:` line, stop this job and show the user the error; don't retry it.
 
-Otherwise spawn `intake` with `<header>`. When it returns, read its
+Otherwise spawn `intake` with `<header>`, but replace its `Worktree: <worktree>.`
+with `Worktree: none, it doesn't exist yet. Work in the main checkout.`
+(`advance <id> spec` creates the worktree). When it returns, read its
 decision:
 
 - `ACCEPT`: run `factory/bin/route <id>`, then `factory/bin/job advance <id> spec`

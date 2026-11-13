@@ -899,9 +899,21 @@ def close_fences(text):
     return text + "\n" + max(fences, key=len) if len(fences) % 2 else text
 
 
-def evidence_md(job, full=False):
+def closes_issue(text, issue):
+    """True when `text` already has a closing reference to this issue, outside any evidence block."""
+    start = text.find(EVIDENCE_START)
+    end = text.find(EVIDENCE_END, start) if start >= 0 else -1
+    if end >= 0:
+        text = text[:start] + text[end + len(EVIDENCE_END):]
+    n = int(issue)
+    return bool(re.search(rf"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s*"
+                          rf"(?:https://github\.com/[\w.-]+/[\w.-]+/issues/{n}\b|#{n}\b)", text, re.I))
+
+
+def evidence_md(job, full=False, closes=True):
     """The PR body block: why the factory thinks this job is done, or why it stopped.
-    `full` keeps every character (for evidence.md); otherwise sections and the block are capped."""
+    `full` keeps every character (for evidence.md); otherwise sections and the block are capped.
+    `closes` adds `Closes #N`; off when the rest of the PR body already closes the issue."""
     d = job_dir(job["id"])
     b = budgets()
     build = d / "build.md"
@@ -915,7 +927,7 @@ def evidence_md(job, full=False):
 
     files = ""
     if Path(job["worktree"]).is_dir():
-        files = git(job, "diff", "--stat=120", "--stat-count=50", f"origin/{BASE}...HEAD", check=False).stdout.strip()
+        files = git(job, "diff", "--stat=120", "--stat-count=50", f"origin/{BASE}...HEAD", check=False).stdout.strip("\n")
         files = fenced(clip(defuse(files))) if files else ""
     checks = "not run"
     if job["round"] and (round_dir(job) / "checks.md").exists():
@@ -940,7 +952,7 @@ def evidence_md(job, full=False):
         f" · time {hours:.1f} h of {hours_limit} since the last allowance",
     ]
     head = f"{EVIDENCE_START}\n## Factory evidence — {job['id']}, round {job['round']}"
-    tail = f"\nCloses #{job['issue']}\n{EVIDENCE_END}\n"
+    tail = (f"\nCloses #{job['issue']}" if closes else "") + f"\n{EVIDENCE_END}\n"
     body = "\n".join([head, *sections])
     room = EVIDENCE_BLOCK_LIMIT - len(tail) - len(note) - 2
     if not full and len(body) > room:
@@ -966,7 +978,8 @@ def publish_evidence(job):
     if job["pr"]:
         try:
             old = gh_json("pr", "view", str(job["pr"]), "--json", "body").get("body") or ""
-            (d / "pr-body.md").write_text(merge_body(old, evidence_md(job)))
+            block = evidence_md(job, closes=not closes_issue(old, job["issue"]))
+            (d / "pr-body.md").write_text(merge_body(old, block))
             gh("pr", "edit", str(job["pr"]), "--body-file", str(d / "pr-body.md"))
             job.pop("evidence_error", None)
         except Refused as e:
@@ -1043,6 +1056,8 @@ def advance(job, stage):
         require(job["pr"] and pr_state(job) == "MERGED", "the PR isn't merged")
         if old == "needs-human":
             label("issue", job["issue"], remove=LABELS["needs_human"])
+        planned = [LABELS["planned"]] if job.get("planned") else []
+        label("issue", job["issue"], remove=",".join([LABELS["queue"], *planned]))
 
     elif stage == "rejected" and old in WAITING:
         require((d / "rejection.md").exists(), "use `job reject` to reject a waiting job")
@@ -1309,6 +1324,7 @@ def cmd_merge(job):
         # Syncing and the gate take minutes; a comment may have landed meanwhile.
         late = pr_comments(job)
         if not late:
+            publish_evidence(job)  # the approver's cost wasn't in the first one
             gh("pr", "merge", str(job["pr"]), f"--{CONFIG['merge_method']}")
     except Refused as e:
         return fail(f"The merge failed:\n\n```\n{e}\n```")
