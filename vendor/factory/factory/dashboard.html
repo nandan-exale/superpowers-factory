@@ -422,6 +422,10 @@ async function render() {
       </div>
       ${cards.get(c).reverse().join('') || '<div class="empty">—</div>'}
     </section>`).join('')
+  try {
+    const p = JSON.parse(await fetchText('jobs/paused.json'))
+    problems.unshift(`Queue paused: ${p.reason} (since ${p.time}). Run factory/bin/job resume once it's fixed.`)
+  } catch { /* not paused */ }
   const banner = problems.map((p) => `<div class="banner">${esc(p)}</div>`).join('')
   if (html + banner !== lastRender) {
     lastRender = html + banner
