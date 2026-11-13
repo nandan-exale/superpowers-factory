@@ -2,7 +2,7 @@
 """Run the software factory unattended.
 
 Usage:
-  runner tick                  one scheduled run: lock, preflight, pull, check the queue, run /factory run headless
+  runner tick                  one scheduled run: lock, preflight, pull, report and digest, check the queue, run /factory run headless
   runner install [--dry-run]   install the launchd LaunchAgent that runs `tick` every runner.interval_minutes
   runner uninstall             unload and delete the LaunchAgent
   runner status                LaunchAgent state and the last lines of factory/jobs/runner.log
@@ -221,8 +221,8 @@ CHORE_SECONDS = 120
 
 
 def chores():
-    """Watch: no Claude session, so it runs every tick. Its failures never fail the tick."""
-    for args in (["watch"],):
+    """Watch, report and digest: no Claude session, so they run every tick. Their failures never fail the tick."""
+    for args in (["watch"], ["report", "--write"], ["digest"]):
         try:
             subprocess.run([sys.executable, str(FACTORY / "bin" / "job"), *args], cwd=REPO,
                            capture_output=True, text=True, timeout=CHORE_SECONDS)

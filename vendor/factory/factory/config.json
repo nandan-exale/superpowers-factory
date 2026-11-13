@@ -8,6 +8,7 @@
     "tags": ["missing-test", "weakened-test", "error-handling", "convention", "docs-not-updated",
              "dead-code", "spec-gap", "input-validation", "secrets", "a11y", "ui-consistency"]
   },
+  "digest": { "enabled": true, "hour": 9, "days": 1 },
   "runner": { "interval_minutes": 15, "max_minutes": 120, "keychain_service": "factory-claude-token" },
   "handoff": { "max_tasks_per_part": 8 },
   "base_branch": "main",
@@ -18,6 +19,7 @@
     "needs_human": "factory:needs-human",
     "planned": "factory:planned",
     "learning": "factory:learning",
+    "digest": "factory:digest",
     "revert": "factory:revert",
     "risk_ok": "factory:risk-ok"
   },
