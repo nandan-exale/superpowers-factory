@@ -1,6 +1,8 @@
-Vendored unmodified from https://github.com/DenisSergeevitch/agents-best-practices
+Vendored from https://github.com/DenisSergeevitch/agents-best-practices
 Commit: da245f8cbfc4c358e8c3cde61dbb703bd40292bc (2026-10-19)
-License: MIT (see LICENSE in this directory)
+Modification: the "Freshness and self-update" section of SKILL.md was replaced by a
+pinned-snapshot note (2026-11-13). Everything else is byte-identical to upstream.
+License: MIT; the copyright and permission notice are unchanged in LICENSE.
 Files: SKILL.md, LICENSE, references/*.md. Images (assets/, icon.jpeg) are not included,
 so image links in SKILL.md and references point to files not shipped here.
-To update: re-run the fetch with a newer commit and update this file.
+To update: re-fetch from a newer commit, redo the modification above, and update this file.
