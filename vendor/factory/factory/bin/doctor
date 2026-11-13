@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -227,6 +228,38 @@ def check_branch_protection(base):
                  "without force-push/deletion rules)")]
 
 
+def platform_name():
+    return platform.system()
+
+
+def unit_name():
+    """Must match unit_name() in factory/bin/runner (a test keeps them equal)."""
+    return f"factory-{hashlib.sha256(str(REPO).encode()).hexdigest()[:12]}"
+
+
+def linux_runner_checks(service):
+    problems = [fail(f"{tool} not found; Claude Code's Linux sandbox needs bubblewrap and socat "
+                     "(apt install bubblewrap socat)") for tool in ("bwrap", "socat") if not shutil.which(tool)]
+    token = False
+    if shutil.which("secret-tool"):
+        res = subprocess.run(["secret-tool", "lookup", "service", service], capture_output=True, text=True)
+        token = res.returncode == 0 and bool(res.stdout.strip())
+    path = Path("~/.config/factory/claude-token").expanduser()
+    if not token and path.exists():
+        token = (path.stat().st_mode & 0o777) == 0o600 and path.stat().st_uid == os.getuid()
+    if not token:
+        problems.append(warn(f"no runner token; store one with secret-tool store --label factory service {service}, "
+                             "or in ~/.config/factory/claude-token with chmod 600"))
+    user = os.environ.get("USER", "")
+    linger = subprocess.run(["loginctl", "show-user", user, "-p", "Linger"], capture_output=True, text=True)
+    if "Linger=yes" not in linger.stdout:
+        problems.append(warn("run loginctl enable-linger $USER so the timer runs while you're logged out"))
+    active = subprocess.run(["systemctl", "--user", "is-active", f"{unit_name()}.timer"], capture_output=True, text=True)
+    if active.stdout.strip() != "active":
+        problems.append(warn("runner timer not active; run factory/bin/runner install"))
+    return problems
+
+
 def check_runner():
     problems = []
     rel = "factory/runner-settings.json"
@@ -245,6 +278,8 @@ def check_runner():
     service = (cfg.get("runner") or {}).get("keychain_service")
     if not service:
         problems.append(fail("factory/config.json has no runner.keychain_service"))
+    elif platform_name() == "Linux":
+        problems += linux_runner_checks(service)
     elif not shutil.which("security"):
         problems.append(warn("security not found; Keychain token not checked"))
     elif subprocess.run(["security", "find-generic-password", "-s", service],
@@ -252,7 +287,7 @@ def check_runner():
         problems.append(warn(f"no Keychain item {service}; run claude setup-token and "
                              f"security add-generic-password -s {service} -a \"$USER\" -w"))
     problems += check_branch_protection(cfg.get("base_branch"))
-    if sys.platform == "darwin" and shutil.which("launchctl"):
+    if platform_name() == "Darwin" and shutil.which("launchctl"):
         if subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{launchd_label()}"],
                           capture_output=True, text=True).returncode != 0:
             problems.append(warn("runner LaunchAgent not loaded; run factory/bin/runner install"))
