@@ -57,9 +57,23 @@ RISKY_CHECKS = ("GATE: PASS\nCOMMIT: abc\n\n## Summary\n- ok\n\n## Protected pat
 class RiskyMergeTest(BudgetCase):
     def approved(self, checks=RISKY_CHECKS):
         self.in_review()
+        self.wt = Path(self.current()["worktree"])
+        git(self.wt, "init", "-q")
+        self.commit_in_worktree("one")
         self.advance("approve")
         (self.d / "decision.md").write_text("APPROVE\n")
         (self.d / "round-1" / "checks.md").write_text(checks)
+
+    def commit_in_worktree(self, message):
+        git(self.wt, "-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-q", "--allow-empty",
+            "-m", message)
+        return git(self.wt, "rev-parse", "HEAD")
+
+    def add_risk_ok(self):
+        self.project.issue["labels"].append({"name": "factory:risk-ok"})
+
+    def label_removals(self):
+        return [c for c in self.gh_calls("issue", "edit") if "factory:risk-ok" in c]
 
     def merge(self):
         out = io.StringIO()
@@ -84,7 +98,7 @@ class RiskyMergeTest(BudgetCase):
         self.approved()
         self.merge()
         self.issues = [{"number": 7, "title": "Build the widget"}]
-        self.project.issue["labels"].append({"name": "factory:risk-ok"})
+        self.add_risk_ok()
         queue = io.StringIO()
         with contextlib.redirect_stdout(queue):
             self.job.cmd_queue()
@@ -93,6 +107,30 @@ class RiskyMergeTest(BudgetCase):
         job = self.advance("merging")
         self.assertEqual(job["stage"], "merging")
         self.assertNotIn("risk_stopped", job)
+        self.assertEqual(job["risk_ok_sha"], git(self.wt, "rev-parse", "HEAD"))
+
+    def test_approval_covers_only_the_reviewed_commit(self):
+        self.approved()
+        self.merge()
+        self.add_risk_ok()
+        self.advance("merging")
+        self.commit_in_worktree("a later change")
+        self.merge()
+        job = self.current()
+        self.assertEqual(job["stage"], "needs-human")
+        self.assertTrue(job["risk_stopped"])
+        self.assertNotIn("risk_ok_sha", job)
+        self.assertTrue(self.label_removals())
+
+    def test_a_label_added_before_the_stop_does_not_skip_it(self):
+        self.approved()
+        self.add_risk_ok()
+        self.merge()
+        job = self.current()
+        self.assertEqual(job["stage"], "needs-human")
+        self.assertTrue(job["risk_stopped"])
+        self.assertTrue(self.label_removals())
+        self.assertIn("added before this commit stopped", (self.d / "decision.md").read_text())
 
     def test_no_risk_ok_no_way_back_to_merging(self):
         self.approved()
@@ -117,3 +155,12 @@ class RiskyMergeTest(BudgetCase):
         (self.d / "feedback-1.md").write_text("# Feedback 1\n\nDrop the new dependency.\n")
         job = self.advance("build")
         self.assertNotIn("risk_stopped", job)
+
+    def test_a_round_after_approval_needs_a_fresh_one(self):
+        self.approved()
+        self.merge()
+        self.add_risk_ok()
+        self.advance("merging")
+        self.job.stop_for_human(self.current(), "the merge failed")
+        (self.d / "feedback-1.md").write_text("# Feedback 1\n\nAdd the new workflow too.\n")
+        self.assertNotIn("risk_ok_sha", self.advance("build"))
