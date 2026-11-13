@@ -87,7 +87,20 @@ on them, tell your human partner which rule, and that the approver will
 escalate, so the job will stop at needs-human for you to merge. This is
 information only; it doesn't stop the handoff.
 
-## 4. File the issue
+## 4. Split a large plan into parts
+
+Count the plan's tasks (`### Task <n>` headings). Read
+`handoff.max_tasks_per_part` from `factory/config.json` (8 when it's
+missing). If the plan has more tasks than that, or your human partner asks
+for parts, propose a split: consecutive task ranges, each ending where the
+tests pass and the change can be reviewed on its own, none over the cap.
+Show each part's range and one line on what it delivers, and ask them to
+confirm or edit the split. Don't split a plan they want built as one PR.
+
+Parts build one after another, never stacked: part `k` starts only after
+part `k-1`'s PR has merged, so expect one PR at a time.
+
+## 5. File the issue
 
 Title: the plan's feature name as a short imperative ("Add dark mode"). Write
 the body to a temp file, then create the issue:
@@ -110,13 +123,29 @@ surfaces: [<surfaces, comma-separated, or nothing>]
 gh issue create --title "<title>" --label factory --label factory:planned --body-file <temp file>
 ```
 
-The block must be exactly as above: five `key: value` lines, paths relative
-to the repo root, the full 40-character sha. `factory/bin/job planned` refuses
-anything else.
+The block must be exactly as above: five `key: value` lines (three more for
+a part, below), paths relative to the repo root, the full 40-character sha.
+`factory/bin/job planned` refuses anything else.
+
+For a split plan, file one issue per part, in order, and wait for each
+`gh issue create` to print its URL before filing the next. Every part gets
+the same `spec`, `plan`, `commit`, `risk` and `surfaces`, plus:
+
+```
+part: <k>/<n>
+tasks: <first>-<last>
+depends: #<previous part's issue>
+```
+
+Leave `depends` out of part 1. Title each `<title> (part <k>/<n>)`. Label
+every part `factory` and `factory:planned`: the factory holds a part until
+the part it depends on has merged.
 
 File the issue as yourself (the account `gh auth status` shows): `factory/bin/job planned` refuses planned issues whose author isn't the account running the factory.
 
-## 5. Report
+## 6. Report
+
+For a split plan, list every part's issue URL in order.
 
 Give the issue URL and say: "Run `/factory run <n>` (or `/factory run`) in a
 fresh session in this project. The plan is pinned to `<short SHA>`; later

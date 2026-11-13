@@ -83,6 +83,11 @@ def check_config():
         if not isinstance(tags, list) or not tags or not all(
                 isinstance(t, str) and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", t) for t in tags):
             problems.append(fail("learning.tags must be a non-empty list of lowercase-hyphenated names"))
+    handoff = cfg.get("handoff")
+    if handoff is not None:
+        cap = handoff.get("max_tasks_per_part") if isinstance(handoff, dict) else None
+        if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
+            problems.append(fail("handoff.max_tasks_per_part must be a positive integer"))
     if not isinstance(cfg.get("agents", {}).get("learner"), dict):
         problems.append(fail("agents.learner missing; expected {model, effort}"))
     return problems
