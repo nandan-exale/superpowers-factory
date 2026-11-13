@@ -132,7 +132,7 @@ def check_compile(root, opts):
             problems.append(f"bin/{name}: {exc}")
     for rel in ("bin/factory_files.py", "bin/factory-manifest", "bin/factory-state",
                 "bin/factory-update-plan", "bin/factory-uninstall-settings", "hooks/factory-session",
-                "scripts/known-hashes", "scripts/release"):
+                "scripts/known-hashes", "scripts/release", "scripts/e2e", "scripts/eval"):
         path = root / rel
         if not path.exists():
             continue  # added by later tasks; JSON and test checks cover their absence

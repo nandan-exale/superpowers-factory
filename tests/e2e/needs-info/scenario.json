@@ -1,0 +1,8 @@
+{
+  "title": "Make it better",
+  "issue_body": "It should be better.",
+  "labels": ["factory"],
+  "config_patch": {},
+  "expect": {"stage": "needs-info", "issue_labels": ["factory:needs-info"]},
+  "timeout_minutes": 20
+}

@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 /factory/jobs/
 /.worktrees/
+/e2e-results/

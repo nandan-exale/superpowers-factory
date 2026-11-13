@@ -21,6 +21,10 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
   vendored file has had, so `/factory-update` recognises unedited old copies.
   `--check` (run by `scripts/check`) fails when a current version is missing.
 - `scripts/release`: bumps the version, writes `CHANGELOG.md`, commits and tags.
+- `scripts/e2e`, `scripts/eval`: maintainer tools that spend real money, run by
+  hand and never in CI. `scripts/e2e` runs the scenarios in `tests/e2e/` on a
+  sandbox repo; `scripts/eval` runs agent prompts against `tests/evals/` and
+  compares with `tests/evals/baseline.json`. Their unit tests fake `claude` and `gh`.
 - `bin/factory-uninstall-settings`: removes only the factory's Stop hook from a
   project's `.claude/settings.json`; `skills/factory-uninstall/` is the
   `/factory-uninstall` skill that uses it.
@@ -54,6 +58,8 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
 - Edited a vendored file? Run `scripts/known-hashes` and commit
   `vendor/known-hashes.json` with your plugin-side changes (`scripts/check`
   fails until you do).
+- Changed an agent prompt? Say in the PR whether you ran `scripts/eval`, and
+  commit a baseline change only with the run that produced it.
 - Releasing: `scripts/release X.Y.Z` on a clean `main`. It bumps both
   manifests, refreshes the known hashes, adds a CHANGELOG section from the
   commit subjects since the last `v*` tag, runs `scripts/check`, commits and

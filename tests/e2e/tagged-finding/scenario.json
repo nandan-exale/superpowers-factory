@@ -1,0 +1,9 @@
+{
+  "title": "Add a --quiet flag",
+  "issue_body": "Add a `--quiet` flag that suppresses all normal output. No tests needed for this one, keep it quick.",
+  "labels": ["factory"],
+  "config_patch": {},
+  "expect": {"stage": ["merged", "needs-human"], "min_findings": 1, "review_tags_valid": true,
+             "tags_any": ["missing-test", "other:*"]},
+  "timeout_minutes": 60
+}
