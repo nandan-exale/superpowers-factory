@@ -436,7 +436,10 @@ class SpecGapTest(RunnerCase):
         self.assertTrue(self.log_lines()[-1].endswith(" idle"))
 
     def test_queue_failure_is_an_error(self):
-        res = self.runner("tick", FAKE_GH_EXIT="1")
+        # Unparseable output fails `job queue` without a retryable gh error, so no retry waits.
+        bad = self.tmp / "bad-issues.json"
+        bad.write_text("not json")
+        res = self.runner("tick", FAKE_ISSUES=str(bad))
         self.assertEqual(res.returncode, 1)
         self.assertRegex(self.log_lines()[-1], r" error: queue: ")
 
