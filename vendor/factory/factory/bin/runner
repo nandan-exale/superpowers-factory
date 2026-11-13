@@ -3,6 +3,7 @@
 
 Usage:
   runner tick                  one scheduled run: lock, preflight, pull, report and digest, check the queue, run /factory run headless
+  runner tick --ci             the same from GitHub Actions: no lock, token from the environment, state on factory-state
   runner install [--dry-run]   install the scheduler: a launchd LaunchAgent on macOS, a systemd user timer on Linux
   runner uninstall             remove it
   runner status                scheduler state and the last lines of factory/jobs/runner.log
@@ -75,6 +76,8 @@ def main(argv):
     try:
         if argv == ["tick"]:
             return cmd_tick()
+        if argv == ["tick", "--ci"]:
+            return cmd_tick(ci=True)
         if argv in (["install"], ["install", "--dry-run"]):
             return cmd_install(dry_run=len(argv) == 2)
         if argv == ["uninstall"]:
@@ -195,6 +198,11 @@ def read_linux_token(service):
 
 def read_token(service):
     return read_linux_token(service) if platform_name() == "Linux" else read_keychain(service)
+
+
+def ci_token():
+    """The token from the workflow's environment, removed from it so only claude's explicit env carries it."""
+    return os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None) or None
 
 
 def missing_sandbox_tools():
@@ -378,20 +386,37 @@ def save_state():
     return False
 
 
-def cmd_tick():
+def cmd_tick(ci=False):
     try:
         base, runner = load_config()
     except ValueError as exc:
         print(f"runner: {exc}", file=sys.stderr)
         log(f"error: config: {exc}")
         return 1
-    lock = open(git_path("factory-runner.lock"), "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        log("busy")
-        return 0
+    if not ci:
+        lock = open(git_path("factory-runner.lock"), "w")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            log("busy")
+            return 0
+        signal.signal(signal.SIGTERM, on_sigterm)
+        return tick_body(base, runner, None)
     signal.signal(signal.SIGTERM, on_sigterm)
+    token = ci_token()
+    if not restore_state():
+        return 1
+    code = 1
+    try:
+        code = tick_body(base, runner, token or "")
+    finally:
+        if not save_state():
+            log(f"error: {STATE_BRANCH} push failed twice; this run's state is in the workflow artifact")
+            code = 1
+    return code
+
+
+def tick_body(base, runner, ci_token_value):
     if hooks_or_fsmonitor_configured():
         log("error: git hooks or fsmonitor configured in this clone; remove them")
         return 1
@@ -419,13 +444,19 @@ def cmd_tick():
     if not work:
         log("idle")
         return 0
-    token = read_token(runner["keychain_service"])
-    if not token:
-        where = (token_problem() or f"no token from secret-tool (service {runner['keychain_service']}) "
-                 f"or {TOKEN_FILE}") if platform_name() == "Linux" else \
-            f"no token in Keychain item {runner['keychain_service']}; run claude setup-token and store it"
-        log(f"error: {where}")
-        return 1
+    if ci_token_value is not None or os.environ.get("GITHUB_ACTIONS") == "true":
+        token = ci_token_value
+        if not token:
+            log("error: CLAUDE_CODE_OAUTH_TOKEN isn't set; add the FACTORY_CLAUDE_TOKEN secret")
+            return 1
+    else:
+        token = read_token(runner["keychain_service"])
+        if not token:
+            where = (token_problem() or f"no token from secret-tool (service {runner['keychain_service']}) "
+                     f"or {TOKEN_FILE}") if platform_name() == "Linux" else \
+                f"no token in Keychain item {runner['keychain_service']}; run claude setup-token and store it"
+            log(f"error: {where}")
+            return 1
     if platform_name() == "Linux" and missing_sandbox_tools():
         log(f"error: {', '.join(missing_sandbox_tools())} missing; Claude Code's Linux sandbox needs bubblewrap and socat")
         return 1
