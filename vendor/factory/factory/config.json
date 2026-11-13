@@ -8,6 +8,7 @@
     "tags": ["missing-test", "weakened-test", "error-handling", "convention", "docs-not-updated",
              "dead-code", "spec-gap", "input-validation", "secrets", "a11y", "ui-consistency"]
   },
+  "digest": { "enabled": true, "hour": 9, "days": 1 },
   "runner": { "interval_minutes": 15, "max_minutes": 120, "keychain_service": "factory-claude-token" },
   "base_branch": "main",
   "merge_method": "merge",
@@ -16,7 +17,8 @@
     "needs_info": "factory:needs-info",
     "needs_human": "factory:needs-human",
     "planned": "factory:planned",
-    "learning": "factory:learning"
+    "learning": "factory:learning",
+    "digest": "factory:digest"
   },
   "pr_feedback": {
     "allowed": []

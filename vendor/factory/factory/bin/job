@@ -26,6 +26,7 @@ Usage:
   job summary [<job>...]         table of jobs: issue, stage, PR, cost, time
   job costs <job>                cost of the job's agents by model
   job report [--days N] [--json] [--write]   spend, throughput, what needs you, findings; --write → jobs/report.json
+  job digest                     post the report on the factory:digest issue, once a day after digest.hour
 
 <job> is a job id (004-dark-mode) or an issue number (12).
 """
@@ -1465,6 +1466,69 @@ def cmd_report(args):
     print(json.dumps(data, indent=2) if as_json else report_md(data), end="" if not as_json else "\n")
 
 
+DIGEST_DEFAULTS = {"enabled": True, "hour": 9, "days": 1}
+DIGEST_EVERY_HOURS = 20
+
+
+def digest_config():
+    return {**DIGEST_DEFAULTS, **(CONFIG.get("digest") or {})}
+
+
+def digest_label():
+    return LABELS.get("digest", "factory:digest")
+
+
+def digest_issue():
+    """The digest issue's number: an open one, else a reopened closed one, else a new pinned one."""
+    label_name = digest_label()
+    issues = sorted(gh_json("issue", "list", "--label", label_name, "--state", "all", "--limit", "20",
+                            "--json", "number,state"), key=lambda i: i["number"])
+    open_ones = [i for i in issues if i["state"] == "OPEN"]
+    if open_ones:
+        return open_ones[0]["number"]
+    if issues:
+        gh("issue", "reopen", str(issues[0]["number"]))
+        return issues[0]["number"]
+    gh("label", "create", label_name, "--color", "0E8A16", "--description", "Daily factory digest", "--force")
+    url = gh("issue", "create", "--title", "Factory digest", "--label", label_name,
+             "--body", "The factory posts a daily summary here.").strip()
+    m = re.search(r"/issues/(\d+)$", url)
+    if not m:
+        raise Refused(f"gh issue create printed {url!r}, not an issue URL")
+    number = int(m.group(1))
+    try:
+        gh("issue", "pin", str(number))
+    except Refused:
+        pass  # pinning is a convenience; the label finds the issue
+    return number
+
+
+def cmd_digest():
+    cfg = digest_config()
+    if not cfg["enabled"]:
+        print("DIGEST: off")
+        return
+    if datetime.now().hour < cfg["hour"]:
+        print(f"DIGEST: not yet (after {cfg['hour']}:00)")
+        return
+    path = JOBS / "digest.json"
+    last = json.loads(path.read_text()) if path.exists() else {}
+    if last.get("posted") and datetime.now(timezone.utc) - parse_time(last["posted"]) < timedelta(hours=DIGEST_EVERY_HOURS):
+        print(f"DIGEST: already posted at {last['posted']}")
+        return
+    try:
+        number = digest_issue()
+        gh("issue", "comment", str(number), "--body", f"{MARKER}\n{report_md(report_data(cfg['days']))}")
+    except Refused as e:
+        print(f"NOTE: digest not posted: {str(e).splitlines()[0]}")
+        return
+    JOBS.mkdir(parents=True, exist_ok=True)
+    tmp = JOBS / "digest.json.tmp"
+    tmp.write_text(json.dumps({"posted": now(), "issue": number}) + "\n")
+    tmp.replace(path)
+    print(f"DIGEST: posted on #{number}")
+
+
 # ---- Commands --------------------------------------------------------------
 
 
@@ -1819,6 +1883,8 @@ def main(argv):
             cmd_costs(resolve(args[0]))
         elif cmd == "report":
             cmd_report(args)
+        elif cmd == "digest" and not args:
+            cmd_digest()
         else:
             die(f"bad arguments: {' '.join(argv)}\n\n{__doc__.strip()}")
     except Refused as e:
