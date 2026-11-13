@@ -44,6 +44,12 @@
   }
   .status.error { color: var(--human); }
   .status.error .dot { background: var(--human); }
+  .pause { font: inherit; font-size: 12px; margin-left: 12px; padding: 2px 10px; border: 1px solid var(--muted);
+           border-radius: 4px; background: none; color: var(--muted); cursor: pointer; }
+  .pause[aria-pressed="true"] { color: var(--human); border-color: var(--human); }
+  .strip { font-family: var(--mono); font-size: 12px; padding: 6px 32px; color: var(--muted);
+           border-bottom: 1px solid var(--line); }
+  .strip b { color: inherit; font-weight: 600; }
   .banner {
     margin: 12px 32px 0; padding: 10px 14px; border: 1px solid var(--human);
     border-radius: 8px; color: var(--human); font-family: var(--mono); font-size: 12px;
@@ -237,6 +243,8 @@
   @media (max-width: 640px) {
     header { padding: 20px 16px 4px; }
     .banner { margin: 12px 16px 0; }
+    .strip { padding: 6px 16px; }
+    .pause { margin-left: 0; }
     .board { grid-template-columns: 1fr; padding: 16px 16px 32px; }
     footer { padding: 0 16px 24px; }
     .d-head { padding: 16px; }
@@ -256,8 +264,10 @@
 <header>
   <h1>Software factory</h1>
   <div class="status" id="status">connecting…</div>
+  <button class="pause" id="pause" type="button" aria-pressed="false">Pause</button>
 </header>
 <div id="banner"></div>
+<div class="strip" id="strip" hidden></div>
 <main class="board" id="board"></main>
 <footer>
   <span>/factory run</span>
@@ -307,6 +317,31 @@ const roundCache = new Map() // "<job>/<n>" -> verdicts of a finished round
 let openJobId = null
 let openPath = null
 let openText = null
+let paused = false
+
+function money(v) { return v == null ? '-' : `$${Number(v).toFixed(2)}` }
+
+// factory/bin/job report --write keeps jobs/report.json current; without it the strip stays hidden.
+async function renderStrip() {
+  let r
+  try { r = JSON.parse(await fetchText('jobs/report.json')) } catch { $('strip').hidden = true; return }
+  const top = (r.findings || [])[0]
+  const waiting = (r.attention || []).length
+  $('strip').innerHTML = [
+    `today <b>${money(r.spend?.today)}</b> of ${money(r.spend?.daily_cap)}`,
+    `<b>${waiting}</b> need${waiting === 1 ? 's' : ''} you`,
+    `<b>${r.throughput?.by_stage?.merged ?? 0}</b> merged in ${r.days} day${r.days === 1 ? '' : 's'}`,
+    top ? `top finding <b>${esc(top.tag)}</b>` : 'no findings',
+  ].join(' · ')
+  $('strip').hidden = false
+}
+
+$('pause').addEventListener('click', () => {
+  paused = !paused
+  $('pause').setAttribute('aria-pressed', String(paused))
+  $('pause').textContent = paused ? 'Resume' : 'Pause'
+  if (!paused) poll()
+})
 
 async function fetchText(url) {
   const res = await fetch(url, { cache: 'no-store' })
@@ -434,10 +469,12 @@ async function render() {
 }
 
 async function poll() {
+  if (paused) return
   const status = $('status')
   try {
     jobs = await loadJobs()
     await render()
+    await renderStrip()
     if (openJobId) await refreshDrawer()
     status.className = 'status'
     status.innerHTML = `<span class="dot"></span>jobs/ · ${new Date().toLocaleTimeString()}`
@@ -457,7 +494,10 @@ async function loadJobs() {
     .filter((h) => h.endsWith('/'))
     .map((h) => h.slice(0, -1))
     .sort()
-  return Promise.all(ids.map(async (id) => JSON.parse(await fetchText(`jobs/${id}/job.json`))))
+  const loaded = await Promise.all(ids.map(async (id) => {
+    try { return JSON.parse(await fetchText(`jobs/${id}/job.json`)) } catch { return null }
+  }))
+  return loaded.filter(Boolean)
 }
 
 // ---- Drawer --------------------------------------------------------------

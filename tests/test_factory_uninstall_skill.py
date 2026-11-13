@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SKILL = Path(__file__).resolve().parents[1] / "skills/factory-uninstall/SKILL.md"
+PLUGIN = Path(__file__).resolve().parents[1]
+SKILL = PLUGIN / "skills/factory-uninstall/SKILL.md"
 
 
 def step(n):
@@ -39,6 +40,16 @@ class FilesStepTest(unittest.TestCase):
                 (root / rel).mkdir(parents=True)
             subprocess.run(command, shell=True, cwd=root, check=True)
             self.assertTrue((root / "factory/jobs").is_dir())
+
+
+class DigestLabelTest(unittest.TestCase):
+    def test_deletes_the_digest_label(self):
+        text = (PLUGIN / "skills" / "factory-uninstall" / "SKILL.md").read_text()
+        self.assertIn("gh label delete factory:digest --yes", text)
+
+    def test_install_creates_the_digest_label(self):
+        text = (PLUGIN / "skills" / "factory-install" / "SKILL.md").read_text()
+        self.assertIn("gh label create factory:digest", text)
 
 
 if __name__ == "__main__":

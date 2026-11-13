@@ -44,11 +44,12 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   install), so `/factory-update` can tell your adaptations from upstream
   changes later.
 
-- **Step 2 (Adapt), labels:** also create the planned and learning labels:
+- **Step 2 (Adapt), labels:** also create the planned, learning and digest labels:
 
   ```bash
   gh label create factory:planned --color 0E8A16 --description "Planned with Superpowers; the factory builds the plan as written"
   gh label create factory:learning --color C5DEF5 --description "Factory-proposed check or rule; add 'factory' to build it"
+  gh label create factory:digest --color 0E8A16 --description "Daily factory digest"
   ```
 
 - **Step 2 (Adapt), AGENTS.md:** add this paragraph to the Software factory

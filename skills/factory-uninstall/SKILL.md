@@ -48,6 +48,7 @@ project root. Commit nothing. Ask before anything this list doesn't cover.
     gh label delete factory:needs-human --yes
     gh label delete factory:planned --yes
     gh label delete factory:learning --yes
+    gh label delete factory:digest --yes
     ```
 
     `/factory-install` (or `"$PLUGIN/bin/factory-state" reset` to get the
