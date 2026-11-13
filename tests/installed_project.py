@@ -12,7 +12,7 @@ from pathlib import Path
 PLUGIN = Path(__file__).resolve().parents[1]
 VENDOR = PLUGIN / "vendor" / "factory"
 AGENTS = ("intake", "spec-writer", "builder", "reviewer-code",
-          "reviewer-security", "reviewer-ux", "reviewer-ui", "approver")
+          "reviewer-security", "reviewer-ux", "reviewer-ui", "approver", "learner")
 COPIED = (
     ".claude/skills/factory/SKILL.md",
     *(f".claude/agents/{name}.md" for name in AGENTS),
@@ -26,7 +26,8 @@ COPIED = (
     "factory/runner-settings.json",
     "factory/dashboard.html",
 )
-LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned")
+LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned",
+          "factory:learning")
 SETTINGS = {"hooks": {"Stop": [{"hooks": [{
     "type": "command",
     "command": "\"$CLAUDE_PROJECT_DIR\"/factory/bin/stop-hook",

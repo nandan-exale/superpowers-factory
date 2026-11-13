@@ -11,7 +11,7 @@ VENDOR = PLUGIN / "vendor" / "factory"
 MANIFEST = "factory/manifest.json"
 SETTINGS = "factory/runner-settings.json"
 AGENTS = ("intake", "spec-writer", "builder", "reviewer-code",
-          "reviewer-security", "reviewer-ux", "reviewer-ui", "approver")
+          "reviewer-security", "reviewer-ux", "reviewer-ui", "approver", "learner")
 FILES = (
     ".claude/skills/factory/SKILL.md",
     *(f".claude/agents/{name}.md" for name in AGENTS),

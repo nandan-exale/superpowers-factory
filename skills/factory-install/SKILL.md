@@ -29,7 +29,7 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   for f in .claude/skills/factory/SKILL.md \
     .claude/agents/intake.md .claude/agents/spec-writer.md .claude/agents/builder.md \
     .claude/agents/reviewer-code.md .claude/agents/reviewer-security.md \
-    .claude/agents/reviewer-ux.md .claude/agents/reviewer-ui.md .claude/agents/approver.md \
+    .claude/agents/reviewer-ux.md .claude/agents/reviewer-ui.md .claude/agents/approver.md .claude/agents/learner.md \
     factory/config.json factory/checks.sh factory/bin/job factory/bin/gate factory/bin/route \
     factory/bin/stop-hook factory/bin/doctor factory/bin/runner factory/runner-settings.json \
     factory/dashboard.html
@@ -44,10 +44,11 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   install), so `/factory-update` can tell your adaptations from upstream
   changes later.
 
-- **Step 2 (Adapt), labels:** also create the planned label:
+- **Step 2 (Adapt), labels:** also create the planned and learning labels:
 
   ```bash
   gh label create factory:planned --color 0E8A16 --description "Planned with Superpowers; the factory builds the plan as written"
+  gh label create factory:learning --color C5DEF5 --description "Factory-proposed check or rule; add 'factory' to build it"
   ```
 
 - **Step 2 (Adapt), AGENTS.md:** add this paragraph to the Software factory

@@ -47,6 +47,22 @@ class DoctorTest(unittest.TestCase):
         self.edit("factory/config.json", change)
         self.assertFails("config", "budgets missing")
 
+    def test_missing_learning_label_fails(self):
+        self.p.set_labels([name for name in LABELS if name != "factory:learning"])
+        self.assertFails("labels", "label 'factory:learning' missing")
+
+    def test_missing_learner_agent_fails(self):
+        (self.p.root / ".claude/agents/learner.md").unlink()
+        self.assertFails("agents", ".claude/agents/learner.md missing")
+
+    def test_bad_learning_config_fails(self):
+        def change(text):
+            cfg = json.loads(text)
+            cfg["learning"]["tags"] = []
+            return json.dumps(cfg)
+        self.edit("factory/config.json", change)
+        self.assertFails("config", "learning.tags")
+
     def runner_settings(self, change):
         path = self.p.root / "factory/runner-settings.json"
         data = json.loads(path.read_text())
