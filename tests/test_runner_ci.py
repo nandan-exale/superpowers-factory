@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from installed_project import InstalledProject, git, load_script
+from installed_project import InstalledProject, clean_env, git, load_script
 
 
 class CiCase(unittest.TestCase):
@@ -21,12 +21,17 @@ class CiCase(unittest.TestCase):
         self.p = InstalledProject(self.tmp)
         self.origin = self.tmp / "origin.git"
         git(self.tmp, "init", "-q", "--bare", "-b", "main", str(self.origin))
+        git(self.origin, "config", "receive.autogc", "false")
         git(self.p.root, "branch", "-M", "main")
         git(self.p.root, "remote", "add", "origin", str(self.origin))
         git(self.p.root, "config", "user.email", "ci@example.com")
         git(self.p.root, "config", "user.name", "ci")
         git(self.p.root, "push", "-q", "-u", "origin", "main")
         self.runner = load_script(f"runner_ci_{id(self)}", self.p.root / "factory/bin/runner")
+        # The runner's git runs in this process too: no background gc or maintenance may outlive the test.
+        env = mock.patch.dict(os.environ, clean_env(), clear=True)
+        env.start()
+        self.addCleanup(env.stop)
 
     def out(self, fn, *args):
         buf = io.StringIO()
