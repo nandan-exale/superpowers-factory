@@ -6,6 +6,7 @@ Usage:
   runner install [--dry-run]   install the scheduler: a launchd LaunchAgent on macOS, a systemd user timer on Linux
   runner uninstall             remove it
   runner status                scheduler state and the last lines of factory/jobs/runner.log
+  runner workflow --claude-version X.Y.Z   print .github/workflows/factory-runner.yml for the Actions runner
 
 The Claude token comes from the macOS Keychain item named by
 runner.keychain_service (store it with
@@ -78,6 +79,8 @@ def main(argv):
             return cmd_uninstall()
         if argv == ["status"]:
             return cmd_status()
+        if len(argv) == 3 and argv[:2] == ["workflow", "--claude-version"]:
+            return cmd_workflow(argv[2])
     except ValueError as exc:
         die(str(exc))
     print(__doc__.strip(), file=sys.stderr)
@@ -493,6 +496,77 @@ def cmd_status():
     print(systemctl("list-timers", "--all", f"{unit_name()}.timer").stdout.rstrip())
     lines = LOG.read_text().splitlines()[-10:] if LOG.exists() else ["(no runner.log yet)"]
     print("\n".join(lines))
+    return 0
+
+
+WORKFLOW = """\
+# Written by factory/bin/runner workflow. Runs the software factory on a schedule.
+name: factory-runner
+on:
+  schedule:
+    - cron: "{cron}"
+  workflow_dispatch:
+concurrency:
+  group: factory-runner
+  cancel-in-progress: false
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: read
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: {timeout}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{{{ secrets.FACTORY_GH_TOKEN }}}}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Sandbox tools
+        run: sudo apt-get update -q && sudo apt-get install -y -q bubblewrap socat
+      - name: Claude Code
+        run: npm install -g @anthropic-ai/claude-code@{claude_version}
+      - name: Git identity from the token's user
+        env:
+          GH_TOKEN: ${{{{ secrets.FACTORY_GH_TOKEN }}}}
+        run: |
+          login="$(gh api user --jq .login)"
+          id="$(gh api user --jq .id)"
+          git config user.name "$login"
+          git config user.email "$id+$login@users.noreply.github.com"
+      - name: Factory tick
+        run: python3 factory/bin/runner tick --ci
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{{{ secrets.FACTORY_CLAUDE_TOKEN }}}}
+          GH_TOKEN: ${{{{ secrets.FACTORY_GH_TOKEN }}}}
+      - name: Keep job state that couldn't be pushed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: factory-jobs-${{{{ github.run_id }}}}
+          path: factory/jobs
+"""
+
+
+def cron(interval_minutes):
+    """GitHub runs schedules at most every 5 min and often late; 15 min is the floor here."""
+    n = max(15, interval_minutes)
+    return f"*/{n} * * * *" if n < 60 else f"0 */{max(1, n // 60)} * * *"
+
+
+def cmd_workflow(claude_version):
+    if not re.fullmatch(r"\d+\.\d+\.\d+", claude_version or ""):
+        die(f"--claude-version must be X.Y.Z (claude --version prints it), not {claude_version!r}")
+    _, runner = load_config()
+    sys.stdout.write(WORKFLOW.format(cron=cron(runner["interval_minutes"]), timeout=runner["max_minutes"] + 10,
+                                     claude_version=claude_version))
     return 0
 
 
