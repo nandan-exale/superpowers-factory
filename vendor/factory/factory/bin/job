@@ -551,6 +551,7 @@ def cmd_agent_learner(tag):
 PLAN_BLOCK = re.compile(r"^```factory-plan[ \t]*\n(.*?)^```[ \t]*$", re.M | re.S)
 PLAN_PATH = re.compile(r"docs/superpowers/[A-Za-z0-9._/-]+\.md")
 PLAN_KEYS = {"spec", "plan", "commit", "risk", "surfaces"}
+PLAN_PART_KEYS = {"part", "tasks", "depends"}
 RISKS = tuple(CONFIG["routing"])
 SURFACES = tuple(CONFIG["surface_reviewers"])
 
@@ -568,8 +569,10 @@ def parse_plan_block(body):
         require(sep, f"factory-plan line isn't `key: value`: {line.strip()!r}")
         require(key.strip() not in fields, f"duplicate factory-plan key {key.strip()!r}")
         fields[key.strip()] = value.strip()
-    require(set(fields) == PLAN_KEYS,
-            f"factory-plan needs exactly {', '.join(sorted(PLAN_KEYS))}; got {', '.join(sorted(fields))}")
+    required, optional = set(fields) & PLAN_KEYS, set(fields) - PLAN_KEYS
+    require(required == PLAN_KEYS and optional <= PLAN_PART_KEYS,
+            f"factory-plan needs {', '.join(sorted(PLAN_KEYS))} (and optionally part, tasks, depends); "
+            f"got {', '.join(sorted(fields))}")
     for key in ("spec", "plan"):
         path = fields[key]
         require(PLAN_PATH.fullmatch(path) and ".." not in path.split("/"),
@@ -582,7 +585,29 @@ def parse_plan_block(body):
     surfaces = [s.strip() for s in listed.group(1).split(",") if s.strip()]
     unknown = [s for s in surfaces if s not in SURFACES]
     require(not unknown, f"unknown surfaces: {', '.join(unknown)} (allowed: {', '.join(SURFACES)})")
-    return {**fields, "surfaces": surfaces}
+    plan = {**{k: fields[k] for k in PLAN_KEYS}, "surfaces": surfaces}
+    plan.update(parse_part(fields))
+    return plan
+
+
+def parse_part(fields):
+    """{} for a whole plan; else {part: (k, n), tasks: (first, last), depends: issue or None}."""
+    if not set(fields) & PLAN_PART_KEYS:
+        return {}
+    require("part" in fields and "tasks" in fields, "part and tasks go together in a factory-plan block")
+    m = re.fullmatch(r"(\d+)/(\d+)", fields["part"])
+    require(m and 1 <= int(m.group(1)) <= int(m.group(2)), f"part must be k/n with 1 ≤ k ≤ n: {fields['part']!r}")
+    k, n = int(m.group(1)), int(m.group(2))
+    t = re.fullmatch(r"(\d+)-(\d+)", fields["tasks"])
+    require(t and 1 <= int(t.group(1)) <= int(t.group(2)), f"tasks must be N-M with 1 ≤ N ≤ M: {fields['tasks']!r}")
+    depends = fields.get("depends")
+    if k == 1:
+        require(depends is None, "part 1 has no depends")
+    else:
+        d = re.fullmatch(r"#(\d+)", depends or "")
+        require(d, f"part {k} needs depends: #<issue of part {k - 1}>, got {depends!r}")
+        depends = int(d.group(1))
+    return {"part": (k, n), "tasks": (int(t.group(1)), int(t.group(2))), "depends": depends}
 
 
 def check_plan_commit(plan):
