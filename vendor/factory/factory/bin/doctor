@@ -19,11 +19,12 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 AGENTS = ("intake", "spec-writer", "builder", "reviewer-code",
-          "reviewer-security", "reviewer-ux", "reviewer-ui", "approver")
+          "reviewer-security", "reviewer-ux", "reviewer-ui", "approver", "learner")
 AGENT_KEYS = {"name", "description", "tools"}
 EXECUTABLES = ("factory/checks.sh", "factory/bin/job", "factory/bin/gate", "factory/bin/route",
                "factory/bin/stop-hook", "factory/bin/doctor", "factory/bin/runner")
-LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned")
+LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned",
+          "factory:learning")
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):")
 CHECKS_TAIL = 20
 # Checks run project code, so they never see the runner's Claude credentials.
@@ -70,6 +71,20 @@ def check_config():
             v = budget.get(key, "missing")
             if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0):
                 problems.append(fail(f"budgets.{key} must be a positive number or null, not {v!r}"))
+    learning = cfg.get("learning")
+    if not isinstance(learning, dict):
+        problems.append(fail("learning missing; expected threshold, window_days and tags"))
+    else:
+        for key in ("threshold", "window_days"):
+            v = learning.get(key)
+            if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+                problems.append(fail(f"learning.{key} must be a positive integer, not {v!r}"))
+        tags = learning.get("tags")
+        if not isinstance(tags, list) or not tags or not all(
+                isinstance(t, str) and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", t) for t in tags):
+            problems.append(fail("learning.tags must be a non-empty list of lowercase-hyphenated names"))
+    if not isinstance(cfg.get("agents", {}).get("learner"), dict):
+        problems.append(fail("agents.learner missing; expected {model, effort}"))
     return problems
 
 
