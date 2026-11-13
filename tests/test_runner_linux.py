@@ -94,3 +94,40 @@ class UnitsTest(LinuxCase):
         self.runner.platform_name = lambda: "Windows"
         with self.assertRaises(SystemExit):
             self.call(self.runner.cmd_install, False)
+
+
+class TokenTest(LinuxCase):
+    def token(self, **env):
+        with mock.patch.dict(os.environ, {**self.env, **env}):
+            return self.runner.read_token("factory-claude-token")
+
+    def write_file_token(self, mode):
+        path = self.home / ".config/factory/claude-token"
+        path.parent.mkdir(parents=True)
+        path.write_text("file-token\n")
+        path.chmod(mode)
+        return path
+
+    def test_secret_tool_first(self):
+        self.write_file_token(0o600)
+        self.assertEqual(self.token(FAKE_SECRET_TOOL_OUT="st-token\n"), "st-token")
+        self.assertEqual(self.calls("secret-tool"), [["lookup", "service", "factory-claude-token"]])
+
+    def test_file_when_secret_tool_has_nothing(self):
+        self.write_file_token(0o600)
+        self.assertEqual(self.token(FAKE_SECRET_TOOL_EXIT="1"), "file-token")
+
+    def test_a_file_readable_by_others_is_refused(self):
+        self.write_file_token(0o644)
+        self.assertIsNone(self.token(FAKE_SECRET_TOOL_EXIT="1"))
+        self.assertIn("chmod 600", self.runner.token_problem())
+
+    def test_no_token_anywhere(self):
+        self.assertIsNone(self.token(FAKE_SECRET_TOOL_EXIT="1"))
+
+
+class SandboxToolsTest(LinuxCase):
+    def test_missing_bubblewrap_is_named(self):
+        (self.bin / "bwrap").unlink()
+        with mock.patch.dict(os.environ, self.env):
+            self.assertEqual(self.runner.missing_sandbox_tools(), ["bwrap"])
