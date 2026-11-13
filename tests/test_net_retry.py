@@ -79,7 +79,8 @@ class RetryTest(unittest.TestCase):
     def test_gh_writes_run_once(self):
         for args in (("issue", "create", "--title", "x"), ("pr", "merge", "1", "--squash"),
                      ("api", "repos/o/r/issues", "-f", "title=x"), ("api", "-X", "DELETE", "x"),
-                     ("api", "--method=POST", "x")):
+                     ("api", "--method=POST", "x"), ("api", "x", "-ftitle=x"), ("api", "x", "-Fn=1"),
+                     ("api", "-XPATCH", "x")):
             fake = self.fake(1)
             with self.assertRaises(self.job.Refused):
                 self.job.gh(*args)
