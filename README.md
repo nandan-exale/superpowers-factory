@@ -357,7 +357,8 @@ file say so, and are yours to make.
 - **Risky changes.** A PR that changes files matching `risky_paths`
   (dependencies, lock files, CI workflows, Dockerfiles, Terraform) is reviewed
   as usual but stops before merging. Review it, add `factory:risk-ok` to the
-  issue and run `/factory run` again, or merge it yourself.
+  issue and run `/factory run` again, or merge it yourself. The label covers
+  the commit you reviewed: if the branch changes again, it stops again.
 - **Secrets.** The builder pushes with `factory/bin/job push`, which refuses
   to push added lines that look like private keys or tokens. The gate scans
   again; a hit there stops the job and asks you to rotate the secret. This is a
