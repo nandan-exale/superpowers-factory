@@ -47,8 +47,8 @@
   .pause { font: inherit; font-size: 12px; margin-left: 12px; padding: 2px 10px; border: 1px solid var(--muted);
            border-radius: 4px; background: none; color: var(--muted); cursor: pointer; }
   .pause[aria-pressed="true"] { color: var(--human); border-color: var(--human); }
-  .strip { font-family: var(--mono); font-size: 12px; padding: 6px 16px; color: var(--muted);
-           border-bottom: 1px solid rgba(127, 127, 127, 0.2); }
+  .strip { font-family: var(--mono); font-size: 12px; padding: 6px 32px; color: var(--muted);
+           border-bottom: 1px solid var(--line); }
   .strip b { color: inherit; font-weight: 600; }
   .banner {
     margin: 12px 32px 0; padding: 10px 14px; border: 1px solid var(--human);
@@ -328,7 +328,7 @@ async function renderStrip() {
   $('strip').innerHTML = [
     `today <b>${money(r.spend?.today)}</b> of ${money(r.spend?.daily_cap)}`,
     `<b>${waiting}</b> need${waiting === 1 ? 's' : ''} you`,
-    `<b>${r.throughput?.by_stage?.merged ?? 0}</b> merged in ${r.days} days`,
+    `<b>${r.throughput?.by_stage?.merged ?? 0}</b> merged in ${r.days} day${r.days === 1 ? '' : 's'}`,
     top ? `top finding <b>${esc(top.tag)}</b>` : 'no findings',
   ].join(' · ')
   $('strip').hidden = false
