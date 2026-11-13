@@ -131,3 +131,42 @@ class SandboxToolsTest(LinuxCase):
         (self.bin / "bwrap").unlink()
         with mock.patch.dict(os.environ, self.env):
             self.assertEqual(self.runner.missing_sandbox_tools(), ["bwrap"])
+
+
+class DoctorLinuxTest(LinuxCase):
+    def setUp(self):
+        super().setUp()
+        self.doctor = load_script(f"doctor_{id(self)}", self.p.root / "factory/bin/doctor")
+        self.doctor.platform_name = lambda: "Linux"
+        self.doctor.check_branch_protection = lambda base: []
+
+    def runner_check(self, **env):
+        with mock.patch.dict(os.environ, {**self.env, **env}):
+            return self.doctor.check_runner()
+
+    def test_missing_sandbox_tools_fail(self):
+        (self.bin / "socat").unlink()
+        problems = self.runner_check(FAKE_SECRET_TOOL_OUT="t\n", FAKE_LOGINCTL_OUT="Linger=yes\n",
+                                     FAKE_SYSTEMCTL_OUT="active\n")
+        self.assertIn(("FAIL", "socat not found; Claude Code's Linux sandbox needs bubblewrap and socat "
+                               "(apt install bubblewrap socat)"), problems)
+
+    def test_linger_token_and_timer_warn(self):
+        problems = self.runner_check(FAKE_SECRET_TOOL_EXIT="1", FAKE_LOGINCTL_OUT="Linger=no\n",
+                                     FAKE_SYSTEMCTL_OUT="inactive\n")
+        texts = [m for level, m in problems if level == "WARN"]
+        self.assertTrue(any("enable-linger" in t for t in texts))
+        self.assertTrue(any("no runner token" in t for t in texts))
+        self.assertTrue(any("timer not active" in t for t in texts))
+        self.assertFalse(any("Keychain" in t or "LaunchAgent" in t for t in texts))
+
+    def test_all_good_is_quiet(self):
+        problems = self.runner_check(FAKE_SECRET_TOOL_OUT="t\n", FAKE_LOGINCTL_OUT="Linger=yes\n",
+                                     FAKE_SYSTEMCTL_OUT="active\n")
+        self.assertEqual(problems, [])
+
+
+class NamesAgreeTest(LinuxCase):
+    def test_runner_and_doctor_name_the_same_unit(self):
+        doctor = load_script(f"doctor_names_{id(self)}", self.p.root / "factory/bin/doctor")
+        self.assertEqual(doctor.unit_name(), self.runner.unit_name())
