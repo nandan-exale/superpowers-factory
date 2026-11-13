@@ -15,13 +15,16 @@ project root. Commit nothing. Ask before anything this list doesn't cover.
    (`factory/bin/job summary` shows them) before uninstalling, and stop.
 3. **Runner.** If `factory/bin/runner status` reports the launchd agent
    installed, run `factory/bin/runner uninstall`.
-4. **Files.** The file list is the keys of `files` in `factory/manifest.json`;
-   without a manifest, use `FILES` from `$PLUGIN/bin/factory_files.py`.
-   Delete each listed file that exists, except `factory/checks.sh` when it
-   differs from `$PLUGIN/vendor/factory/factory/checks.sh` (it holds the
-   project's own checks: keep it and say so). Delete `factory/manifest.json`.
-   Then remove directories left empty under `factory/` and `.claude/`
-   (`find factory .claude -type d -empty -delete`), never `factory/jobs/`.
+4. **Files.** The file list is the keys of `files` in `factory/manifest.json`
+   that are also in `FILES` from `$PLUGIN/bin/factory_files.py`; delete only
+   those. A key that is absolute, has a `..` segment, or isn't in `FILES`:
+   never delete it, and list it for the human. Without a manifest, use
+   `FILES`. Delete each listed file that exists, except `factory/checks.sh`
+   when it differs from `$PLUGIN/vendor/factory/factory/checks.sh` (it holds
+   the project's own checks: keep it and say so). Delete
+   `factory/manifest.json`. Then remove directories left empty under
+   `factory/` and `.claude/`, never `factory/jobs/` or anything in it:
+   `find factory .claude -type d -empty -not -path factory/jobs -not -path 'factory/jobs/*' -delete`.
 5. **Stop hook.** Run `"$PLUGIN/bin/factory-uninstall-settings" .`. If it
    exits 1, show its message and stop; don't edit the file by hand.
 6. **AGENTS.md.** Remove the `## Software factory` section: from that
