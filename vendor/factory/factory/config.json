@@ -67,6 +67,7 @@
     "**/poetry.lock", "**/uv.lock", "**/Cargo.toml", "**/Cargo.lock", "**/go.mod",
     "**/go.sum", "**/Gemfile", "**/Gemfile.lock", "Dockerfile", "**/*.tf"],
   "secret_scan": { "allow": ["**/*.test.*", "**/fixtures/**"] },
+  "watch": { "enabled": true, "max_minutes": 60, "ignore_workflows": [] },
   "ports": { "base": 5100, "step": 10 },
   "prices_usd_per_mtok": {
     "claude-fable-5-2":  { "input": 8.0,  "output": 40.0, "cache_write_5m": 10.0, "cache_write_1h": 16.0, "cache_read": 0.20 },

@@ -29,6 +29,7 @@ Usage:
   job resume                     clear the pause (a human runs this once the base branch is fixed)
   job scan <job-id>              secret patterns in the branch's added lines; exit 1 on a hit
   job push <job>                 the builder's push: scan, then push the job branch (nothing is pushed on a hit)
+  job watch                      check base-branch CI for merged jobs; red → revert PR and pause
 
 <job> is a job id (004-dark-mode) or an issue number (12).
 """
@@ -487,6 +488,73 @@ def cmd_push(job):
 def gate_found_secrets(job):
     body = section(round_dir(job) / "checks.md", "Secrets") if (round_dir(job) / "checks.md").exists() else None
     return bool(body) and body != "None found."
+
+
+# ---- Watching the base branch -------------------------------------------------
+
+WATCH_DEFAULTS = {"enabled": True, "max_minutes": 60, "ignore_workflows": []}
+RED_CONCLUSIONS = {"failure", "timed_out", "cancelled"}
+
+
+def watch_config():
+    return {**WATCH_DEFAULTS, **(CONFIG.get("watch") or {})}
+
+
+def record_watch(job):
+    """After a merge: remember the commit that landed on the base branch, to watch its CI."""
+    if not watch_config()["enabled"]:
+        return
+    try:
+        sha = gh_json("pr", "view", str(job["pr"]), "--json", "mergeCommit")["mergeCommit"]["oid"]
+    except (Refused, KeyError, TypeError) as e:
+        print(f"NOTE: not watching {BASE} after #{job['pr']}: {str(e).splitlines()[0] if str(e) else e!r}")
+        return
+    job["watch"] = {"sha": sha, "since": now(), "state": "watching"}
+
+
+def watch_verdict(runs, cfg, since):
+    """(state, failed runs) for a merge commit's workflow runs on the base branch."""
+    runs = [r for r in runs if r.get("workflowName") not in cfg["ignore_workflows"]]
+    failed = [r for r in runs if r.get("conclusion") in RED_CONCLUSIONS]
+    if failed:
+        return "red", failed
+    if runs and all(r.get("status") == "completed" for r in runs):
+        return "green", []
+    minutes = (datetime.now(timezone.utc) - parse_time(since)).total_seconds() / 60
+    if not runs and minutes > cfg["max_minutes"]:
+        return "no-ci", []
+    return "watching", []
+
+
+def cmd_watch():
+    cfg = watch_config()
+    if not cfg["enabled"]:
+        print("WATCH: off")
+        return
+    for job in all_jobs():
+        w = job.get("watch") or {}
+        if w.get("state") != "watching":
+            continue
+        try:
+            runs = gh_json("run", "list", "--branch", BASE, "--commit", w["sha"], "--limit", "50",
+                           "--json", "status,conclusion,workflowName,url")
+        except Refused as e:
+            print(f"NOTE: {job['id']}: {BASE} checks unknown, still watching: {str(e).splitlines()[0]}")
+            continue
+        state, failed = watch_verdict(runs, cfg, w["since"])
+        if state == "watching":
+            continue
+        if state == "red":
+            revert_for(job, failed)
+            continue
+        job["watch"] = {**w, "state": state}
+        save(job)
+        print(f"WATCH: {job['id']} {state}" + (f"; no CI runs on {BASE} within {cfg['max_minutes']} min" if state == "no-ci" else ""))
+
+
+def revert_for(job, failed):
+    """Replaced in Task 6."""
+    raise Refused("revert isn't implemented yet")
 
 
 # ---- Learning ---------------------------------------------------------------
@@ -1604,6 +1672,7 @@ def cmd_merge(job):
         return fail(unhandled)
     # GitHub may already have deleted the branch on merge.
     run(["git", "push", "origin", "--delete", job["branch"]], check=False)
+    record_watch(job)
     save(advance(sync(job), "merged"))
     print(f"{job['id']}: merged PR #{job['pr']}")
     sync_main()
@@ -1819,6 +1888,8 @@ def main(argv):
             cmd_scan(json.loads(path.read_text()))
         elif cmd == "push" and len(args) == 1:
             cmd_push(resolve(args[0]))
+        elif cmd == "watch" and not args:
+            cmd_watch()
         else:
             die(f"bad arguments: {' '.join(argv)}\n\n{__doc__.strip()}")
     except Refused as e:
