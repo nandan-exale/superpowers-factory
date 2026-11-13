@@ -330,8 +330,12 @@ class SecurityTest(RunnerCase):
         for tool in ("Edit", "Write"):
             for path in ("./.git/**", "./factory/bin/**", "./factory/runner-settings.json",
                          "./factory/config.json", "./factory/checks.sh", "./.claude/**",
-                         "~/.ssh/**", "~/.claude/**", "~/Library/LaunchAgents/**"):
+                         "~/.ssh/**", "~/.claude/**", "~/Library/LaunchAgents/**",
+                         "~/.config/systemd/user/**", "~/.config/factory/**"):
                 self.assertIn(f"{tool}({path})", deny)
+
+    def test_settings_deny_reading_the_linux_token_file(self):
+        self.assertIn("Read(~/.config/factory/**)", self.settings()["permissions"]["deny"])
 
     def test_settings_deny_destructive_git_and_gh(self):
         deny = self.settings()["permissions"]["deny"]

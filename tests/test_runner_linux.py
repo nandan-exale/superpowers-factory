@@ -2,12 +2,15 @@ import contextlib
 import io
 import json
 import os
+import shutil
+import signal
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from installed_project import InstalledProject, load_script
+from test_runner import RunnerCase
 
 FAKE = """#!{python}
 import json, os, sys
@@ -95,6 +98,15 @@ class UnitsTest(LinuxCase):
         with self.assertRaises(SystemExit):
             self.call(self.runner.cmd_install, False)
 
+    def test_missing_systemctl_is_a_clear_error(self):
+        (self.bin / "systemctl").unlink()
+        err = io.StringIO()
+        for fn, args in ((self.runner.cmd_install, (False,)), (self.runner.cmd_uninstall, ()),
+                         (self.runner.cmd_status, ())):
+            with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+                self.call(fn, *args, PATH=str(self.bin))
+        self.assertEqual(err.getvalue().count("systemctl not found"), 3)
+
 
 class TokenTest(LinuxCase):
     def token(self, **env):
@@ -160,6 +172,14 @@ class DoctorLinuxTest(LinuxCase):
         self.assertTrue(any("timer not active" in t for t in texts))
         self.assertFalse(any("Keychain" in t or "LaunchAgent" in t for t in texts))
 
+    def test_missing_loginctl_and_systemctl_warn_instead_of_crashing(self):
+        (self.bin / "loginctl").unlink()
+        (self.bin / "systemctl").unlink()
+        problems = self.runner_check(PATH=str(self.bin), FAKE_SECRET_TOOL_OUT="t\n")
+        texts = [m for level, m in problems if level == "WARN"]
+        self.assertIn("loginctl not found; linger not checked", texts)
+        self.assertIn("systemctl not found; the systemd timer can't run", texts)
+
     def test_all_good_is_quiet(self):
         problems = self.runner_check(FAKE_SECRET_TOOL_OUT="t\n", FAKE_LOGINCTL_OUT="Linger=yes\n",
                                      FAKE_SYSTEMCTL_OUT="active\n")
@@ -170,3 +190,57 @@ class NamesAgreeTest(LinuxCase):
     def test_runner_and_doctor_name_the_same_unit(self):
         doctor = load_script(f"doctor_names_{id(self)}", self.p.root / "factory/bin/doctor")
         self.assertEqual(doctor.unit_name(), self.runner.unit_name())
+
+
+class LinuxTickTest(RunnerCase):
+    """cmd_tick in-process on Linux, with a queue that has work."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_issues([{"number": 7, "title": "Build the widget"}])
+        self.linuxbin = self.tmp / "linuxbin"
+        self.linuxbin.mkdir()
+        for tool in ("secret-tool", "bwrap", "socat"):
+            (self.linuxbin / tool).write_text(FAKE.format(python=__import__("sys").executable))
+            (self.linuxbin / tool).chmod(0o755)
+        # Only git from the system, so a real bwrap or socat on the host can't leak in.
+        gitbin = self.tmp / "gitbin"
+        gitbin.mkdir()
+        (gitbin / "git").symlink_to(shutil.which("git"))
+        self.path = os.pathsep.join(map(str, (self.p.fakebin, self.linuxbin, gitbin)))
+        self.module = load_script(f"runner_tick_{id(self)}", self.p.root / "factory/bin/runner")
+        self.module.platform_name = lambda: "Linux"
+        self.addCleanup(signal.signal, signal.SIGTERM, signal.getsignal(signal.SIGTERM))
+
+    def tick(self, **env):
+        with mock.patch.dict(os.environ, self.runner_env(PATH=self.path, **env), clear=True):
+            return self.module.cmd_tick()
+
+    def token_file(self, text, mode):
+        path = self.home / ".config/factory/claude-token"
+        path.parent.mkdir(parents=True)
+        path.write_text(text)
+        path.chmod(mode)
+
+    def test_missing_bubblewrap_skips_with_a_log_line(self):
+        (self.linuxbin / "bwrap").unlink()
+        self.assertEqual(self.tick(FAKE_SECRET_TOOL_OUT="tok-123\n"), 1)
+        self.assertEqual(self.calls("claude"), [])
+        self.assertTrue(self.log_lines()[-1].endswith(
+            "error: bwrap missing; Claude Code's Linux sandbox needs bubblewrap and socat"))
+
+    def test_open_token_file_is_refused_with_the_chmod_fix(self):
+        self.token_file("file-token\n", 0o644)
+        self.assertEqual(self.tick(FAKE_SECRET_TOOL_EXIT="1"), 1)
+        self.assertEqual(self.calls("claude"), [])
+        last = self.log_lines()[-1]
+        self.assertIn("must be mode 600 and yours; run chmod 600", last)
+        self.assertNotIn("file-token", last)
+
+    def test_private_token_file_reaches_claude_only_through_its_environment(self):
+        self.token_file("tok-123\n", 0o600)
+        self.assertEqual(self.tick(FAKE_SECRET_TOOL_EXIT="1"), 0)
+        [call] = self.calls("claude")
+        self.assertTrue(call["has_token"])
+        self.assertNotIn("tok-123", json.dumps(call["argv"]))
+        self.assertNotIn("tok-123", "\n".join(self.log_lines()))
