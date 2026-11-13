@@ -232,6 +232,25 @@ class DoctorTest(unittest.TestCase):
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         self.assertIn("WARN labels: gh not found; labels not checked", res.stdout)
 
+    def test_missing_digest_label_fails(self):
+        self.p.set_labels([name for name in LABELS if name != "factory:digest"])
+        self.assertFails("labels", "label 'factory:digest' missing")
+
+    def test_bad_digest_config_fails(self):
+        cfg = json.loads((self.p.root / "factory/config.json").read_text())
+        cfg["digest"] = {"enabled": "yes", "hour": 24, "days": 0}
+        self.p.write("factory/config.json", json.dumps(cfg))
+        res = self.p.run("doctor", "--fast")
+        for text in ("digest.enabled must be true or false", "digest.hour must be an integer from 0 to 23",
+                     "digest.days must be a positive integer"):
+            self.assertIn(text, res.stdout)
+
+    def test_missing_digest_config_is_fine(self):
+        cfg = json.loads((self.p.root / "factory/config.json").read_text())
+        cfg.pop("digest")
+        self.p.write("factory/config.json", json.dumps(cfg))
+        self.assertNotIn("digest", self.p.run("doctor", "--fast").stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
