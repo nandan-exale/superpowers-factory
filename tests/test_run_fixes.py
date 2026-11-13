@@ -1,6 +1,9 @@
 """Fixes from the first real run: evidence block, merge labels, intake prompt."""
 
+import contextlib
+import io
 import re
+import shutil
 import types
 import unittest
 from pathlib import Path
@@ -43,8 +46,27 @@ class EvidenceBlockTest(BudgetCase):
         block = self.pr_body[:self.pr_body.index("<!-- /factory evidence -->")]
         self.assertIn("Closes #7", block)
 
+    def test_closes_url_of_another_repo_does_not_count(self):
+        self.in_review()
+        self.job._repo_slug = "o/r"
+        self.pr_body = "Fixes https://github.com/x/y/issues/7\n"
+        self.advance("approve")
+        block = self.pr_body[:self.pr_body.index("<!-- /factory evidence -->")]
+        self.assertIn("Closes #7", block)
+
+    def test_closes_url_is_ignored_when_the_repo_is_unknown(self):
+        self.in_review()
+        self.job._repo_slug = None
+        self.job.gh = lambda *a: (_ for _ in ()).throw(self.job.Refused("no gh")) \
+            if a[:2] == ("repo", "view") else self.fake_gh(lambda *x: "", *a)
+        self.pr_body = "Fixes https://github.com/o/r/issues/7\n"
+        self.advance("approve")
+        block = self.pr_body[:self.pr_body.index("<!-- /factory evidence -->")]
+        self.assertIn("Closes #7", block)
+
     def test_closes_stays_single_across_republishing(self):
         self.in_review()
+        self.job._repo_slug = "o/r"
         self.pr_body = "Fixes https://github.com/o/r/issues/7\n"
         self.advance("approve")
         self.job.publish_evidence(self.current())
@@ -101,12 +123,14 @@ class MergeTest(BudgetCase):
         record = self.job.gh
 
         def gh(*args):
+            if args[:2] == ("issue", "edit") and getattr(self, "label_error", False):
+                raise self.job.Refused("gh is down")
             if args[:2] == ("pr", "merge"):
                 merged.append(True)
             return record(*args)
         self.job.gh = gh
         (self.d / "decision.md").write_text("APPROVE\n\n## Why\nfine\n")
-        with mock.patch("builtins.print"):
+        with contextlib.redirect_stdout(io.StringIO()):
             self.job.cmd_merge(self.job.load(self.job_id))
         return self.job.load(self.job_id)
 
@@ -135,6 +159,36 @@ class MergeTest(BudgetCase):
         self.assertEqual(job["stage"], "merged")
         self.assertIn(("issue", "edit", "7", "--remove-label", "factory,factory:planned"),
                       self.project.gh_calls)
+
+    def test_label_failure_does_not_block_the_merge(self):
+        self.to_approve()
+        self.label_error = True
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            job = self.merge()
+        self.assertEqual(job["stage"], "merged")
+        self.assertIn("job: labels not removed:", err.getvalue())
+
+    def test_queue_sweep_survives_label_failure(self):
+        self.to_approve()
+        self.issues = [{"number": 9, "title": "Another"}]
+        self.in_review(planned=True)
+        self.job.save({**self.job.load(self.job_id), "stage": "approve"})
+        self.label_error = True
+        shutil.rmtree(self.job.load(self.job_id)["worktree"])  # a test stand-in, not a real worktree
+        self.job.gh_json = lambda *a: ({"state": "MERGED", "isDraft": False, "body": ""}
+                                       if a[:2] == ("pr", "view") else self.fake_gh_json(*a))
+        record = self.job.gh
+
+        def gh(*args):
+            if args[:2] == ("issue", "edit"):
+                raise self.job.Refused("gh is down")
+            return record(*args)
+        self.job.gh = gh
+        out = io.StringIO()
+        with mock.patch("sys.stderr", new_callable=io.StringIO), contextlib.redirect_stdout(out):
+            self.job.cmd_queue()
+        self.assertEqual(self.job.load(self.job_id)["stage"], "merged")
+        self.assertIn("new\t9", out.getvalue())
 
     def test_merged_unplanned_issue_loses_only_the_queue_label(self):
         self.to_approve(planned=False)

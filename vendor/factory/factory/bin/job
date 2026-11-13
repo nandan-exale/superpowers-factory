@@ -899,6 +899,20 @@ def close_fences(text):
     return text + "\n" + max(fences, key=len) if len(fences) % 2 else text
 
 
+_repo_slug = None
+
+
+def repo_slug():
+    """owner/name of this repository, cached; None when gh can't say."""
+    global _repo_slug
+    if _repo_slug is None:
+        try:
+            _repo_slug = gh("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip() or None
+        except Refused:
+            return None
+    return _repo_slug
+
+
 def closes_issue(text, issue):
     """True when `text` already has a closing reference to this issue, outside any evidence block."""
     start = text.find(EVIDENCE_START)
@@ -906,8 +920,11 @@ def closes_issue(text, issue):
     if end >= 0:
         text = text[:start] + text[end + len(EVIDENCE_END):]
     n = int(issue)
-    return bool(re.search(rf"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s*"
-                          rf"(?:https://github\.com/[\w.-]+/[\w.-]+/issues/{n}\b|#{n}\b)", text, re.I))
+    repo = repo_slug()
+    forms = [rf"#{n}\b"]
+    if repo:
+        forms.append(rf"https://github\.com/{re.escape(repo)}/issues/{n}\b")
+    return bool(re.search(rf"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s*(?:{'|'.join(forms)})", text, re.I))
 
 
 def evidence_md(job, full=False, closes=True):
@@ -1054,10 +1071,14 @@ def advance(job, stage):
 
     if stage == "merged":
         require(job["pr"] and pr_state(job) == "MERGED", "the PR isn't merged")
+        # The PR is merged already: a label that won't come off must not strand the job.
+        gone = [LABELS["queue"]] + ([LABELS["planned"]] if job.get("planned") else [])
         if old == "needs-human":
-            label("issue", job["issue"], remove=LABELS["needs_human"])
-        planned = [LABELS["planned"]] if job.get("planned") else []
-        label("issue", job["issue"], remove=",".join([LABELS["queue"], *planned]))
+            gone.append(LABELS["needs_human"])
+        try:
+            label("issue", job["issue"], remove=",".join(gone))
+        except Refused as e:
+            print(f"job: labels not removed: {e}", file=sys.stderr)
 
     elif stage == "rejected" and old in WAITING:
         require((d / "rejection.md").exists(), "use `job reject` to reject a waiting job")
