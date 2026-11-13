@@ -26,7 +26,7 @@ and how much it may spend.
 - [Quick start](#quick-start)
 - [Everyday use](#everyday-use)
 - [Configuration](#configuration)
-- [Hands-off running (macOS)](#hands-off-running-macos)
+- [Hands-off running](#hands-off-running)
 - [The learning loop](#the-learning-loop)
 - [Safety: what stays with you](#safety-what-stays-with-you)
 - [Troubleshooting](#troubleshooting)
@@ -84,7 +84,7 @@ intake. The plan-based route is better for anything larger than a small fix.
   [`gh` CLI](https://cli.github.com) logged in with an account that can push
   and manage labels.
 - **Python 3.10+** (the factory's scripts use only the standard library).
-- macOS, only if you want the [scheduled runner](#hands-off-running-macos).
+- macOS or Linux, only if you want the [scheduled runner](#hands-off-running).
 
 ---
 
@@ -314,7 +314,7 @@ Keychain item holding its token. See below.
 
 ---
 
-## Hands-off running (macOS)
+## Hands-off running
 
 Want the factory to work while you're away? The runner starts `/factory run`
 on a schedule, but only when there's work.
@@ -341,6 +341,22 @@ Each run is headless, uses `--permission-mode dontAsk`, and runs commands in
 Claude Code's sandbox: writes stay in the project, network access is limited
 to GitHub and the hosts you list, and anything not allowed is refused rather
 than asked about.
+
+### Linux (systemd)
+
+```bash
+sudo apt install bubblewrap socat          # Claude Code's Linux sandbox
+claude setup-token                         # prints a long-lived token
+secret-tool store --label factory service factory-claude-token   # paste it
+# or: mkdir -p ~/.config/factory && install -m 600 /dev/stdin ~/.config/factory/claude-token
+factory/bin/runner install                 # a systemd user timer every runner.interval_minutes
+loginctl enable-linger "$USER"             # keep it running while you're logged out
+factory/bin/doctor
+```
+
+`factory/bin/runner status` shows the timer and the log; `factory/bin/runner
+uninstall` removes it. The runner refuses a token file that isn't mode 600
+and yours, and won't start Claude without bubblewrap and socat.
 
 ---
 

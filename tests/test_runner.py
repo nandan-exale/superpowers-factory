@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import os
 import plistlib
@@ -209,12 +211,14 @@ class TickTest(RunnerCase):
         self.assertEqual(len(runs), 1)
         self.assertEqual(json.loads(runs[0].read_text())["result"], "done")
 
+    @unittest.skipUnless(sys.platform == "darwin", "Keychain only; Linux tokens are in test_runner_linux")
     def test_token_is_read_from_the_configured_keychain_item(self):
         self.set_issues(self.WORK)
         self.runner("tick")
         [call] = self.calls("security")
         self.assertEqual(call["argv"], ["find-generic-password", "-s", "factory-claude-token", "-w"])
 
+    @unittest.skipUnless(sys.platform == "darwin", "Keychain only; Linux tokens are in test_runner_linux")
     def test_missing_token_is_an_error(self):
         self.set_issues(self.WORK)
         res = self.runner("tick", FAKE_SECURITY_EXIT="44", FAKE_SECURITY_OUT="")
@@ -281,6 +285,7 @@ class LaunchAgentTest(RunnerCase):
         self.assertEqual(res.returncode, 0, res.stderr)
         return plistlib.loads(res.stdout.encode())
 
+    @unittest.skipUnless(sys.platform == "darwin", "launchd only; Linux units are in test_runner_linux")
     def test_dry_run_plist(self):
         p = self.plist()
         self.assertTrue(p["Label"].startswith("com.superpowers-factory."))
@@ -322,11 +327,14 @@ class LaunchAgentTest(RunnerCase):
         self.assertIn("not loaded", res.stdout)
         self.assertIn(" idle", res.stdout)
 
-    @unittest.skipIf(sys.platform == "darwin", "non-macOS behavior")
-    def test_install_outside_macos_refuses(self):
-        res = self.runner("install")
-        self.assertEqual(res.returncode, 1)
-        self.assertIn("launchd only", res.stderr)
+    def test_install_without_a_scheduler_refuses(self):
+        module = load_script("runner_no_scheduler", self.p.root / "factory/bin/runner")
+        module.platform_name = lambda: "Windows"
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as exit_:
+            module.cmd_install(False)
+        self.assertEqual(exit_.exception.code, 1)
+        self.assertIn("no scheduler for Windows", err.getvalue())
 
 
 class SecurityTest(RunnerCase):
@@ -341,8 +349,12 @@ class SecurityTest(RunnerCase):
         for tool in ("Edit", "Write"):
             for path in ("./.git/**", "./factory/bin/**", "./factory/runner-settings.json",
                          "./factory/config.json", "./factory/checks.sh", "./.claude/**",
-                         "~/.ssh/**", "~/.claude/**", "~/Library/LaunchAgents/**"):
+                         "~/.ssh/**", "~/.claude/**", "~/Library/LaunchAgents/**",
+                         "~/.config/systemd/user/**", "~/.config/factory/**"):
                 self.assertIn(f"{tool}({path})", deny)
+
+    def test_settings_deny_reading_the_linux_token_file(self):
+        self.assertIn("Read(~/.config/factory/**)", self.settings()["permissions"]["deny"])
 
     def test_settings_deny_destructive_git_and_gh(self):
         deny = self.settings()["permissions"]["deny"]
@@ -515,9 +527,8 @@ class RobustnessTest(RunnerCase):
         self.set_issues(self.WORK)
         bin2 = self.tmp / "bin2"
         bin2.mkdir()
-        for name in ("gh", "security"):
-            shutil.copy2(self.p.fakebin / name, bin2 / name)
-        res = self.runner("tick", PATH=f"{bin2}{os.pathsep}/usr/bin{os.pathsep}/bin")
+        shutil.copy2(self.p.fakebin / "gh", bin2 / "gh")
+        res = self.runner("tick", PATH=os.pathsep.join((str(bin2), str(self.p.toolbin), "/usr/bin", "/bin")))
         self.assertEqual(res.returncode, 1)
         self.assertTrue(self.log_lines()[-1].endswith(" error: claude not found on PATH"))
 

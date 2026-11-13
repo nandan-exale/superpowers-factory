@@ -3,14 +3,16 @@
 
 Usage:
   runner tick                  one scheduled run: lock, preflight, pull, report and digest, check the queue, run /factory run headless
-  runner install [--dry-run]   install the launchd LaunchAgent that runs `tick` every runner.interval_minutes
-  runner uninstall             unload and delete the LaunchAgent
-  runner status                LaunchAgent state and the last lines of factory/jobs/runner.log
+  runner install [--dry-run]   install the scheduler: a launchd LaunchAgent on macOS, a systemd user timer on Linux
+  runner uninstall             remove it
+  runner status                scheduler state and the last lines of factory/jobs/runner.log
 
 The Claude token comes from the macOS Keychain item named by
 runner.keychain_service (store it with
-`security add-generic-password -s <service> -a "$USER" -w`). It is passed to
-claude only through its environment, never in arguments, files or logs.
+`security add-generic-password -s <service> -a "$USER" -w`). On Linux the token
+comes from `secret-tool lookup service <service>`, or from
+`~/.config/factory/claude-token` with mode 600. It is passed to claude only
+through its environment, never in arguments, files or logs.
 """
 
 import fcntl
@@ -20,6 +22,7 @@ import os
 import platform
 import plistlib
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -151,11 +154,46 @@ def has_work():
     return any(line.split("\t", 1)[0] in {"resume", "new"} for line in res.stdout.splitlines())
 
 
-def read_token(service):
+TOKEN_FILE = Path("~/.config/factory/claude-token")
+SANDBOX_TOOLS = ("bwrap", "socat")
+_token_problem = None
+
+
+def token_problem():
+    """Why the last read_token found no usable token file, or None."""
+    return _token_problem
+
+
+def read_keychain(service):
     res = subprocess.run(["security", "find-generic-password", "-s", service, "-w"],
                          capture_output=True, text=True)
     token = res.stdout.strip()
     return token if res.returncode == 0 and token else None
+
+
+def read_linux_token(service):
+    global _token_problem
+    _token_problem = None
+    if shutil.which("secret-tool"):
+        res = subprocess.run(["secret-tool", "lookup", "service", service], capture_output=True, text=True)
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    path = TOKEN_FILE.expanduser()
+    if not path.exists():
+        return None
+    st = path.stat()
+    if (st.st_mode & 0o777) != 0o600 or st.st_uid != os.getuid():
+        _token_problem = f"{TOKEN_FILE} must be mode 600 and yours; run chmod 600 {path}"
+        return None
+    return path.read_text().strip() or None
+
+
+def read_token(service):
+    return read_linux_token(service) if platform_name() == "Linux" else read_keychain(service)
+
+
+def missing_sandbox_tools():
+    return [tool for tool in SANDBOX_TOOLS if not shutil.which(tool)]
 
 
 def kill_group(proc):
@@ -273,8 +311,13 @@ def cmd_tick():
         return 0
     token = read_token(runner["keychain_service"])
     if not token:
-        log(f"error: no token in Keychain item {runner['keychain_service']}; "
-            "run claude setup-token and store it")
+        where = (token_problem() or f"no token from secret-tool (service {runner['keychain_service']}) "
+                 f"or {TOKEN_FILE}") if platform_name() == "Linux" else \
+            f"no token in Keychain item {runner['keychain_service']}; run claude setup-token and store it"
+        log(f"error: {where}")
+        return 1
+    if platform_name() == "Linux" and missing_sandbox_tools():
+        log(f"error: {', '.join(missing_sandbox_tools())} missing; Claude Code's Linux sandbox needs bubblewrap and socat")
         return 1
     max_seconds = int(os.environ.get("FACTORY_RUNNER_MAX_SECONDS") or runner["max_minutes"] * 60)
     RUNS.mkdir(parents=True, exist_ok=True)
@@ -324,22 +367,70 @@ def plist_bytes(runner):
     })
 
 
-def require_launchd():
-    if platform.system() != "Darwin":
-        die("launchd only (macOS); elsewhere run `factory/bin/runner tick` from cron or systemd")
+def platform_name():
+    return platform.system()
+
+
+def unit_name():
+    return f"factory-{hashlib.sha256(str(REPO).encode()).hexdigest()[:12]}"
+
+
+def units_dir():
+    return Path.home() / ".config" / "systemd" / "user"
+
+
+def systemd_units(runner):
+    service = (f"[Unit]\nDescription=Software factory runner for {REPO}\n\n"
+               f"[Service]\nType=oneshot\nWorkingDirectory={REPO}\n"
+               f"ExecStart={sys.executable} {FACTORY / 'bin' / 'runner'} tick\n"
+               f"Environment=PATH={os.environ.get('PATH', '/usr/bin:/bin')}\n")
+    timer = (f"[Unit]\nDescription=Run the software factory for {REPO} every {runner['interval_minutes']} min\n\n"
+             f"[Timer]\nOnBootSec=5min\nOnUnitActiveSec={runner['interval_minutes']}min\nPersistent=true\n\n"
+             "[Install]\nWantedBy=timers.target\n")
+    return service, timer
+
+
+def systemctl(*args):
+    if not shutil.which("systemctl"):
+        die("systemctl not found; the Linux runner needs a systemd user session")
+    return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True)
+
+
+def require_scheduler():
+    name = platform_name()
+    if name not in ("Darwin", "Linux"):
+        die(f"no scheduler for {name}; run `factory/bin/runner tick` from your own scheduler")
+    return name
+
+
+def install_systemd(runner, dry_run):
+    service, timer = systemd_units(runner)
+    if dry_run:
+        sys.stdout.write(f"# {unit_name()}.service\n{service}\n# {unit_name()}.timer\n{timer}")
+        return 0
+    d = units_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    JOBS.mkdir(parents=True, exist_ok=True)
+    (d / f"{unit_name()}.service").write_text(service)
+    (d / f"{unit_name()}.timer").write_text(timer)
+    for args in (("daemon-reload",), ("enable", "--now", f"{unit_name()}.timer")):
+        res = systemctl(*args)
+        if res.returncode != 0:
+            die(f"systemctl --user {' '.join(args)} failed: {first_line(res.stderr)}")
+    print(f"installed {d / unit_name()}.timer; runs every {runner['interval_minutes']} min. "
+          "Run `loginctl enable-linger $USER` so it also runs while you're logged out.")
+    return 0
 
 
 def launchctl(*args):
     return subprocess.run(["launchctl", *args], capture_output=True, text=True)
 
 
-def cmd_install(dry_run):
-    _, runner = load_config()
+def install_launchd(runner, dry_run):
     data = plist_bytes(runner)
     if dry_run:
         sys.stdout.write(data.decode())
         return 0
-    require_launchd()
     path = plist_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     JOBS.mkdir(parents=True, exist_ok=True)
@@ -360,20 +451,46 @@ def cmd_install(dry_run):
     return 0
 
 
-def cmd_uninstall():
-    require_launchd()
+def uninstall_launchd():
     launchctl("bootout", f"{domain()}/{label()}")
     plist_path().unlink(missing_ok=True)
     print(f"uninstalled {label()}")
     return 0
 
 
-def cmd_status():
-    require_launchd()
+def status_launchd():
     loaded = launchctl("print", f"{domain()}/{label()}").returncode == 0
     path = plist_path()
     print(f"{label()}: {'loaded' if loaded else 'not loaded'}")
     print(f"plist: {path}{'' if path.exists() else ' (missing)'}")
+    lines = LOG.read_text().splitlines()[-10:] if LOG.exists() else ["(no runner.log yet)"]
+    print("\n".join(lines))
+    return 0
+
+
+def cmd_install(dry_run):
+    _, runner = load_config()
+    if dry_run and platform_name() != "Linux":
+        return install_launchd(runner, dry_run)
+    name = require_scheduler()
+    return install_systemd(runner, dry_run) if name == "Linux" else install_launchd(runner, dry_run)
+
+
+def cmd_uninstall():
+    if require_scheduler() == "Darwin":
+        return uninstall_launchd()
+    systemctl("disable", "--now", f"{unit_name()}.timer")
+    for suffix in ("service", "timer"):
+        (units_dir() / f"{unit_name()}.{suffix}").unlink(missing_ok=True)
+    systemctl("daemon-reload")
+    print(f"uninstalled {unit_name()}")
+    return 0
+
+
+def cmd_status():
+    if require_scheduler() == "Darwin":
+        return status_launchd()
+    print(systemctl("list-timers", "--all", f"{unit_name()}.timer").stdout.rstrip())
     lines = LOG.read_text().splitlines()[-10:] if LOG.exists() else ["(no runner.log yet)"]
     print("\n".join(lines))
     return 0

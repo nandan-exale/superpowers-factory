@@ -1,5 +1,6 @@
 import json
 import shutil
+import sys
 import tempfile
 import unittest
 
@@ -126,6 +127,7 @@ class DoctorTest(unittest.TestCase):
         self.runner_settings(lambda d: d["sandbox"].update(allowUnsandboxedCommands=True))
         self.assertFails("runner", "sandbox.allowUnsandboxedCommands must be false")
 
+    @unittest.skipUnless(sys.platform == "darwin", "Keychain only; Linux tokens are in test_runner_linux")
     def test_missing_keychain_item_warns(self):
         res = self.p.run("doctor", "--fast", env={"FAKE_SECURITY_EXIT": "44"})
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
