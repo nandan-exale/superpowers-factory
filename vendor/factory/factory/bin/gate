@@ -82,7 +82,8 @@ def secret_scan(job_id):
     """Masked SECRET lines from `job scan`; the gate never prints a secret itself."""
     res = subprocess.run([sys.executable, str(FACTORY / "bin" / "job"), "scan", job_id], cwd=REPO,
                          capture_output=True, text=True)
-    hits = [line.removeprefix("SECRET: ") for line in res.stdout.splitlines() if line.startswith("SECRET: ")]
+    prefix = "SECRET: "  # named, so the scan never reads this line as an assigned secret
+    hits = [line.removeprefix(prefix) for line in res.stdout.splitlines() if line.startswith(prefix)]
     if res.returncode != (1 if hits else 0):
         die(f"job scan failed: {(res.stderr or res.stdout).strip()}")
     return hits
