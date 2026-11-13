@@ -220,6 +220,14 @@ class PendingCountTest(unittest.TestCase):
         (self.p.root / "factory/bin/gate").write_text("# mine\n")
         m["files"]["factory/bin/gate"] = "0" * 64
         path.write_text(json.dumps(m))
+        # The user adopted upstream's core but dropped one of its domains, so the
+        # settings file classifies as `settings`, not `unchanged`, and must still count.
+        settings_path = self.p.root / "factory/runner-settings.json"
+        s = json.loads(settings_path.read_text())
+        s["sandbox"]["network"]["allowedDomains"].pop(0)
+        settings_path.write_text(json.dumps(s))
+        groups = dict(reversed(line.split("\t")) for line in self.plan().stdout.splitlines() if "\t" in line)
+        self.assertEqual(groups["factory/runner-settings.json"], "settings")
         res = self.plan("--resolved", "factory/bin/gate")
         self.assertEqual(res.returncode, 0, res.stderr)
         left = int(res.stdout.rsplit("merges left:", 1)[1])
