@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+"""Cut a plugin release: bump versions, refresh known hashes, write the changelog, check, commit, tag.
+
+Usage: scripts/release X.Y.Z
+Never pushes; prints the push command. Opens CHANGELOG.md in $EDITOR when run from a terminal.
+"""
+
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+from datetime import date
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+PLUGIN_JSON = Path(".claude-plugin/plugin.json")
+MARKET_JSON = Path(".claude-plugin/marketplace.json")
+CHANGELOG = Path("CHANGELOG.md")
+HASHES = Path("vendor/known-hashes.json")
+VERSION = re.compile(r"^\d+\.\d+\.\d+$")
+VERSION_KEY = re.compile(r'("version"\s*:\s*")[^"]*(")')
+
+
+class Stop(Exception):
+    pass
+
+
+def git(*args, check=True):
+    res = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
+    if check and res.returncode != 0:
+        raise Stop(f"git {' '.join(args)} failed: {res.stderr.strip()}")
+    return res.stdout.strip()
+
+
+def parse(version):
+    return tuple(int(part) for part in version.split("."))
+
+
+def bump(rel, version):
+    """Set the one "version" value in a JSON file, leaving its formatting alone."""
+    path = ROOT / rel
+    text, count = VERSION_KEY.subn(rf"\g<1>{version}\g<2>", path.read_text(encoding="utf-8"))
+    if count != 1:
+        raise Stop(f"{rel} has {count} version keys, expected 1")
+    path.write_text(text, encoding="utf-8")
+
+
+def subjects():
+    """Commit subjects since the latest v* tag (all history when there's none), oldest first."""
+    tag = git("describe", "--tags", "--abbrev=0", "--match", "v*", check=False)
+    return git("log", "--reverse", "--format=%s", *([f"{tag}..HEAD"] if tag else [])).splitlines()
+
+
+def section(version, lines, today):
+    groups = {"Added": [], "Fixed": [], "Changed": []}
+    for subject in lines:
+        if not subject or subject.startswith("chore: release"):
+            continue
+        kind, sep, text = subject.partition(": ")
+        kind = kind.split("(")[0].rstrip("!")
+        if sep and kind == "feat":
+            groups["Added"].append(text)
+        elif sep and kind == "fix":
+            groups["Fixed"].append(text)
+        else:
+            groups["Changed"].append(subject)
+    out = [f"## [{version}] - {today}", ""]
+    for name, items in groups.items():
+        if items:
+            out += [f"### {name}", "", *(f"- {item}" for item in items), ""]
+    return "\n".join(out) + "\n"
+
+
+def add_section(text, new):
+    """Insert before the first released section, after the title and intro."""
+    at = text.find("\n## [")
+    if at == -1:
+        return text.rstrip("\n") + "\n\n" + new
+    return text[:at + 1] + new + text[at + 1:]
+
+
+def script(name):
+    return subprocess.run([sys.executable, str(ROOT / "scripts" / name)], cwd=ROOT).returncode
+
+
+def release(version, editor):
+    if not VERSION.match(version):
+        raise Stop(f"{version!r} isn't a version like 1.2.3")
+    if git("status", "--porcelain"):
+        raise Stop("the working tree has changes; commit or stash them first")
+    current = json.loads((ROOT / PLUGIN_JSON).read_text(encoding="utf-8"))["version"]
+    if parse(version) <= parse(current):
+        raise Stop(f"{version} isn't higher than the current {current}")
+    if git("tag", "--list", f"v{version}"):
+        raise Stop(f"tag v{version} already exists")
+    new = section(version, subjects(), date.today().isoformat())
+    for rel in (PLUGIN_JSON, MARKET_JSON):
+        bump(rel, version)
+    if script("known-hashes") != 0:
+        raise Stop("scripts/known-hashes failed; the release changes are left uncommitted")
+    log = ROOT / CHANGELOG
+    log.write_text(add_section(log.read_text(encoding="utf-8") if log.exists() else "# Changelog\n", new),
+                   encoding="utf-8")
+    if editor:
+        subprocess.run([*shlex.split(editor), str(log)], check=False)
+    if script("check") != 0:
+        raise Stop("scripts/check failed; the release changes are left uncommitted")
+    git("add", "--", str(PLUGIN_JSON), str(MARKET_JSON), str(CHANGELOG), str(HASHES))
+    git("commit", "-q", "-m", f"chore: release {version}")
+    git("tag", "-a", f"v{version}", "-m", f"Release {version}")
+    branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    print(f"Released {version} (commit and tag v{version} are local). Push with:\n"
+          f"  git push origin {branch} v{version}")
+
+
+def main(argv):
+    if len(argv) != 1:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    editor = os.environ.get("EDITOR") if sys.stdin.isatty() else None
+    try:
+        release(argv[0], editor)
+    except Stop as exc:
+        print(f"release: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

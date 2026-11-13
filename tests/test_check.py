@@ -78,6 +78,18 @@ class CheckTest(RepoCopyTest):
         self.assertNotIn("FAIL", out)
         self.assertIn("PASS license", out)
 
+    def test_mismatched_plugin_and_marketplace_versions_fail(self):
+        def change(text):
+            data = json.loads(text)
+            data["plugins"][0]["version"] = "9.9.9"
+            return json.dumps(data, indent=2) + "\n"
+        self.edit(".claude-plugin/marketplace.json", change)
+        self.assertFails("json", "marketplace.json version 9.9.9")
+
+    def test_stale_known_hashes_fail(self):
+        self.edit("vendor/factory/factory/bin/gate", lambda text: text + "# edited\n")
+        self.assertFails("hashes", "factory/bin/gate")
+
     def test_syntax_error_in_stop_hook_fails(self):
         self.edit("vendor/factory/factory/bin/stop-hook", lambda text: text + "\ndef broken(:\n")
         self.assertFails("compile", "bin/stop-hook:")
