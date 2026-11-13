@@ -44,11 +44,14 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   install), so `/factory-update` can tell your adaptations from upstream
   changes later.
 
-- **Step 2 (Adapt), labels:** also create the planned and learning labels:
+- **Step 2 (Adapt), labels:** also create the planned, learning, revert and
+  risk-ok labels:
 
   ```bash
   gh label create factory:planned --color 0E8A16 --description "Planned with Superpowers; the factory builds the plan as written"
   gh label create factory:learning --color C5DEF5 --description "Factory-proposed check or rule; add 'factory' to build it"
+  gh label create factory:revert --color B60205 --description "Reverts a factory merge that broke the base branch"
+  gh label create factory:risk-ok --color FBCA04 --description "A human reviewed this issue's risky changes; the factory may merge them"
   ```
 
 - **Step 2 (Adapt), AGENTS.md:** add this paragraph to the Software factory

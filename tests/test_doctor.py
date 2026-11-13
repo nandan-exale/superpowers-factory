@@ -5,7 +5,7 @@ import unittest
 
 from installed_project import LABELS, VENDOR, InstalledProject, load_script
 
-CHECK_NAMES = ("config", "agents", "files", "gitignore", "stop-hook", "claude-md", "labels", "runner")
+CHECK_NAMES = ("config", "agents", "files", "gitignore", "stop-hook", "claude-md", "labels", "paused", "runner")
 
 
 class DoctorTest(unittest.TestCase):
@@ -70,6 +70,26 @@ class DoctorTest(unittest.TestCase):
             return json.dumps(cfg)
         self.edit("factory/config.json", change)
         self.assertFails("config", "agents.learner: model 'gpt' not in model_aliases")
+
+    def test_missing_revert_and_risk_ok_labels_fail(self):
+        self.p.set_labels([n for n in LABELS if n not in ("factory:revert", "factory:risk-ok")])
+        res = self.p.run("doctor", "--fast")
+        self.assertIn("label 'factory:revert' missing", res.stdout)
+        self.assertIn("label 'factory:risk-ok' missing", res.stdout)
+
+    def test_paused_is_a_warning_with_the_reason(self):
+        self.p.write("factory/jobs/paused.json", json.dumps({"reason": "main is red", "time": "t"}))
+        self.assertIn("WARN paused: main is red", self.p.run("doctor", "--fast").stdout)
+
+    def test_bad_safety_config_fails(self):
+        cfg = json.loads((self.p.root / "factory/config.json").read_text())
+        cfg.update(watch={"enabled": 1, "max_minutes": 0, "ignore_workflows": "x"}, risky_paths="x",
+                   secret_scan={"allow": [1]})
+        self.p.write("factory/config.json", json.dumps(cfg))
+        out = self.p.run("doctor", "--fast").stdout
+        for text in ("watch.enabled", "watch.max_minutes", "watch.ignore_workflows", "risky_paths",
+                     "secret_scan.allow"):
+            self.assertIn(text, out)
 
     def runner_settings(self, change):
         path = self.p.root / "factory/runner-settings.json"
