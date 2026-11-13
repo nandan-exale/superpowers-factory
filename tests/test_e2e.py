@@ -85,6 +85,27 @@ class GuardTest(E2ECase):
         with self.assertRaisesRegex(self.e2e.Refused, "doctor"):
             self.guard(FAKE_DOCTOR_EXIT=1)
 
+    def test_refuses_when_gh_resolves_another_repo(self):
+        with self.assertRaisesRegex(self.e2e.Refused, "gh resolves this clone to 'someone/real-app'"):
+            self.guard(FAKE_GH_REPO="someone/real-app")
+
+    def test_refuses_a_push_url_to_another_repo(self):
+        git(self.sb.repo, "config", "remote.origin.pushurl", "https://github.com/tester/real-app.git")
+        with self.assertRaisesRegex(self.e2e.Refused, "pushes to origin go to"):
+            self.guard()
+
+    def test_refuses_a_push_url_off_github(self):
+        git(self.sb.repo, "config", "remote.origin.pushurl", "https://gitlab.com/tester/factory-e2e.git")
+        with self.assertRaisesRegex(self.e2e.Refused, "pushes to origin go to"):
+            self.guard()
+
+    def test_refuses_a_push_rewrite_to_another_repo(self):
+        git(self.sb.repo, "config", "--remove-section", f"url.{self.sb.bare}")
+        git(self.sb.repo, "config", "url.https://github.com/tester/real-app.git.pushInsteadOf",
+            "https://github.com/tester/factory-e2e.git")
+        with self.assertRaisesRegex(self.e2e.Refused, "pushes to origin go to"):
+            self.guard()
+
 
 class ConfigTest(E2ECase):
     def test_deep_merge_recurses_and_leaves_inputs_alone(self):
@@ -267,6 +288,16 @@ class MainTest(E2ECase):
         self.assertEqual(self.sb.origin_config()["budgets"]["job_usd"], 25)
         self.assertIn(["issue", "close", "7"], self.sb.gh_calls())
         self.assertFalse(any(c[:2] == ["pr", "close"] for c in self.sb.gh_calls()))
+
+    def test_every_gh_call_and_session_targets_the_guarded_repo(self):
+        self.scenario("happy", HAPPY)
+        code, out = self.main("--max-usd", "5", FAKE_PR_STATE="OPEN")  # an open PR: cleanup closes it too
+        self.assertEqual(code, 1, out)
+        writes = [(repo, args) for repo, args in self.sb.gh_repos()
+                  if args[:2] not in (["auth", "status"], ["repo", "view"])]
+        self.assertIn(["pr", "close", "3", "--delete-branch"], [args for _, args in writes])
+        self.assertEqual({repo for repo, _ in writes}, {"tester/factory-e2e"})
+        self.assertEqual({c["gh_repo"] for c in self.sb.claude_calls()}, {"tester/factory-e2e"})
 
     def test_a_failing_expectation_fails_the_run_and_closes_an_open_pr(self):
         self.scenario("happy", HAPPY)

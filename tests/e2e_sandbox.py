@@ -16,9 +16,11 @@ FAKE_GH = r'''
 import json, os, sys
 args = sys.argv[1:]
 with open(os.environ["FAKE_RECORD"], "a") as f:
-    f.write(json.dumps(["gh", *args]) + "\n")
+    f.write(json.dumps(["gh", os.environ.get("GH_REPO"), *args]) + "\n")
 if args[:2] == ["auth", "status"]:
     sys.exit(int(os.environ.get("FAKE_GH_AUTH_EXIT", "0")))
+if args[:2] == ["repo", "view"]:
+    print(os.environ.get("FAKE_GH_REPO", "tester/factory-e2e"))
 if args[:2] == ["issue", "create"]:
     print("https://github.com/tester/factory-e2e/issues/7")
 elif args[:2] == ["issue", "view"]:
@@ -35,7 +37,8 @@ FAKE_CLAUDE = r'''
 import datetime, json, os, sys
 with open(os.environ["FAKE_RECORD"], "a") as f:
     f.write(json.dumps({"argv": sys.argv[1:], "runner": os.environ.get("FACTORY_RUNNER"),
-                        "scrub": os.environ.get("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB")}) + "\n")
+                        "scrub": os.environ.get("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"),
+                        "gh_repo": os.environ.get("GH_REPO")}) + "\n")
 job = os.path.join("factory", "jobs", "001-e2e")
 os.makedirs(job, exist_ok=True)
 with open(os.path.join(job, "job.json"), "w") as f:
@@ -104,7 +107,11 @@ class E2ESandbox:
         return [c for c in self.calls() if isinstance(c, dict)]
 
     def gh_calls(self):
-        return [c[1:] for c in self.calls() if isinstance(c, list)]
+        return [c[2:] for c in self.calls() if isinstance(c, list)]
+
+    def gh_repos(self):
+        """[(GH_REPO, args)] for every gh call."""
+        return [(c[1], c[2:]) for c in self.calls() if isinstance(c, list)]
 
     def origin_config(self):
         return json.loads(git(self.root, "--git-dir", str(self.bare), "show", "main:factory/config.json"))

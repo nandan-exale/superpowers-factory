@@ -75,6 +75,13 @@ def guard(sandbox):
     name = repo.rsplit("/", 1)[-1]
     if "e2e" not in name and "sandbox" not in name:
         raise Refused(f"the sandbox repo name {name!r} must contain 'e2e' or 'sandbox'")
+    # A pushurl must name the sandbox itself; a rewrite may only point off GitHub (the tests push to a bare repo).
+    pushurls = git(sandbox, "config", "--get-all", "remote.origin.pushurl").stdout.split()
+    rewritten = git(sandbox, "remote", "get-url", "--push", "--all", "origin").stdout.split()
+    wrong = [u for u in pushurls if github_repo(u) != repo]
+    wrong += [u for u in rewritten if github_repo(u) not in (None, repo)]
+    if wrong:
+        raise Refused(f"pushes to origin go to {wrong[0]}, not github.com/{repo}")
     if not (sandbox / "factory" / "bin" / "job").is_file():
         raise Refused("the factory isn't installed in the sandbox; run /factory-install there")
     if git(sandbox, "status", "--porcelain").stdout.strip():
@@ -85,6 +92,10 @@ def guard(sandbox):
         raise Refused(f"the sandbox is on {branch!r}, not {base!r}")
     if run(["gh", "auth", "status"], sandbox).returncode != 0:
         raise Refused("gh auth status failed; run gh auth login")
+    resolved = run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], sandbox).stdout.strip()
+    if resolved.lower() != repo:
+        raise Refused(f"gh resolves this clone to {resolved!r}, not {repo!r}; "
+                      "check its remotes and gh repo set-default")
     if run([str(sandbox / "factory" / "bin" / "doctor")], sandbox).returncode != 0:
         raise Refused("factory/bin/doctor failed in the sandbox; fix what it reports")
     return repo
@@ -291,10 +302,10 @@ class ScenarioError(Exception):
     """The scenario couldn't finish; its message goes in the result."""
 
 
-def run_session(cmd, cwd, seconds, out_path):
+def run_session(cmd, cwd, repo, seconds, out_path):
     """(exit code or None on timeout, stdout). Stderr goes to <out>.stderr.log so stdout stays JSON.
     Kills the whole process group, like the runner does, so nothing claude started outlives it."""
-    env = {**os.environ, **RUN_ENV}
+    env = {**os.environ, **RUN_ENV, "GH_REPO": repo}
     err_path = out_path.with_name(out_path.name.removesuffix(".json") + ".stderr.log")
     with out_path.open("w") as out, err_path.open("w") as err:
         proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out,
@@ -320,10 +331,12 @@ def session_cost(text):
 
 
 class Run:
-    """One e2e invocation: the sandbox, its original config, the spend and where results go."""
+    """One e2e invocation: the sandbox and the repo the guard checked, its original config, the spend and
+    where results go."""
 
-    def __init__(self, sandbox, cap, out_dir, keep, scenarios_root):
-        self.sandbox, self.out_dir, self.keep, self.scenarios_root = sandbox, out_dir, keep, scenarios_root
+    def __init__(self, sandbox, repo, cap, out_dir, keep, scenarios_root):
+        self.sandbox, self.repo, self.out_dir, self.keep = sandbox, repo, out_dir, keep
+        self.scenarios_root = scenarios_root
         self.jobs_dir = sandbox / "factory" / "jobs"
         self.config_path = sandbox / "factory" / "config.json"
         self.original_text = self.config_path.read_text()
@@ -352,11 +365,16 @@ def push_config(r, text, message):
             raise ScenarioError(f"git {args[0]} failed: {res.stderr.strip()}")
 
 
+def gh(r, *args):
+    """gh pinned to the repo the guard checked, whatever gh would otherwise pick."""
+    return run(["gh", *args], r.sandbox, env={**os.environ, "GH_REPO": r.repo})
+
+
 def file_issue(r, scenario):
-    cmd = ["gh", "issue", "create", "--title", scenario["title"], "--body", scenario["issue_body"]]
+    args = ["issue", "create", "--title", scenario["title"], "--body", scenario["issue_body"]]
     for label in scenario.get("labels", []):
-        cmd += ["--label", label]
-    res = run(cmd, r.sandbox)
+        args += ["--label", label]
+    res = gh(r, *args)
     if res.returncode != 0:
         raise ScenarioError(f"gh issue create failed: {res.stderr.strip()}")
     return int(res.stdout.strip().rsplit("/", 1)[-1])
@@ -369,7 +387,7 @@ def one_session(r, scenario, name, n, seconds):
     else:
         cmd = ["claude", "-p", "/factory run", "--output-format", "json", "--permission-mode", "dontAsk",
                "--settings", str(r.sandbox / "factory" / "runner-settings.json")]
-    code, text = run_session(cmd, r.sandbox, seconds, out_path)
+    code, text = run_session(cmd, r.sandbox, r.repo, seconds, out_path)
     r.spend.add_session(session_cost(text))
     if code is None:
         raise ScenarioError(f"timed out after {scenario['timeout_minutes']} minutes")
@@ -400,7 +418,7 @@ def drive(r, scenario, name, issue):
 
 
 def gh_json(r, *args):
-    res = run(["gh", *args], r.sandbox)
+    res = gh(r, *args)
     if res.returncode != 0:
         raise ScenarioError(f"gh {' '.join(args[:2])} failed: {res.stderr.strip()}")
     return json.loads(res.stdout or "null")
@@ -429,12 +447,12 @@ def gather(r, scenario, job, issue, stdout, started, log_offset):
 def cleanup(r, issues, ctx):
     """Close what this scenario created. Returns warnings for anything that didn't close."""
     job = ctx.get("job") if ctx else None
-    steps = [(["gh", "issue", "close", str(n)], f"issue #{n}") for n in issues]
+    steps = [(["issue", "close", str(n)], f"issue #{n}") for n in issues]
     if job and job.get("pr") and ctx.get("pr_state") == "OPEN":
-        steps.append((["gh", "pr", "close", str(job["pr"]), "--delete-branch"], f"PR #{job['pr']}"))
+        steps.append((["pr", "close", str(job["pr"]), "--delete-branch"], f"PR #{job['pr']}"))
     warnings = []
-    for cmd, what in steps:
-        res = run(cmd, r.sandbox)
+    for args, what in steps:
+        res = gh(r, *args)
         if res.returncode != 0:
             warnings.append(f"couldn't close {what}: {res.stderr.strip()}")
     if job and job.get("branch"):
@@ -535,14 +553,14 @@ def main(argv=None):
         return 2
     sandbox = opts.sandbox.resolve()
     try:
-        guard(sandbox)
+        repo = guard(sandbox)
         scenarios = load_scenarios(SCENARIOS, opts.only)
     except Refused as exc:
         print(f"e2e: {exc}", file=sys.stderr)
         return 2
     out_dir = RESULTS / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out_dir.mkdir(parents=True, exist_ok=True)
-    r = Run(sandbox, opts.max_usd, out_dir, opts.keep, SCENARIOS)
+    r = Run(sandbox, repo, opts.max_usd, out_dir, opts.keep, SCENARIOS)
     try:
         results = run_all(r, scenarios)
     except ScenarioError as exc:

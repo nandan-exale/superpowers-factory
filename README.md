@@ -410,8 +410,10 @@ scripts/e2e --sandbox ~/src/factory-e2e --max-usd 10
 `--only <scenario>` runs one, and `--keep` leaves its issue, PR and branch open
 for a look. Results are in `e2e-results/<timestamp>/`. The tool refuses
 any repo that isn't on github.com, is this plugin's repo, or lacks `e2e` or
-`sandbox` in its name. The `runner-tick` scenario needs the runner's Keychain
-token and is skipped without it.
+`sandbox` in its name. It also refuses a clone whose pushes or `gh` would reach
+another repo, and pins every `gh` call it and the factory make to the sandbox
+(`GH_REPO`). The `runner-tick` scenario needs the runner's Keychain token and is
+skipped without it.
 
 Licensed under **GPLv3**, because `vendor/factory/` is a modified copy of
 GPLv3-licensed code.
