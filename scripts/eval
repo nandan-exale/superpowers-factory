@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""Run factory agent prompts against fixtures with real `claude -p` calls and compare each case's
+pass rate with tests/evals/baseline.json.
+
+Usage: scripts/eval [--agent NAME] [--samples 3] [--max-usd 5] [--update-baseline]
+
+Spends real money: run it by hand, never in CI. A case fails the run when its pass rate is more
+than one sample below its baseline. --update-baseline writes the new rates for a human to review.
+"""
+
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from fnmatch import fnmatch
+from pathlib import Path
+
+PLUGIN = Path(__file__).resolve().parents[1]
+VENDOR = PLUGIN / "vendor" / "factory"
+AGENTS = VENDOR / ".claude" / "agents"
+CONFIG = VENDOR / "factory" / "config.json"
+EVALS = PLUGIN / "tests" / "evals"
+BASELINE = EVALS / "baseline.json"
+CHECK_KEYS = {"first_line", "verdict", "tags_any", "regex"}
+EXPECT_KEYS = CHECK_KEYS | {"output"}
+NUMBERED = re.compile(r"\s*\d+\.\s+(.*)")
+TAG = re.compile(r"\[([^\]\s]+)\]")
+SAMPLE_SECONDS = 900
+
+
+class Stop(Exception):
+    """The evals can't run at all (exit 2)."""
+
+
+def agent_prompt(agent):
+    """(the agent's prompt without its frontmatter, its tools) from the vendored agent file."""
+    path = AGENTS / f"{agent}.md"
+    if not path.is_file():
+        raise Stop(f"no agent {agent!r} in {AGENTS.relative_to(PLUGIN)}")
+    lines = path.read_text().splitlines()
+    try:
+        end = lines.index("---", 1) if lines and lines[0] == "---" else -1
+    except ValueError:
+        end = -1
+    if end < 0:
+        raise Stop(f"{path.relative_to(PLUGIN)} has no closed frontmatter")
+    tools = []
+    for line in lines[1:end]:
+        if line.startswith("tools:"):
+            tools = [t.strip() for t in line.removeprefix("tools:").split(",") if t.strip()]
+    return "\n".join(lines[end + 1:]).strip() + "\n", tools
+
+
+def model_for(agent, cfg):
+    """{model, effort} the factory gives `agent` on a medium-risk job."""
+    if agent in cfg.get("agents", {}):
+        return cfg["agents"][agent]
+    role = agent.removeprefix("reviewer-")
+    medium = cfg.get("routing", {}).get("medium", {})
+    if role in medium:
+        return medium[role]
+    for roles in cfg.get("surface_reviewers", {}).values():
+        if role in roles:
+            return roles[role]
+    raise Stop(f"factory/config.json has no model for {agent}")
+
+
+def finding_tags(text):
+    tags, inside = [], False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            inside = line[3:].strip() == "Findings"
+            continue
+        m = NUMBERED.fullmatch(line) if inside else None
+        tag = TAG.match(m.group(1)) if m else None
+        if tag:
+            tags.append(tag.group(1))
+    return tags
+
+
+def check(expect, output):
+    """Failure messages for one sample's output; empty when it passes."""
+    first = next((line.strip() for line in output.splitlines() if line.strip()), "")
+    fails = []
+    if "first_line" in expect and first != expect["first_line"]:
+        fails.append(f"first line {first!r}, expected {expect['first_line']!r}")
+    if "verdict" in expect and first != f"VERDICT: {expect['verdict']}":
+        fails.append(f"first line {first!r}, expected 'VERDICT: {expect['verdict']}'")
+    tags = finding_tags(output)
+    if "tags_any" in expect and not any(fnmatch(t, p) for t in tags for p in expect["tags_any"]):
+        fails.append(f"findings tagged {tags}, expected one of {expect['tags_any']}")
+    if "regex" in expect and not re.search(expect["regex"], output, re.M):
+        fails.append(f"output doesn't match {expect['regex']!r}")
+    return fails
+
+
+def validate_case(case_dir):
+    problems = [] if (case_dir / "input.md").is_file() else ["missing input.md"]
+    try:
+        expect = json.loads((case_dir / "expect.json").read_text())
+    except (OSError, ValueError) as exc:
+        return problems + [f"expect.json: {exc}"]
+    problems += [f"unknown expect key {k!r}" for k in sorted(set(expect) - EXPECT_KEYS)]
+    if not set(expect) & CHECK_KEYS:
+        problems.append(f"expect.json checks nothing (use one of {sorted(CHECK_KEYS)})")
+    if "regex" in expect:
+        try:
+            re.compile(expect["regex"])
+        except re.error as exc:
+            problems.append(f"bad regex: {exc}")
+    return problems
+
+
+def regressions(rates, baseline, samples):
+    """Cases whose pass rate is more than one sample below their baseline."""
+    slack = 1 / samples + 1e-9
+    return sorted(k for k, rate in rates.items() if k in baseline and rate < baseline[k] - slack)
