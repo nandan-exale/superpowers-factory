@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Run real factory scenarios on a disposable sandbox repo, under a hard spend cap.
+
+Usage: scripts/e2e --sandbox <local clone of the sandbox repo> --max-usd 10 [--only <scenario>] [--keep]
+
+Spends real money with real agents: run it by hand, never in CI. Scenarios are
+tests/e2e/<name>/scenario.json; results go to e2e-results/<timestamp>/.
+"""
+
+import argparse
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+from datetime import datetime, timedelta, timezone
+from fnmatch import fnmatch
+from pathlib import Path
+from urllib.parse import urlparse
+
+PLUGIN = Path(__file__).resolve().parents[1]
+SCENARIOS = PLUGIN / "tests" / "e2e"
+RESULTS = PLUGIN / "e2e-results"
+
+
+class Refused(Exception):
+    """A precondition failed before any money was spent."""
+
+
+def run(cmd, cwd, **kwargs):
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, **kwargs)
+
+
+def git(cwd, *args):
+    return run(["git", *args], cwd)
+
+
+def github_repo(url):
+    """'owner/name', lowercased, for a github.com remote (https, ssh:// or scp-style); else None."""
+    if "://" in url:
+        parsed = urlparse(url)
+        host, path = parsed.hostname, parsed.path
+    elif ":" in url:
+        host, path = url.split(":", 1)
+        host = host.rsplit("@", 1)[-1]
+    else:
+        return None
+    if (host or "").lower() != "github.com":
+        return None
+    return path.strip("/").removesuffix(".git").lower() or None
+
+
+def guard(sandbox):
+    """The sandbox's owner/name. Raises Refused unless it is safe to spend money in."""
+    if not (sandbox / ".git").exists():
+        raise Refused(f"{sandbox} isn't a git clone")
+    repo = github_repo(git(sandbox, "remote", "get-url", "origin").stdout.strip())
+    if not repo:
+        raise Refused("the sandbox's origin isn't on github.com")
+    if repo == github_repo(git(PLUGIN, "remote", "get-url", "origin").stdout.strip()):
+        raise Refused("the sandbox's origin is this plugin's repo")
+    name = repo.rsplit("/", 1)[-1]
+    if "e2e" not in name and "sandbox" not in name:
+        raise Refused(f"the sandbox repo name {name!r} must contain 'e2e' or 'sandbox'")
+    if not (sandbox / "factory" / "bin" / "job").is_file():
+        raise Refused("the factory isn't installed in the sandbox; run /factory-install there")
+    if git(sandbox, "status", "--porcelain").stdout.strip():
+        raise Refused("the sandbox's working tree has changes")
+    base = json.loads((sandbox / "factory" / "config.json").read_text())["base_branch"]
+    branch = git(sandbox, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if branch != base:
+        raise Refused(f"the sandbox is on {branch!r}, not {base!r}")
+    if run(["gh", "auth", "status"], sandbox).returncode != 0:
+        raise Refused("gh auth status failed; run gh auth login")
+    if run([str(sandbox / "factory" / "bin" / "doctor")], sandbox).returncode != 0:
+        raise Refused("factory/bin/doctor failed in the sandbox; fix what it reports")
+    return repo
