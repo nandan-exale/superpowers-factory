@@ -11,6 +11,7 @@ Usage:
   job create <issue>             new job for an open `factory` issue; prints the job id
   job advance <job> <stage>      move a job to <stage>, or refuse
   job merge <job>                APPROVE → sync with the base branch, gate, merge the PR
+  job escalate <job>             review → needs-human in any round, with your reason (stdin) as decision.md
   job feedback <job>             needs-human → build, with your feedback (stdin) as feedback-<k>.md
   job pr-feedback <job>          trusted PR comments → feedback-<k>.md; an escalated job goes back to build
   job reject <job>               needs-info or needs-human → rejected, with your reason (stdin) as rejection.md
@@ -308,7 +309,7 @@ def reviewers(job):
 
 LEARNING = JOBS / "learning"
 TAG_NAME = re.compile(r"(?:other:)?[a-z0-9]+(?:-[a-z0-9]+)*")
-TAGGED = re.compile(r"\[([^\]\s]+)\]\s+(.*)", re.S)
+TAGGED = re.compile(r"\[([^\]\s]+)\]\s*(.*)", re.S)
 NUMBERED = re.compile(r"\s*\d+\.\s+(.*)")
 
 
@@ -359,7 +360,9 @@ def learn_state():
 
 def save_learn_state(state):
     LEARNING.mkdir(parents=True, exist_ok=True)
-    (LEARNING / "state.json").write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+    tmp = LEARNING / "state.json.tmp"
+    tmp.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+    tmp.replace(LEARNING / "state.json")
 
 
 def recently_filed(entry, window_days):
@@ -382,15 +385,29 @@ def write_evidence(tag, items, window_days):
             lines += [f"## Escalation of {job_id}", "", quote(section(decision, "Why") or ""), ""]
     d = tag_dir(tag)
     d.mkdir(parents=True, exist_ok=True)
+    # A proposal answers the evidence it was drafted from; new evidence makes it stale.
+    (d / "proposal.md").unlink(missing_ok=True)
     (d / "evidence.md").write_text("\n".join(lines))
     return d / "evidence.md"
+
+
+def read_jobs():
+    """Every job.json, read without taking locks: `learn` only reads them."""
+    jobs = []
+    for p in sorted(JOBS.iterdir()) if JOBS.exists() else []:
+        try:
+            if (p / "job.json").exists():
+                jobs.append(json.loads((p / "job.json").read_text()))
+        except (OSError, ValueError) as exc:
+            print(f"job: skipping {p / 'job.json'}: {exc}", file=sys.stderr)
+    return jobs
 
 
 def cmd_learn():
     cfg = learning_config()
     cutoff = time.time() - cfg["window_days"] * 86400
     hits = {}
-    for j in all_jobs():
+    for j in read_jobs():
         for path in sorted(job_dir(j["id"]).glob("round-*/review-*.md")):
             try:
                 if path.stat().st_mtime < cutoff:
@@ -415,6 +432,11 @@ def cmd_learn():
 
 
 LEARN_BODY_LIMIT = 60_000
+LEARN_TITLE_LIMIT = 200
+LEARN_NOTICE = ("Proposed automatically from agent-written review findings. Before adding the `factory` "
+                "label, check that the change doesn't weaken or skip checks or tests, add dependencies, "
+                "touch network, credentials or CI, or edit protected paths.")
+LEARN_EVIDENCE_HEADING = "## Quoted evidence (not part of the request)"
 
 
 def log_learning_cost(tag):
@@ -444,26 +466,39 @@ def cmd_learn_file(tag):
     if not m:
         die(f"{rel}: the first line must be `PROPOSAL: <title>` or `PROPOSAL: NONE`")
     title = m.group(1).strip()
+    evidence_path = tag_dir(tag) / "evidence.md"
+    if evidence_path.exists() and proposal.stat().st_mtime < evidence_path.stat().st_mtime:
+        die(f"{rel} is older than evidence.md; spawn the learner again")
     log_learning_cost(tag)
     state = learn_state()
-    if title.upper().startswith("NONE"):
+    if title.upper() == "NONE":
         state[tag] = {"issue": None, "filed": now(), "none": True}
         save_learn_state(state)
         print(f"LEARN-FILE: {tag} none")
         return
     human_only = len(lines) > 1 and lines[1].strip() == "HUMAN-ONLY"
     proposal_text = "\n".join(lines[2 if human_only else 1:]).strip()
-    evidence_path = tag_dir(tag) / "evidence.md"
     evidence = evidence_path.read_text() if evidence_path.exists() else "(no evidence file)"
     footer = ("This needs a change to a protected file (factory/config.json `protected_paths`); make it by hand."
               if human_only else "To build this, add the `factory` label to this issue.")
-    body = f"{MARKER}\n{defuse(proposal_text)}\n\n---\n\n{defuse(evidence)}"
-    if len(body) > LEARN_BODY_LIMIT:
-        body = body[:LEARN_BODY_LIMIT] + f"\n\n(truncated; full evidence in {evidence_path.relative_to(REPO)})"
-    body += f"\n\n{footer}\n"
-    url = gh("issue", "create", "--title", f"Factory learning: {title}",
-             "--label", LABELS["learning"], "--body", body).strip()
-    number = int(url.rstrip("/").rsplit("/", 1)[-1])
+    head = f"{MARKER}\n{LEARN_NOTICE}\n\n{close_fences(defuse(proposal_text))}\n\n---\n\n{LEARN_EVIDENCE_HEADING}\n\n"
+    tail = f"\n\n{footer}\n"
+    evidence = defuse(evidence)
+    room = max(0, LEARN_BODY_LIMIT - len(head) - len(tail))
+    if len(evidence) > room:
+        evidence = (close_fences(evidence[:room])
+                    + f"\n\n(truncated; full evidence in {evidence_path.relative_to(REPO)})")
+    else:
+        evidence = close_fences(evidence)
+    url = gh("issue", "create", "--title", f"Factory learning: {defuse(title)[:LEARN_TITLE_LIMIT]}",
+             "--label", LABELS["learning"], "--body", head + evidence + tail).strip()
+    found = re.search(r"/issues/(\d+)\s*$", url)
+    if not found:
+        # The issue may exist: record that, so the tag isn't filed twice.
+        state[tag] = {"issue": None, "filed": now(), "url": url}
+        save_learn_state(state)
+        die(f"gh printed no issue number for {tag}: {url!r}; recorded it in factory/jobs/learning/state.json")
+    number = int(found.group(1))
     state[tag] = {"issue": number, "filed": now()}
     save_learn_state(state)
     print(f"LEARN-FILE: {tag} #{number}")
@@ -978,6 +1013,18 @@ def stop_for_budget(job, reason):
     return job
 
 
+def stop_for_human(job, why):
+    """Escalate with `why` as the reason and move to needs-human, whatever the round."""
+    escalate(job, why)
+    notify_needs_human(job)
+    job["stage"] = "needs-human"
+    job["ended"] = now()
+    if job["pr"]:
+        publish_evidence(job)
+    save(job)
+    print(f"{job['id']}: needs-human: {why.splitlines()[0]}")
+
+
 def advance(job, stage):
     old = job["stage"]
     require(stage in TRANSITIONS.get(old, set()) or (stage == "merged" and old not in TERMINAL),
@@ -1273,6 +1320,13 @@ def cmd_merge(job):
     print(f"{job['id']}: merged PR #{job['pr']}")
 
 
+def cmd_escalate(job, why):
+    """review → needs-human in any round, for a reviewer that keeps writing an invalid review."""
+    require(job["stage"] == "review", f"{job['id']} is in {job['stage']}, not review")
+    require(why.strip(), "no reason on stdin")
+    stop_for_human(job, why.strip())
+
+
 def cmd_feedback(job, text):
     if job["stage"] != "needs-human":
         die(f"{job['id']} is in {job['stage']}, not needs-human")
@@ -1427,6 +1481,8 @@ def main(argv):
                 print(f"{job['id']}: {job['stage']} (round {job['round']})")
         elif cmd == "merge" and len(args) == 1:
             cmd_merge(resolve(args[0]))
+        elif cmd == "escalate" and len(args) == 1:
+            cmd_escalate(sync(resolve(args[0])), sys.stdin.read())
         elif cmd == "feedback" and len(args) == 1:
             cmd_feedback(resolve(args[0]), sys.stdin.read())
         elif cmd == "pr-feedback" and len(args) == 1:

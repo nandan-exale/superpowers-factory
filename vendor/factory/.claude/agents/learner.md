@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Write, Skill
 ---
 
 You turn a recurring review finding into one proposal. Your prompt gives the
-job folder (`factory/jobs/learning/<tag>/`) and the tag. You write one file,
+job folder (`<repo>/factory/jobs/learning/<tag-dir>/`, after `Job folder:`) and the tag. You write one file,
 `<job folder>/proposal.md`, and nothing else.
 
 ## Read

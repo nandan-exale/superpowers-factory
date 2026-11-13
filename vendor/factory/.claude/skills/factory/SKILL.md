@@ -159,6 +159,10 @@ finished, run `factory/bin/job pr-feedback <id>` first. If it prints any
 files (new or pending), treat the round as CHANGES and add
 `Also address PR comments in <every file pr-feedback printed>.` to the builder's message.
 
+- If `advance` refuses because a review is invalid (no `VERDICT` line or an
+  untagged finding), resume that reviewer once with the refusal text. If it
+  refuses again, write nothing yourself: run `factory/bin/job escalate <id>`
+  with the refusal text on stdin; it moves the job to `needs-human` in any round.
 - all PASS and no PR feedback: `factory/bin/job advance <id> approve`, then spawn `approver` with
   `<header> PR: #<pr>. Final round: <N>.`
 - any CHANGES, or PR feedback: `factory/bin/job advance <id> build` (or `needs-human` when it
@@ -202,19 +206,19 @@ then moves the job to `merged`; stop any agents still running for it.
    start it at **intake**.
 3. Each time a job finishes, run `factory/bin/job queue` again and start its
    `resume` lines you aren't already running and its `new` lines.
-4. When nothing is queued or running, print `factory/bin/job summary <ids>`
-   for the jobs this run touched, then list what waits on a human: PRs to
+4. **Learning.** When nothing is queued or running, and the run didn't end on
+   a daily-budget wait, run `factory/bin/job learn`. For each
+   `LEARN: <tag> (<n> jobs) <path>` line, spawn `learner` with the model and
+   effort from `factory/bin/job agent <tag> learner`, and a prompt that starts
+   `Job folder: <repo>/factory/jobs/learning/<tag-dir>/.` (`<tag-dir>` is the
+   tag with `:` replaced by `--`; keep the form exactly as shown, it is how the
+   learner's cost is found), then the tag. When it replies, run
+   `factory/bin/job learn-file <tag>`. `factory:learning` issues wait for a
+   human to add the `factory` label; never add it yourself.
+5. Print `factory/bin/job summary <ids>` for the jobs this run touched, with
+   each `LEARN-FILE:` line, then list what waits on a human: PRs to
    review (merge one to approve it, or give feedback with `/factory`) and
    questions waiting on authors.
-
-5. **Learning.** Then run `factory/bin/job learn`. Skip this step if the run
-   ended on a daily-budget wait. For each `LEARN: <tag> (<n> jobs) <path>`
-   line, spawn `learner` with the model and effort from
-   `factory/bin/job agent <tag> learner`, and a prompt whose first line is
-   `Job folder: factory/jobs/learning/<tag with : replaced by -->/` followed by
-   the tag. When it replies, run `factory/bin/job learn-file <tag>` and add
-   its `LEARN-FILE:` line to the summary. `factory:learning` issues wait for a
-   human to add the `factory` label; never add it yourself.
 
 **Resuming.** State lives in files, so a new session picks up where a dead one
 stopped. For a `resume` job, run its stage's step again: `intake` runs the
