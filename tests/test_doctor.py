@@ -63,6 +63,14 @@ class DoctorTest(unittest.TestCase):
         self.edit("factory/config.json", change)
         self.assertFails("config", "learning.tags")
 
+    def test_bad_learner_model_fails(self):
+        def change(text):
+            cfg = json.loads(text)
+            cfg["agents"]["learner"]["model"] = "gpt"
+            return json.dumps(cfg)
+        self.edit("factory/config.json", change)
+        self.assertFails("config", "agents.learner: model 'gpt' not in model_aliases")
+
     def runner_settings(self, change):
         path = self.p.root / "factory/runner-settings.json"
         data = json.loads(path.read_text())

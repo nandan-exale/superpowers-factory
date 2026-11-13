@@ -22,7 +22,8 @@ JSON_FILES = (
 
 def check_license(root, opts):
     problems = []
-    for rel in ("LICENSE", "vendor/factory/NOTICE", "skills/agents-best-practices/LICENSE"):
+    for rel in ("LICENSE", "vendor/factory/NOTICE", "skills/agents-best-practices/LICENSE",
+                "skills/agents-best-practices/SOURCE"):
         path = root / rel
         if not path.is_file() or not path.read_text(encoding="utf-8").strip():
             problems.append(f"{rel} is missing or empty")

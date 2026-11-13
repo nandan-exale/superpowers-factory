@@ -105,7 +105,8 @@ protected file say so and are yours to make.
 
 The plugin ships the
 [agents-best-practices](https://github.com/DenisSergeevitch/agents-best-practices)
-skill (MIT, by Denis Sergeevitch), vendored unmodified in
+skill (MIT, by Denis Sergeevitch), vendored with one modification (its
+self-update section is replaced by a pinned-snapshot note; see `SOURCE`) in
 `skills/agents-best-practices/`; the learner uses it.
 
 ## PR comments

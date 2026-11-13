@@ -81,6 +81,10 @@ class CheckTest(RepoCopyTest):
         (self.root / "vendor/factory/NOTICE").unlink()
         self.assertFails("license", "vendor/factory/NOTICE is missing or empty")
 
+    def test_missing_skill_source_fails(self):
+        (self.root / "skills/agents-best-practices/SOURCE").unlink()
+        self.assertFails("license", "skills/agents-best-practices/SOURCE is missing or empty")
+
     def test_unparseable_config_fails(self):
         self.edit(CONFIG, lambda text: text + "}")
         self.assertFails("json", "vendor/factory/factory/config.json")

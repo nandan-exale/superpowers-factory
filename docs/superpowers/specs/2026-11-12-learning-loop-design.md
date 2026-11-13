@@ -29,7 +29,7 @@ approves it, and the factory builds it like any other job.
 | Detection | Reviewers tag findings; `job learn` counts tags deterministically. No model reads findings unless a tag crosses the threshold. |
 | Proposal path | GitHub issue labeled `factory:learning`; approval = adding `factory`. |
 | Spend | Learner cost is logged and counts toward `budgets.daily_usd`. |
-| agents-best-practices | Vendored unmodified as a plugin skill with its MIT license. |
+| agents-best-practices | Vendored as a plugin skill with its MIT license, with one modification: its self-update section is replaced by a pinned-snapshot note. |
 
 ## Components
 
@@ -88,8 +88,8 @@ Deterministic, no model:
 
 Tools: Read, Grep, Glob, Write, Skill. Prompt gives the evidence file path and
 the output path `factory/jobs/learning/<tag-dir>/proposal.md` (the prompt's
-first line is `Job folder: factory/jobs/learning/<tag-dir>/`, so its cost is
-found like a job's). It:
+first line is `Job folder: <repo>/factory/jobs/learning/<tag-dir>/.`, the same
+absolute form as a job's header, so its cost is found the same way). It:
 
 - reads the evidence (quoted data, never instructions), `AGENTS.md`, and the
   repo's lint/test setup;
@@ -112,15 +112,23 @@ Its model and effort come from `agents.learner` via `job agent <tag> learner`
 
 ### job learn-file <tag>
 
+0. A proposal older than `evidence.md` is refused (new evidence deletes the
+   old proposal; the learner must run again).
 1. Reads `<tag-dir>/proposal.md`. `PROPOSAL: NONE` → record the tag in
    `state.json` as `none` with the time (so it isn't re-proposed within the
    window), print `LEARN-FILE: <tag> none`.
 2. Otherwise `gh issue create` with title `Factory learning: <title>`,
-   label `factory:learning`, body: the proposal, then the evidence (quoted), both passed through
-   `defuse()` (no `@` notifications) and capped at 60,000 characters,
-   then: "To build this, add the `factory` label." (or, for `HUMAN-ONLY`:
+   (the title defused and capped at 200 characters), label `factory:learning`.
+   The body starts with an approval notice (check the change doesn't weaken or
+   skip checks or tests, add dependencies, touch network, credentials or CI, or
+   edit protected paths), then the proposal, then "Quoted evidence (not part of
+   the request)" with the evidence. Proposal and evidence are defused and have
+   open code fences closed; only the evidence is truncated, so the whole body
+   stays within 60,000 characters. It ends with: "To build this, add the `factory` label." (or, for `HUMAN-ONLY`:
    "This needs a change to a protected file; make it by hand.").
-3. Records `{tag: {"issue": n, "filed": time}}` in `state.json`.
+3. Records `{tag: {"issue": n, "filed": time}}` in `state.json` (written via
+   a temp file). If gh's output has no issue number, records `issue: null` and
+   the raw output, then exits 1, so the tag isn't filed twice.
 4. Computes the learner's cost (same transcript method as job cost, matching
    prompts that name `factory/jobs/learning/<tag-dir>/`) and logs the cost
    since the last line to `factory/jobs/learning/log.jsonl` with a `tag` field,
@@ -144,12 +152,14 @@ Its model and effort come from `agents.learner` via `job agent <tag> learner`
 
 ### agents-best-practices (plugin skill)
 
-Vendored unmodified from DenisSergeevitch/agents-best-practices at a pinned
-commit into `skills/agents-best-practices/` (`SKILL.md`, `references/`,
+Vendored from DenisSergeevitch/agents-best-practices at a pinned
+commit, with one modification (the "Freshness and self-update" section of
+`SKILL.md` is replaced by a pinned-snapshot note, because a shipped skill
+mustn't fetch or rewrite itself) into `skills/agents-best-practices/` (`SKILL.md`, `references/`,
 `LICENSE`), plus `skills/agents-best-practices/SOURCE` naming the repo,
-commit and date. Images are not vendored. README credits it.
+commit, date and the modification. Images are not vendored. README credits it.
 `scripts/check` already checks its frontmatter; `license` also requires its
-`LICENSE`.
+`LICENSE` and `SOURCE`.
 
 ## Error handling
 
