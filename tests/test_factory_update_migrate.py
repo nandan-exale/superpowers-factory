@@ -71,6 +71,23 @@ class MigrateOldConfigTest(unittest.TestCase):
         self.assertEqual(self.config()["routing"]["low"]["builder"], upstream["routing"]["low"]["builder"])
         self.assertIn("routing.low.builder", res.stdout)
 
+    def test_unknown_model_replacement_is_reported_with_the_old_value(self):
+        mine = json.loads(OLD_CONFIG.read_text())
+        mine["routing"]["low"]["code"] = "gpt"
+        (self.p.root / "factory/config.json").write_text(json.dumps(mine))
+        res = self.plan("--apply-safe")
+        self.assertIn("routing.low.code (was gpt)", res.stdout)
+
+    def test_whole_added_tables_are_listed(self):
+        mine = json.loads(OLD_CONFIG.read_text())
+        del mine["routing"]["high"]
+        del mine["surface_reviewers"]["security"]
+        (self.p.root / "factory/config.json").write_text(json.dumps(mine))
+        res = self.plan("--apply-safe")
+        self.assertIn("routing.high", res.stdout)
+        self.assertIn("surface_reviewers.security", res.stdout)
+        self.assertIn("agents", res.stdout)
+
     def test_doctor_config_check_passes_after_apply_safe(self):
         self.plan("--apply-safe")
         res = self.p.run("doctor", "--fast")
@@ -178,6 +195,50 @@ class ResolvedCountTest(unittest.TestCase):
         self.plan("--resolved", self.files[-1])
         manifest = json.loads((self.p.root / ff.MANIFEST).read_text())
         self.assertEqual(manifest["vendor_hash"], ff.vendor_hash())
+
+
+class PendingCountTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.p = InstalledProject(tmp.name)
+
+    def plan(self, *args):
+        return subprocess.run([sys.executable, str(PLAN), str(self.p.root), *args],
+                              capture_output=True, text=True)
+
+    def manifest(self):
+        return json.loads((self.p.root / ff.MANIFEST).read_text())
+
+    def test_stale_settings_core_keeps_the_count_and_vendor_hash_pending(self):
+        path = self.p.root / ff.MANIFEST
+        m = self.manifest()
+        m["settings_core"] = "stale"
+        m["vendor_hash"] = "old"
+        path.write_text(json.dumps(m))
+        shutil.copy2(ff.VENDOR / "factory/bin/job", self.p.root / "factory/bin/job")
+        (self.p.root / "factory/bin/gate").write_text("# mine\n")
+        m["files"]["factory/bin/gate"] = "0" * 64
+        path.write_text(json.dumps(m))
+        res = self.plan("--resolved", "factory/bin/gate")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        left = int(res.stdout.rsplit("merges left:", 1)[1])
+        self.assertGreater(left, 0)
+        self.assertNotEqual(self.manifest()["vendor_hash"], ff.vendor_hash())
+
+    def test_resolved_with_an_unapplied_safe_row_does_not_mark_current(self):
+        m = self.manifest()
+        m["vendor_hash"] = "old"
+        m["files"]["factory/bin/route"] = "0" * 64  # installed copy equals the recorded old one
+        old = "# old route\n"
+        (self.p.root / "factory/bin/route").write_text(old)
+        m["files"]["factory/bin/route"] = ff.sha256_file(self.p.root / "factory/bin/route")
+        m["files"]["factory/bin/gate"] = "0" * 64
+        (self.p.root / "factory/bin/gate").write_text("# mine\n")
+        (self.p.root / ff.MANIFEST).write_text(json.dumps(m))
+        res = self.plan("--resolved", "factory/bin/gate")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertNotEqual(self.manifest()["vendor_hash"], ff.vendor_hash())
 
 
 def ff_efforts():

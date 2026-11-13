@@ -152,11 +152,14 @@ def add_missing(mine, upstream, aliases=None, path="", notes=None):
         here = f"{path}.{key}" if path else key
         if key not in mine:
             mine[key] = value
-            if notes is not None and path.split(".")[0] in ("routing", "surface_reviewers") and is_entry(value):
+            if notes is not None and here.split(".")[0] in ("routing", "surface_reviewers", "agents") \
+                    and (is_entry(value) or isinstance(value, dict)):
                 notes.append(here)
         elif is_entry(value):
             migrated = migrate_entry(mine[key], value, aliases)
             if migrated is not None:
+                if notes is not None and isinstance(mine[key], str) and migrated["model"] != mine[key]:
+                    notes.append(f"{here} (was {mine[key]})")
                 mine[key] = migrated
         elif isinstance(mine[key], dict) and isinstance(value, dict):
             add_missing(mine[key], value, aliases, here, notes)
@@ -252,8 +255,7 @@ def resolve(project, vendor, rel):
         data["settings_core"] = settings_core(theirs)
         data["settings_domains"] = allowed_domains(theirs, SETTINGS)
     remaining = [r for group, r in classify(project, vendor, data)
-                 if group == "merge" or (group == "unchanged" and r not in OWNED | {CONFIG}
-                                         and pending(r, data, vendor))]
+                 if group == "merge" or (group != "owned" and r != CONFIG and pending(r, data, vendor))]
     current = manifest_data(vendor)["vendor_hash"]
     if not remaining:
         data["vendor_hash"] = current
