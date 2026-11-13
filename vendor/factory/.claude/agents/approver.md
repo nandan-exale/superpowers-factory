@@ -43,7 +43,8 @@ APPROVE only if all of these hold:
 - The change stays inside intake's Scope.
 - When `plan.md` exists: every plan task is ticked in build.md's
   `## Plan tasks`, and every entry under `## Deviations` has a reason you'd
-  accept yourself.
+  accept yourself. For a part (`Tasks: N-M of T.` in the header),
+  only the tasks in `Tasks:` count.
 
 ESCALATE if any of them fails, or if the change:
 
