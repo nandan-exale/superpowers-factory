@@ -402,6 +402,12 @@ def has_risk_ok(job):
     return risk_ok_label() in {l["name"] for l in fetch_issue(job["issue"])["labels"]}
 
 
+def risk_approved(job):
+    """The label covers only the commit a human saw stopped: the one recorded on needs-human → merging."""
+    sha = job.get("risk_ok_sha")
+    return bool(sha) and has_risk_ok(job) and git(job, "rev-parse", "HEAD").stdout.strip() == sha
+
+
 # ---- Secret scan -------------------------------------------------------------
 
 SECRET_RULES = (
@@ -1546,6 +1552,7 @@ def advance(job, stage):
         require(job.get("risk_stopped"), "only a job stopped for risky changes can go back to merging")
         require(has_risk_ok(job), f"add the {risk_ok_label()} label to issue #{job['issue']} first")
         job.pop("risk_stopped")
+        job["risk_ok_sha"] = git(job, "rev-parse", "HEAD").stdout.strip()
         label("issue", job["issue"], remove=LABELS["needs_human"])
 
     elif old == "needs-human":
@@ -1560,6 +1567,7 @@ def advance(job, stage):
         job["budget_base_time"] = now()
         job.pop("budget_stopped", None)
         job.pop("risk_stopped", None)
+        job.pop("risk_ok_sha", None)
         next_round(job)
         label("issue", job["issue"], remove=LABELS["needs_human"])
 
@@ -1714,10 +1722,16 @@ def cmd_merge(job):
     if job.get("feedback_pending") or pr_comments(job):
         return fail(unhandled)
     risky = risky_listed(job)
-    if risky and not has_risk_ok(job):
+    if risky and not risk_approved(job):
         job["risk_stopped"] = True
+        job.pop("risk_ok_sha", None)
+        stale = ""
+        if has_risk_ok(job):
+            label("issue", job["issue"], remove=risk_ok_label())
+            stale = (f"\n\nThe `{risk_ok_label()}` label was removed: it was added before this commit stopped, "
+                     "so it didn't cover these changes.")
         return fail(f"This PR changes dependencies or CI: {', '.join(risky)}. Review it, then add "
-                    f"`{risk_ok_label()}` to the issue and run the factory again, or merge it yourself.")
+                    f"`{risk_ok_label()}` to the issue and run the factory again, or merge it yourself.{stale}")
     git(job, "fetch", "origin", BASE)
     merged = git(job, "merge", "--no-edit", f"origin/{BASE}", check=False)
     if merged.returncode != 0:
