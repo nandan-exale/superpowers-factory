@@ -22,6 +22,12 @@ class DashboardTest(unittest.TestCase):
         self.assertIn("padding: 6px 32px", rule)
         self.assertIn("var(--line)", rule)
 
+    def test_strip_and_pause_use_the_phone_gutter(self):
+        phone = self.html[self.html.index("@media (max-width: 640px)"):]
+        phone = phone[:phone.index("\n  }\n")]
+        self.assertIn(".strip { padding: 6px 16px; }", phone)
+        self.assertIn(".pause { margin-left: 0; }", phone)
+
     def test_pause_toggle(self):
         self.assertIn('id="pause"', self.html)
         self.assertIn("if (paused) return", self.html)
