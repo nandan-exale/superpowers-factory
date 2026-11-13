@@ -126,3 +126,49 @@ class StateTest(CiCase):
             tar.addfile(info, io.BytesIO(b""))
         with self.assertRaises(ValueError):
             self.runner.extract_state(bad.read_bytes(), self.p.root / "factory/jobs")
+
+
+FAKE_GH = f"#!{sys.executable}\nimport sys\nsys.stdout.write('[]')\n"
+
+
+class TickCiTest(CiCase):
+    def tick(self, **env):
+        fakebin = self.tmp / "cibin"
+        fakebin.mkdir(exist_ok=True)
+        (fakebin / "gh").write_text(FAKE_GH)
+        (fakebin / "gh").chmod(0o755)
+        full = {**self.p.env(), "PATH": f"{fakebin}{os.pathsep}{os.environ['PATH']}", **env}
+        return subprocess.run([sys.executable, str(self.p.root / "factory/bin/runner"), "tick", "--ci"],
+                              cwd=self.p.root, capture_output=True, text=True, env=full)
+
+    def test_idle_ci_tick_saves_state_with_its_log(self):
+        res = self.tick(CLAUDE_CODE_OAUTH_TOKEN="tok")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        files = git(self.tmp, "--git-dir", str(self.origin), "ls-tree", "-r", "--name-only", "factory-state").split()
+        self.assertIn("runner.log", files)
+        self.assertFalse((self.p.git_dir / "factory-runner.lock").exists())
+
+    def test_state_is_restored_before_the_tick(self):
+        self.tick(CLAUDE_CODE_OAUTH_TOKEN="tok")
+        import shutil
+        shutil.rmtree(self.p.root / "factory/jobs")
+        self.tick(CLAUDE_CODE_OAUTH_TOKEN="tok")
+        lines = (self.p.root / "factory/jobs/runner.log").read_text().splitlines()
+        self.assertEqual(len(lines), 2)  # the first tick's line came back from factory-state
+
+    def test_token_comes_from_the_environment_and_leaves_it(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_OAUTH_TOKEN": "tok"}):
+            self.assertEqual(self.runner.ci_token(), "tok")
+            self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", os.environ)
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+            self.assertIsNone(self.runner.ci_token())
+
+    def test_missing_token_with_work_logs_the_secret_to_add(self):
+        base, runner = self.runner.load_config()
+        with mock.patch.object(self.runner, "chores"), mock.patch.object(self.runner, "has_work", return_value=True), \
+                mock.patch.object(self.runner, "run_claude") as run_claude:
+            self.assertEqual(self.runner.tick_body(base, runner, ""), 1)
+        run_claude.assert_not_called()
+        self.assertIn("CLAUDE_CODE_OAUTH_TOKEN isn't set; add the FACTORY_CLAUDE_TOKEN secret",
+                      (self.p.root / "factory/jobs/runner.log").read_text())
