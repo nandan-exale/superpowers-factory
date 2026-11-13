@@ -32,6 +32,7 @@ Usage:
   job scan <job-id>              secret patterns in the branch's added lines; exit 1 on a hit
   job push <job>                 the builder's push: scan, then push the job branch (nothing is pushed on a hit)
   job watch                      check base-branch CI for merged jobs; red → revert PR and pause
+  job ensure-worktree <job>      recreate a missing worktree (fresh CI machines) from the job branch or the base
 
 <job> is a job id (004-dark-mode) or an issue number (12).
 """
@@ -1618,6 +1619,36 @@ def advance(job, stage):
     return job
 
 
+WORKTREE_STAGES = {"spec", "build", "gate", "review", "approve", "merging"}
+
+
+def ensure_worktree(job):
+    """'present', 'not needed', 'recreated from origin/<branch>' or 'created from origin/<base>'.
+    Raises Refused when git fails."""
+    if Path(job["worktree"]).exists():
+        return "present"
+    if job["stage"] not in WORKTREE_STAGES | {"needs-human"}:
+        return "not needed"
+    run(["git", "worktree", "prune"])
+    pushed = run_net(["git", "ls-remote", "--heads", "origin", job["branch"]]).stdout.strip()
+    if not pushed and job["stage"] == "needs-human":
+        return "not needed"
+    if pushed:
+        run_net(["git", "fetch", "origin", f"+refs/heads/{job['branch']}:refs/remotes/origin/{job['branch']}"])
+        run(["git", "worktree", "add", "-q", "-B", job["branch"], job["worktree"], f"origin/{job['branch']}"])
+        return f"recreated from origin/{job['branch']}"
+    run_net(["git", "fetch", "origin", BASE])
+    run(["git", "worktree", "add", "-q", "-B", job["branch"], job["worktree"], f"origin/{BASE}"])
+    return f"created from origin/{BASE}"
+
+
+def cmd_ensure_worktree(job):
+    try:
+        print(f"WORKTREE: {job['id']} {ensure_worktree(job)}")
+    except Refused as e:
+        stop_for_human(job, f"The job's worktree couldn't be recreated on this machine:\n\n```\n{e}\n```")
+
+
 # ---- Report and digest -----------------------------------------------------
 
 WAITING_REASON = {"needs-human": ("decision.md", "Why"), "needs-info": ("intake.md", "Questions")}
@@ -2319,6 +2350,8 @@ def main(argv):
             cmd_push(resolve(args[0]))
         elif cmd == "watch" and not args:
             cmd_watch()
+        elif cmd == "ensure-worktree" and len(args) == 1:
+            cmd_ensure_worktree(resolve(args[0]))
         else:
             die(f"bad arguments: {' '.join(argv)}\n\n{__doc__.strip()}")
     except Refused as e:

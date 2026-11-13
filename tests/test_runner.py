@@ -371,8 +371,9 @@ class SecurityTest(RunnerCase):
         with mock.patch.object(module.subprocess, "run") as run:
             module.git("status")
         args, kwargs = run.call_args
-        self.assertEqual(args[0][:5], ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"])
-        self.assertEqual(args[0][5:], ["status"])
+        self.assertEqual(args[0][:7], ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+                                       "-c", "protocol.ext.allow=never"])
+        self.assertEqual(args[0][7:], ["status"])
         self.assertEqual(kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
         self.assertIn("BatchMode=yes", kwargs["env"]["GIT_SSH_COMMAND"])
 

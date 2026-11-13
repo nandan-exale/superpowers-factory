@@ -358,6 +358,17 @@ factory/bin/doctor
 uninstall` removes it. The runner refuses a token file that isn't mode 600
 and yours, and won't start Claude without bubblewrap and socat.
 
+### GitHub Actions
+
+`/factory-install` can add `.github/workflows/factory-runner.yml` (off by
+default). It runs `factory/bin/runner tick --ci` on a schedule, with your
+`FACTORY_CLAUDE_TOKEN` and `FACTORY_GH_TOKEN` secrets. Runners are fresh
+machines, so job state lives on an orphan `factory-state` branch that only
+the runner writes, and missing worktrees are recreated from their pushed
+branches. Work a run didn't push is redone by the next one. If saving state
+fails twice, the run goes red and keeps `factory/jobs` as a workflow
+artifact. Check the setup with `factory/bin/doctor --ci`.
+
 ---
 
 ## The learning loop

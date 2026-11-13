@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Check that the software factory is installed correctly in this project.
 
-Usage: doctor [--fast]
+Usage: doctor [--fast] [--ci]
 
 Prints PASS, WARN or FAIL per check and exits 1 on any FAIL. --fast skips
-running factory/checks.sh.
+running factory/checks.sh. --ci checks the GitHub Actions runner instead of a
+local one.
 """
 
 import argparse
@@ -30,6 +31,7 @@ TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):")
 CHECKS_TAIL = 20
 # Checks run project code, so they never see the runner's Claude credentials.
 SECRET_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
+CI = False
 
 
 def fail(message):
@@ -312,6 +314,23 @@ def linux_runner_checks(service):
     return problems
 
 
+STATE_BLOCKING = {"update", "non_fast_forward", "creation", "pull_request", "required_status_checks"}
+
+
+def ci_state_checks():
+    problems = []
+    gh = shutil.which("gh") or "gh"
+    if isinstance(gh_api(gh, "repos/{owner}/{repo}/branches/factory-state/protection"), dict):
+        problems.append(fail("factory-state is protected; the Actions runner must be able to push it"))
+    rules = gh_api(gh, "repos/{owner}/{repo}/rules/branches/factory-state")
+    blocking = sorted({r.get("type") for r in rules if isinstance(r, dict)} & STATE_BLOCKING) if isinstance(rules, list) else []
+    if blocking:
+        problems.append(fail(f"rules on factory-state block the runner ({', '.join(blocking)})"))
+    if not (REPO / ".github" / "workflows" / "factory-runner.yml").is_file():
+        problems.append(warn("no Actions workflow; /factory-install writes it"))
+    return problems
+
+
 def check_runner():
     problems = []
     rel = "factory/runner-settings.json"
@@ -327,6 +346,8 @@ def check_runner():
     allow = (settings.get("permissions") or {}).get("allow") or []
     problems += [fail(f"{rel}: missing allow rule {rule}") for rule in RUNNER_ALLOW if rule not in allow]
     cfg = json.loads((REPO / "factory" / "config.json").read_text(encoding="utf-8"))
+    if CI:
+        return problems + check_branch_protection(cfg.get("base_branch")) + ci_state_checks()
     service = (cfg.get("runner") or {}).get("keychain_service")
     if not service:
         problems.append(fail("factory/config.json has no runner.keychain_service"))
@@ -373,7 +394,10 @@ CHECKS = [
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--fast", action="store_true", help="skip running factory/checks.sh")
+    parser.add_argument("--ci", action="store_true", help="check the GitHub Actions runner instead of a local one")
     opts = parser.parse_args(argv)
+    global CI
+    CI = opts.ci
     failed = False
     for name, check in CHECKS:
         if opts.fast and name == "checks":
