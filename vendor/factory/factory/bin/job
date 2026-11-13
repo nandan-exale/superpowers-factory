@@ -24,6 +24,7 @@ Usage:
   job learn                      tags reviewers raised in `learning.threshold`+ jobs → evidence for the learner
   job learn-file <tag>           learner's proposal.md → a factory:learning issue (add `factory` to build it)
   job summary [<job>...]         table of jobs: issue, stage, PR, cost, time
+  job costs <job>                cost of the job's agents by model
 
 <job> is a job id (004-dark-mode) or an issue number (12).
 """
@@ -793,8 +794,8 @@ def cost_usd(job):
     return cost_for_needle(f"Job folder: {job_dir(job['id'])}/")
 
 
-def cost_for_needle(needle):
-    """API-equivalent cost of every subagent whose first prompt line contains `needle`.
+def cost_by_model(needle):
+    """{model: API-equivalent cost} of every subagent whose first prompt line contains `needle`.
 
     Claude Code writes each subagent's messages, with model and token usage, to
     <config>/projects/<project>/<session>/subagents/agent-<id>.jsonl. Every
@@ -802,7 +803,7 @@ def cost_for_needle(needle):
     its job across sessions.
     """
     prices = CONFIG["prices_usd_per_mtok"]
-    total = 0.0
+    totals = {}
     for path in transcripts_dir().glob("*/subagents/agent-*.jsonl"):
         with path.open() as f:
             first = f.readline()
@@ -825,12 +826,34 @@ def cost_for_needle(needle):
             split = u.get("cache_creation") or {}
             write_1h = split.get("ephemeral_1h_input_tokens", 0)
             write_5m = u.get("cache_creation_input_tokens", 0) - write_1h
-            total += (u.get("input_tokens", 0) * p["input"]
-                      + u.get("output_tokens", 0) * p["output"]
-                      + write_5m * p["cache_write_5m"]
-                      + write_1h * p["cache_write_1h"]
-                      + u.get("cache_read_input_tokens", 0) * p["cache_read"]) / 1e6
-    return round(total, 2)
+            totals[model] = totals.get(model, 0.0) + (
+                u.get("input_tokens", 0) * p["input"]
+                + u.get("output_tokens", 0) * p["output"]
+                + write_5m * p["cache_write_5m"]
+                + write_1h * p["cache_write_1h"]
+                + u.get("cache_read_input_tokens", 0) * p["cache_read"]) / 1e6
+    return {model: round(usd, 2) for model, usd in totals.items()}
+
+
+def cost_for_needle(needle):
+    """API-equivalent cost of every subagent whose first prompt line contains `needle`."""
+    return round(sum(cost_by_model(needle).values()), 2)
+
+
+def model_summary(by_model):
+    """`opus-5-5 $4.97, sonnet-5-5 $0.60`: largest first, without the `claude-` prefix."""
+    if not by_model:
+        return "none"
+    ranked = sorted(by_model.items(), key=lambda kv: -kv[1])
+    return ", ".join(f"{m.removeprefix('claude-')} ${usd:.2f}" for m, usd in ranked)
+
+
+def cmd_costs(job):
+    by_model = cost_by_model(f"Job folder: {job_dir(job['id'])}/")
+    width = max((len(m) for m in by_model), default=0)
+    for model, usd in sorted(by_model.items(), key=lambda kv: -kv[1]):
+        print(f"{model.ljust(width)}  ${usd:.2f}")
+    print(f"total ${sum(by_model.values()):.2f}")
 
 
 # ---- Sync: fields derived from files ---------------------------------------
@@ -991,6 +1014,7 @@ def evidence_md(job, full=False, closes=True):
     spent, hours = allowance_used(job)
     usd_limit = f"${b['job_usd']:.2f}" if b["job_usd"] is not None else "no limit"
     hours_limit = f"{b['job_hours']:g} h" if b["job_hours"] is not None else "no limit"
+    by_model = model_summary(cost_by_model(f"Job folder: {job_dir(job['id'])}/"))
     sections = [
         "", "### Files changed", files or "none",
         "", "### Checks", checks,
@@ -1000,7 +1024,8 @@ def evidence_md(job, full=False, closes=True):
         "", "### Budget",
         f"Rounds {job['round']} of {job['round_limit']}"
         f" · cost ${spent:.2f} of {usd_limit} since the last allowance (${job['cost_usd']:.2f} total)"
-        f" · time {hours:.1f} h of {hours_limit} since the last allowance",
+        f" · time {hours:.1f} h of {hours_limit} since the last allowance"
+        f" · by model: {by_model}",
     ]
     head = f"{EVIDENCE_START}\n## Factory evidence — {job['id']}, round {job['round']}"
     tail = (f"\nCloses #{job['issue']}" if closes else "") + f"\n{EVIDENCE_END}\n"
@@ -1601,6 +1626,8 @@ def main(argv):
             cmd_learn()
         elif cmd == "summary":
             cmd_summary(args)
+        elif cmd == "costs" and len(args) == 1:
+            cmd_costs(resolve(args[0]))
         else:
             die(f"bad arguments: {' '.join(argv)}\n\n{__doc__.strip()}")
     except Refused as e:
