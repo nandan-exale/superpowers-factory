@@ -27,11 +27,14 @@ Usage:
   job costs <job>                cost of the job's agents by model
   job pause <reason>             stop the queue: nothing starts and nothing merges until `job resume`
   job resume                     clear the pause (a human runs this once the base branch is fixed)
+  job scan <job-id>              secret patterns in the branch's added lines; exit 1 on a hit
+  job push <job>                 the builder's push: scan, then push the job branch (nothing is pushed on a hit)
 
 <job> is a job id (004-dark-mode) or an issue number (12).
 """
 
 import fcntl
+import fnmatch
 import json
 import os
 import re
@@ -396,6 +399,94 @@ def risky_listed(job):
 
 def has_risk_ok(job):
     return risk_ok_label() in {l["name"] for l in fetch_issue(job["issue"])["labels"]}
+
+
+# ---- Secret scan -------------------------------------------------------------
+
+SECRET_RULES = (
+    ("private key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("aws access key", re.compile(r"AKIA[0-9A-Z]{16}")),
+    ("github token", re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,}")),
+    ("anthropic key", re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}")),
+    ("slack token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}")),
+    ("assigned secret", re.compile(r"(api[_-]?key|secret|token|password)\s*[:=]\s*[\"'][^\"']{16,}[\"']", re.I)),
+)
+HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+SECRET_WHY = ("A possible secret reached the remote branch (see `## Secrets` in this round's checks.md). "
+              "Rotate it, then remove it from the branch history before giving feedback.")
+
+
+def path_matches(path, pattern):
+    """fnmatch (whose * also crosses /), plus `**/x` matching `x` at the root. Same as the gate's."""
+    return fnmatch.fnmatch(path, pattern) or (pattern.startswith("**/") and fnmatch.fnmatch(path, pattern[3:]))
+
+
+def added_lines(diff):
+    """(path, new line number, text) for every added line of a unified diff."""
+    path, line = None, 0
+    for text in diff.splitlines():
+        if text.startswith("+++ "):
+            path = text[6:] if text.startswith("+++ b/") else None
+            continue
+        m = HUNK.match(text)
+        if m:
+            line = int(m.group(1))
+            continue
+        if path is None or text.startswith("--- "):
+            continue
+        if text.startswith("+"):
+            yield path, line, text[1:]
+            line += 1
+        elif text.startswith(" "):
+            line += 1
+
+
+def mask(value):
+    return f"{value[:4]}… ({len(value)} chars)"
+
+
+def secret_hits(worktree):
+    """`path:line rule: masked` for each added line on the branch that matches a secret rule."""
+    allow = (CONFIG.get("secret_scan") or {}).get("allow", ["**/*.test.*", "**/fixtures/**"])
+    diff = run(["git", "diff", "--no-color", "--unified=0", f"origin/{BASE}...HEAD"], cwd=worktree).stdout
+    hits = []
+    for path, n, text in added_lines(diff):
+        if any(path_matches(path, pattern) for pattern in allow):
+            continue
+        for name, rule in SECRET_RULES:
+            m = rule.search(text)
+            if m:
+                hits.append(f"{path}:{n} {name}: {mask(m.group(0))}")
+                break
+    return hits
+
+
+def cmd_scan(job):
+    hits = secret_hits(job["worktree"])
+    for hit in hits:
+        print(f"SECRET: {hit}")
+    if hits:
+        sys.exit(1)
+    print("SCAN: clean")
+
+
+def cmd_push(job):
+    require(job["stage"] == "build", f"{job['id']} is in {job['stage']}; only the builder pushes, in build")
+    git(job, "fetch", "origin", BASE)
+    hits = secret_hits(job["worktree"])
+    if hits:
+        for hit in hits:
+            print(f"SECRET: {hit}")
+        print("Nothing was pushed. Remove the secret from your commits (amend or rebase; the branch "
+              "isn't pushed yet), then run factory/bin/job push again.")
+        sys.exit(1)
+    git(job, "push", "-u", "origin", job["branch"])
+    print(f"PUSHED: {job['branch']}")
+
+
+def gate_found_secrets(job):
+    body = section(round_dir(job) / "checks.md", "Secrets") if (round_dir(job) / "checks.md").exists() else None
+    return bool(body) and body != "None found."
 
 
 # ---- Learning ---------------------------------------------------------------
@@ -1180,6 +1271,9 @@ def advance(job, stage):
     if stage == "merging":
         p = paused()
         require(not p, f"the queue is paused: {p['reason'] if p else ''}; run factory/bin/job resume first")
+    if old == "gate" and stage in {"build", "needs-human"} and gate_found_secrets(job):
+        stop_for_human(job, SECRET_WHY)
+        return job
     if budgeted_move(old, stage):
         daily = daily_problem()
         require(daily is None, f"{daily}; the job resumes when it drops")
@@ -1717,6 +1811,14 @@ def main(argv):
             cmd_pause(" ".join(args))
         elif cmd == "resume" and not args:
             cmd_resume()
+        elif cmd == "scan" and len(args) == 1:
+            # The gate runs this while `job merge` holds the job's lock; a scan only reads.
+            path = job_dir(args[0]) / "job.json"
+            if not path.exists():
+                die(f"no job {args[0]}")
+            cmd_scan(json.loads(path.read_text()))
+        elif cmd == "push" and len(args) == 1:
+            cmd_push(resolve(args[0]))
         else:
             die(f"bad arguments: {' '.join(argv)}\n\n{__doc__.strip()}")
     except Refused as e:
