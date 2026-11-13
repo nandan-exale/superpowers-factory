@@ -78,6 +78,16 @@ def risky_changes(worktree, patterns):
     return hits
 
 
+def secret_scan(job_id):
+    """Masked SECRET lines from `job scan`; the gate never prints a secret itself."""
+    res = subprocess.run([sys.executable, str(FACTORY / "bin" / "job"), "scan", job_id], cwd=REPO,
+                         capture_output=True, text=True)
+    hits = [line.removeprefix("SECRET: ") for line in res.stdout.splitlines() if line.startswith("SECRET: ")]
+    if res.returncode != (1 if hits else 0):
+        die(f"job scan failed: {(res.stderr or res.stdout).strip()}")
+    return hits
+
+
 def run_checks(worktree):
     start = time.monotonic()
     env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
@@ -94,8 +104,9 @@ def gate(job_id, merge):
     commit = git(worktree, "rev-parse", "HEAD").strip()
     protected = protected_changes(worktree, protected_patterns(job))
     risky = risky_changes(worktree, CONFIG.get("risky_paths", []))
+    secrets = secret_scan(job_id)
     code, log, seconds = run_checks(worktree)
-    verdict = "PASS" if code == 0 and not protected else "FAIL"
+    verdict = "PASS" if code == 0 and not protected and not secrets else "FAIL"
     name = "merge-checks" if merge else "checks"
     (round_dir / f"{name}.log").write_text(log)
     tail = "\n".join(log.rstrip().splitlines()[-TAIL:])
@@ -103,6 +114,7 @@ def gate(job_id, merge):
         f"checks.sh {'passed' if code == 0 else f'failed with exit {code}'} in {seconds}s",
         f"Protected paths: {'changed: ' + ', '.join(protected) if protected else 'none changed'}",
         f"Risky changes: {', '.join(risky) if risky else 'none'}",
+        f"Secrets: {len(secrets)} found" if secrets else "Secrets: none found",
         f"Commit {commit[:7]}" + (", synced with the latest main before merging" if merge else ""),
     ]
     (round_dir / f"{name}.md").write_text(
@@ -112,6 +124,8 @@ def gate(job_id, merge):
         + ("\n".join(f"- {p}" for p in protected) if protected else "None changed.")
         + "\n\n## Risky changes\n"
         + ("\n".join(f"- {r}" for r in risky) if risky else "None.")
+        + "\n\n## Secrets\n"
+        + ("\n".join(f"- {s}" for s in secrets) if secrets else "None found.")
         + f"\n\n## checks.sh\nExit {code} in {seconds}s. Last {TAIL} lines of {name}.log:\n\n```\n{tail}\n```\n"
     )
     print(f"GATE: {verdict} ({job_id} round {job['round']}, checks.sh exit {code} in {seconds}s"
