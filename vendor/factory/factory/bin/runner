@@ -377,6 +377,8 @@ def systemd_units(runner):
 
 
 def systemctl(*args):
+    if not shutil.which("systemctl"):
+        die("systemctl not found; the Linux runner needs a systemd user session")
     return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True)
 
 

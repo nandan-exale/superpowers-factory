@@ -256,11 +256,15 @@ def linux_runner_checks(service):
         problems.append(warn(f"no runner token; store one with secret-tool store --label factory service {service}, "
                              "or in ~/.config/factory/claude-token with chmod 600"))
     user = os.environ.get("USER", "")
-    linger = subprocess.run(["loginctl", "show-user", user, "-p", "Linger"], capture_output=True, text=True)
-    if "Linger=yes" not in linger.stdout:
+    if not shutil.which("loginctl"):
+        problems.append(warn("loginctl not found; linger not checked"))
+    elif "Linger=yes" not in subprocess.run(["loginctl", "show-user", user, "-p", "Linger"],
+                                            capture_output=True, text=True).stdout:
         problems.append(warn("run loginctl enable-linger $USER so the timer runs while you're logged out"))
-    active = subprocess.run(["systemctl", "--user", "is-active", f"{unit_name()}.timer"], capture_output=True, text=True)
-    if active.stdout.strip() != "active":
+    if not shutil.which("systemctl"):
+        problems.append(warn("systemctl not found; the systemd timer can't run"))
+    elif subprocess.run(["systemctl", "--user", "is-active", f"{unit_name()}.timer"],
+                        capture_output=True, text=True).stdout.strip() != "active":
         problems.append(warn("runner timer not active; run factory/bin/runner install"))
     return problems
 
