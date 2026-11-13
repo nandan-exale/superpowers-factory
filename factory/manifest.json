@@ -1,31 +1,31 @@
 {
+  "vendor_hash": "e780a9d2b9a2f9b7a9377ca7d5aecbe0403caab4431a82a5334ad463b0cba590",
   "files": {
-    ".claude/agents/approver.md": "fa6bdd933430ac48131a590af725fa02d21b1b5c76f165d1102d0caf887c0132",
-    ".claude/agents/builder.md": "fbed88c68501e89a3c202da05c12486c8c1dcb7683fcfb406cc3f036a39aa8c5",
+    ".claude/skills/factory/SKILL.md": "11a78e5914bb2a44ec3e61b056d19aaac8514872af300ffb11ef1d12a91ba458",
     ".claude/agents/intake.md": "1b2b99d6f6eaff21f828c927219f33809f672e3d1b81421f5eb8360dfbda4298",
-    ".claude/agents/learner.md": "8df4a40e9c92974be462a0f1e1e46b9cfc6521d620b54a459f3e5d94782e43de",
+    ".claude/agents/spec-writer.md": "cc0e9382bec239bd94eef385b99299f3bf2d669e7e6a0a83fa9e5607bac363f2",
+    ".claude/agents/builder.md": "29694650cbdfd1aa3b36f4f84965dac657036458342c5692a4481c3a668ab091",
     ".claude/agents/reviewer-code.md": "c9aa01f2dd969f1d16f0a7a5f5a8d7d1b634eb89ffb90fa8fb0b7373d461233b",
     ".claude/agents/reviewer-security.md": "294d89842ae8c857cab12cea6cdead57eb6be1e984fe8deb3543fa8154ff9207",
-    ".claude/agents/reviewer-ui.md": "75c134af7e3a0f0f5b9194227a8c7f4df28a255d191baa23c751a83e85d496ab",
     ".claude/agents/reviewer-ux.md": "31df9bab3fcba72218480ee3528991f93587b34fe77f00673715c11e7681f590",
-    ".claude/agents/spec-writer.md": "cc0e9382bec239bd94eef385b99299f3bf2d669e7e6a0a83fa9e5607bac363f2",
-    ".claude/skills/factory/SKILL.md": "4f58152a68191cf31286258575a77dfd2f2f3c0c9d40162fe48d1847add6947a",
-    "factory/bin/doctor": "74a77439e28881d7619aba874bb793c3d94b3b17aaf4ebe0ca76d7b9cbf63217",
-    "factory/bin/gate": "1b72d84a9443f7f77965e47734351bf110ff9c2f09b560756d4be5bd7ab7cb1b",
-    "factory/bin/job": "b939977091bf5a38d2851138afb2c78e7abd15e20386676a3074749cb23a9041",
-    "factory/bin/route": "31aced93230c3cd8d2819f297d6868d4c7f3bafba25009ee16673da8d8f7ad5a",
-    "factory/bin/runner": "13e5ec65f3328d3b0d13215663a59f61d12a2344c1f7b9f7a6fc5b3562371498",
-    "factory/bin/stop-hook": "acbc628031d508faadf40f6ea6d97ddd591dedbcb7df4c034d27d5b690a1a453",
-    "factory/checks.sh": "c14883a7cf74f62edf2f32a76c74881e2873022205c999f71dc4cbfb1c38f1b4",
+    ".claude/agents/reviewer-ui.md": "75c134af7e3a0f0f5b9194227a8c7f4df28a255d191baa23c751a83e85d496ab",
+    ".claude/agents/approver.md": "fa6bdd933430ac48131a590af725fa02d21b1b5c76f165d1102d0caf887c0132",
+    ".claude/agents/learner.md": "8df4a40e9c92974be462a0f1e1e46b9cfc6521d620b54a459f3e5d94782e43de",
     "factory/config.json": "54b93fd9e90fa7e36f28c8580dc34aa8e55eb3b28334d94fe1a5e6fec6d3cb81",
-    "factory/dashboard.html": "d70d409b3b5b9a9bbd85c37aef11aa75c86d727ba885724dbaf7c7a163fde202",
-    "factory/runner-settings.json": "e0928fbd6264f21fe37867bb2660bac0fafefb010943bbbbf7fcaf182ecd99d2"
+    "factory/checks.sh": "c14883a7cf74f62edf2f32a76c74881e2873022205c999f71dc4cbfb1c38f1b4",
+    "factory/bin/job": "0522214bdba83ca2e237affdb1338e5c3990e081859032bbe832f1bf5c95d895",
+    "factory/bin/gate": "739ce0756248fff46beabeb05fb00109ddd0c1102d0011390e33d662ae042e88",
+    "factory/bin/route": "31aced93230c3cd8d2819f297d6868d4c7f3bafba25009ee16673da8d8f7ad5a",
+    "factory/bin/stop-hook": "acbc628031d508faadf40f6ea6d97ddd591dedbcb7df4c034d27d5b690a1a453",
+    "factory/bin/doctor": "74a77439e28881d7619aba874bb793c3d94b3b17aaf4ebe0ca76d7b9cbf63217",
+    "factory/bin/runner": "13e5ec65f3328d3b0d13215663a59f61d12a2344c1f7b9f7a6fc5b3562371498",
+    "factory/runner-settings.json": "e0928fbd6264f21fe37867bb2660bac0fafefb010943bbbbf7fcaf182ecd99d2",
+    "factory/dashboard.html": "d70d409b3b5b9a9bbd85c37aef11aa75c86d727ba885724dbaf7c7a163fde202"
   },
   "settings_core": "1d8193b3beba91c58e3cf60aed88b2c97796820669dc5736afc466afba576748",
   "settings_domains": [
     "github.com",
     "api.github.com",
     "*.githubusercontent.com"
-  ],
-  "vendor_hash": "508f4216e69c958881edbd37ad6cb9c760b4f986b96f3a6ac1f5d53df12aef36"
+  ]
 }

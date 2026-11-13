@@ -81,8 +81,13 @@ the build order, not a suggestion.
   the first task without a commit.
 - Round 1: carry out the plan's tasks in order, one commit per task. The plan
   works in the main checkout's terms; you work in the worktree, so translate
-  its paths and skip any step that creates a branch or worktree, or that
-  merges, opens a PR or pushes anything other than your job branch.
+  its paths and skip any step that creates a branch, worktree or tag, merges,
+  opens a PR, pushes anything other than your job branch, or changes files
+  outside your worktree. List each skipped step under `## Deviations` as
+  `For the human: <step>`.
+- Never edit the spec or plan files the job was planned from (`intake.md`
+  names them); the gate fails the round if you do. If a task asks you to,
+  skip that step and record it under `## Deviations`.
 - If a task can't be done as written (the plan is wrong, or contradicts the
   spec or the code), stop there: write `STATUS: BLOCKED`, naming the task and
   why under `## Blocked`. Don't redesign.
