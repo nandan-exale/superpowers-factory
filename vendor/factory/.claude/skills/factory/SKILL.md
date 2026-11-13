@@ -82,7 +82,7 @@ is wrong: stop that job and show the user the error. Each agent replies with one
 you are notified when it finishes, and you advance that job then. While agents
 run, don't poll and don't wait: end your turn with a one-line status.
 
-Every prompt starts with the job's header, built from `job.json`:
+Every prompt starts with the job's header, built from `job.json` and `base_branch` in `factory/config.json`:
 
 ```
 Job: <id>. Job folder: <repo>/factory/jobs/<id>/. Main checkout: <repo>. Worktree: <worktree>. Branch: <branch>. Base: origin/<base>. Issue: #<issue>.
@@ -95,9 +95,8 @@ Agents that open pages get ports. With `n` the job number (`004` → 4), the
 builder gets `5100 + 10n`, `reviewer-ux` `5101 + 10n` and `reviewer-ui`
 `5102 + 10n` (`ports` in `config.json`).
 
-Name the builder `builder-<id>`. Resume it with `SendMessage` to that name
-when this session spawned it; otherwise spawn a new `builder` with that name.
-Start every message to it with `<header>` too.
+When this session spawned the job's builder, resume it with `SendMessage` to the agent id its
+spawn result gave; otherwise spawn a new `builder`. Start every message to it with `<header>` too.
 
 ## Advancing a job
 
@@ -128,7 +127,7 @@ decision:
 **spec.** Spawn `spec-writer` with `<header>`. When it returns,
 `factory/bin/job advance <id> build` and go to **build**.
 
-**build.** Spawn or resume `builder-<id>` with
+**build.** Spawn or resume the job's builder with
 `<header> Build round <N>. Port: <port>.` plus what this round is for: the
 gate's `round-<N-1>/checks.md`, the reviews in `round-<N-1>/`, or every
 file `pr-feedback` (or `job feedback`) printed. When it returns, read `build.md`'s first line:
