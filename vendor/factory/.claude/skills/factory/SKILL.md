@@ -207,6 +207,15 @@ then moves the job to `merged`; stop any agents still running for it.
    review (merge one to approve it, or give feedback with `/factory`) and
    questions waiting on authors.
 
+5. **Learning.** Then run `factory/bin/job learn`. Skip this step if the run
+   ended on a daily-budget wait. For each `LEARN: <tag> (<n> jobs) <path>`
+   line, spawn `learner` with the model and effort from
+   `factory/bin/job agent <tag> learner`, and a prompt whose first line is
+   `Job folder: factory/jobs/learning/<tag with : replaced by -->/` followed by
+   the tag. When it replies, run `factory/bin/job learn-file <tag>` and add
+   its `LEARN-FILE:` line to the summary. `factory:learning` issues wait for a
+   human to add the `factory` label; never add it yourself.
+
 **Resuming.** State lives in files, so a new session picks up where a dead one
 stopped. For a `resume` job, run its stage's step again: `intake` runs the
 **intake** step again (it checks the `factory:planned` label first) and `spec`

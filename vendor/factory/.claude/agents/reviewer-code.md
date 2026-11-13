@@ -69,12 +69,16 @@ VERDICT: PASS | CHANGES
 - 3 to 5 short bullets: what happened in this step and why
 
 ## Findings
-1. <path:line> <the problem and the fix you want>
+1. [<tag>] <path:line> <the problem and the fix you want>
 
 ## Notes
 Non-blocking observations. Optional.
 ```
 
+- Start every finding with one tag in brackets: one of `config.json`
+  `learning.tags` (read `factory/config.json`), or `other:<slug>` with a short
+  lowercase-hyphenated slug when none fits. The factory counts tags across
+  jobs to propose checks; an untagged finding makes the review invalid.
 - The first line must be exactly `VERDICT: PASS` or `VERDICT: CHANGES`.
 - Use CHANGES only for bugs, spec gaps, weakened tests or clear convention
   breaks in the code. Put style preferences, process nitpicks and anything
