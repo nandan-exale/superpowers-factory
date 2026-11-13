@@ -220,3 +220,96 @@ class ScenarioLoadTest(E2ECase):
         self.write("c-bad", {"expect": {}, "timeout_minutes": 5})
         with self.assertRaisesRegex(self.e2e.Refused, "c-bad"):
             self.e2e.load_scenarios(root)
+
+
+HAPPY = {"title": "Add a flag", "issue_body": "Please.", "labels": ["factory"], "config_patch": {"budgets": {"job_usd": 3}},
+         "expect": {"stage": "merged", "pr_state": "MERGED", "files": ["{job}/job.json"]}, "timeout_minutes": 1}
+
+
+class MainTest(E2ECase):
+    def setUp(self):
+        super().setUp()
+        self.e2e.SCENARIOS = self.tmp / "scenarios"
+        self.e2e.RESULTS = self.tmp / "results"
+
+    def scenario(self, name, scenario):
+        d = self.e2e.SCENARIOS / name
+        d.mkdir(parents=True)
+        (d / "scenario.json").write_text(json.dumps(scenario))
+
+    def main(self, *args, **env):
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, self.sb.env(**env)), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            code = self.e2e.main(["--sandbox", str(self.sb.repo), *args])
+        return code, out.getvalue()
+
+    def result(self, name):
+        (path,) = self.e2e.RESULTS.glob(f"*/{name}.md")
+        return path.read_text()
+
+    def test_a_passing_scenario(self):
+        self.scenario("happy", HAPPY)
+        code, out = self.main("--max-usd", "5")
+        self.assertEqual(code, 0, out)
+        self.assertIn("PASSED", self.result("happy"))
+        create = next(c for c in self.sb.gh_calls() if c[:2] == ["issue", "create"])
+        self.assertEqual(create[create.index("--label") + 1], "factory")
+        (call,) = self.sb.claude_calls()
+        self.assertEqual(call["argv"][:2], ["-p", "/factory run"])
+        self.assertIn("dontAsk", call["argv"])
+        self.assertEqual((call["runner"], call["scrub"]), ("1", "1"))
+        log = git(self.tmp, "--git-dir", str(self.sb.bare), "log", "--format=%s", "main")
+        self.assertEqual(log.splitlines()[:2], ["chore(e2e): restore config", "chore(e2e): happy config"])
+        cfg = json.loads(git(self.tmp, "--git-dir", str(self.sb.bare), "show", "main~1:factory/config.json"))
+        self.assertEqual(cfg["budgets"]["job_usd"], 3)
+        self.assertEqual(cfg["budgets"]["daily_usd"], 5.0)
+        self.assertEqual(self.sb.origin_config()["budgets"]["job_usd"], 25)
+        self.assertIn(["issue", "close", "7"], self.sb.gh_calls())
+        self.assertFalse(any(c[:2] == ["pr", "close"] for c in self.sb.gh_calls()))
+
+    def test_a_failing_expectation_fails_the_run_and_closes_an_open_pr(self):
+        self.scenario("happy", HAPPY)
+        code, out = self.main("--max-usd", "5", FAKE_STAGE="needs-human", FAKE_PR_STATE="OPEN")
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAILED", self.result("happy"))
+        self.assertIn("stage is needs-human", self.result("happy"))
+        self.assertIn(["pr", "close", "3", "--delete-branch"], self.sb.gh_calls())
+
+    def test_keep_closes_nothing(self):
+        self.scenario("happy", HAPPY)
+        self.main("--max-usd", "5", "--keep")
+        self.assertFalse(any(c[1] == "close" for c in self.sb.gh_calls()))
+
+    def test_no_progress_fails_after_three_sessions(self):
+        self.scenario("happy", HAPPY)
+        code, _ = self.main("--max-usd", "5", FAKE_STAGE="build")
+        self.assertEqual(code, 1)
+        self.assertEqual(len(self.sb.claude_calls()), 3)
+        self.assertIn("no progress", self.result("happy"))
+
+    def test_the_cap_skips_the_remaining_scenarios(self):
+        self.scenario("a-first", HAPPY)
+        self.scenario("b-second", HAPPY)
+        code, out = self.main("--max-usd", "1", FAKE_DELTA="2")
+        self.assertEqual(code, 1)
+        self.assertEqual(len(self.sb.claude_calls()), 1)
+        self.assertIn("CAPPED", out)
+        self.assertIn("b-second", out)
+
+    def test_a_runner_scenario_without_a_token_is_skipped(self):
+        self.scenario("tick", {**HAPPY, "drive": "runner"})
+        code, out = self.main("--max-usd", "5")
+        self.assertEqual(code, 0, out)
+        self.assertIn("SKIPPED", out)
+        self.assertEqual(self.sb.claude_calls(), [])
+
+    def test_the_guard_refuses_before_any_spend(self):
+        self.scenario("happy", HAPPY)
+        code, out = self.main("--max-usd", "5", FAKE_DOCTOR_EXIT=1)
+        self.assertEqual(code, 2, out)
+        self.assertEqual(self.sb.claude_calls(), [])
+        self.assertFalse(any(c[:2] == ["issue", "create"] for c in self.sb.gh_calls()))
+
+    def test_a_cap_of_zero_is_refused(self):
+        self.assertEqual(self.main("--max-usd", "0")[0], 2)

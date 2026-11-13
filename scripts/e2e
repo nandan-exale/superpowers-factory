@@ -30,6 +30,10 @@ SCENARIO_KEYS = {"title", "issue_body", "labels", "config_patch", "expect", "tim
 EXPECT_KEYS = {"stage", "stage_not", "decision_prefix", "budget_stopped", "review_tags_valid", "min_findings",
                "tags_any", "issue_labels", "pr_state", "files", "first_lines", "stdout_contains",
                "learning_issue", "runner_log_contains"}
+FINISHED = {"merged", "rejected", "needs-info", "needs-human"}
+STALL_SESSIONS = 3
+RUN_ENV = {"FACTORY_RUNNER": "1", "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1",
+           "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
 
 
 class Refused(Exception):
@@ -281,3 +285,274 @@ def load_scenarios(root, only=None):
             raise Refused(f"tests/e2e/{name}/scenario.json: {'; '.join(problems)}")
         out.append((name, scenario))
     return out
+
+
+class ScenarioError(Exception):
+    """The scenario couldn't finish; its message goes in the result."""
+
+
+def run_session(cmd, cwd, seconds, out_path):
+    """(exit code or None on timeout, stdout). Stderr goes to <out>.stderr.log so stdout stays JSON.
+    Kills the whole process group, like the runner does, so nothing claude started outlives it."""
+    env = {**os.environ, **RUN_ENV}
+    err_path = out_path.with_name(out_path.name.removesuffix(".json") + ".stderr.log")
+    with out_path.open("w") as out, err_path.open("w") as err:
+        proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out,
+                                stderr=err, start_new_session=True)
+        try:
+            code = proc.wait(timeout=max(1, seconds))
+        except subprocess.TimeoutExpired:
+            code = None
+        finally:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass  # the group already exited
+            proc.wait()
+    return code, out_path.read_text()
+
+
+def session_cost(text):
+    try:
+        return float(json.loads(text)["total_cost_usd"])
+    except (ValueError, KeyError, TypeError):
+        return 0.0  # no JSON result (timeout or crash); the job logs still count its agents
+
+
+class Run:
+    """One e2e invocation: the sandbox, its original config, the spend and where results go."""
+
+    def __init__(self, sandbox, cap, out_dir, keep, scenarios_root):
+        self.sandbox, self.out_dir, self.keep, self.scenarios_root = sandbox, out_dir, keep, scenarios_root
+        self.jobs_dir = sandbox / "factory" / "jobs"
+        self.config_path = sandbox / "factory" / "config.json"
+        self.original_text = self.config_path.read_text()
+        self.original = json.loads(self.original_text)
+        self.spend = Spend(self.jobs_dir, cap)
+
+
+def find_job(jobs_dir, issue):
+    for path in sorted(jobs_dir.glob("*/job.json")):
+        try:
+            job = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue  # a job.json mid-write; the next poll reads it
+        if job.get("issue") == issue:
+            return job
+    return None
+
+
+def push_config(r, text, message):
+    if r.config_path.read_text() == text:
+        return
+    r.config_path.write_text(text)
+    for args in (("add", "factory/config.json"), ("commit", "-q", "-m", message), ("push", "-q", "origin", "HEAD")):
+        res = git(r.sandbox, *args)
+        if res.returncode != 0:
+            raise ScenarioError(f"git {args[0]} failed: {res.stderr.strip()}")
+
+
+def file_issue(r, scenario):
+    cmd = ["gh", "issue", "create", "--title", scenario["title"], "--body", scenario["issue_body"]]
+    for label in scenario.get("labels", []):
+        cmd += ["--label", label]
+    res = run(cmd, r.sandbox)
+    if res.returncode != 0:
+        raise ScenarioError(f"gh issue create failed: {res.stderr.strip()}")
+    return int(res.stdout.strip().rsplit("/", 1)[-1])
+
+
+def one_session(r, scenario, name, n, seconds):
+    out_path = r.out_dir / f"{name}.run-{n}.json"
+    if scenario.get("drive") == "runner":
+        cmd = [str(r.sandbox / "factory" / "bin" / "runner"), "tick"]
+    else:
+        cmd = ["claude", "-p", "/factory run", "--output-format", "json", "--permission-mode", "dontAsk",
+               "--settings", str(r.sandbox / "factory" / "runner-settings.json")]
+    code, text = run_session(cmd, r.sandbox, seconds, out_path)
+    r.spend.add_session(session_cost(text))
+    if code is None:
+        raise ScenarioError(f"timed out after {scenario['timeout_minutes']} minutes")
+    return text
+
+
+def drive(r, scenario, name, issue):
+    """Run sessions until the job finishes; returns their output."""
+    deadline = time.monotonic() + scenario["timeout_minutes"] * 60
+    outputs, last, stalled = [], None, 0
+    while True:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise ScenarioError(f"timed out after {scenario['timeout_minutes']} minutes")
+        if r.spend.remaining() <= 0:
+            raise ScenarioError("the spend cap was reached during the scenario")
+        outputs.append(one_session(r, scenario, name, len(outputs) + 1, left))
+        if issue is None or scenario.get("drive") == "runner":
+            return "\n".join(outputs)
+        job = find_job(r.jobs_dir, issue)
+        if job and job["stage"] in FINISHED:
+            return "\n".join(outputs)
+        state = (job["stage"], job["round"]) if job else None
+        stalled = stalled + 1 if state == last else 1
+        last = state
+        if stalled >= STALL_SESSIONS:
+            raise ScenarioError(f"no progress after {STALL_SESSIONS} sessions (job at {state})")
+
+
+def gh_json(r, *args):
+    res = run(["gh", *args], r.sandbox)
+    if res.returncode != 0:
+        raise ScenarioError(f"gh {' '.join(args[:2])} failed: {res.stderr.strip()}")
+    return json.loads(res.stdout or "null")
+
+
+def learning_issues(r, since):
+    label = r.original["labels"]["learning"]
+    rows = gh_json(r, "issue", "list", "--label", label, "--state", "all", "--json", "number,createdAt")
+    return [row["number"] for row in rows or [] if parse_time(row["createdAt"]) >= since]
+
+
+def gather(r, scenario, job, issue, stdout, started, log_offset):
+    expect = scenario["expect"]
+    ctx = {"job": job, "job_dir": r.jobs_dir / job["id"] if job else None, "jobs_dir": r.jobs_dir,
+           "tags": set(r.original.get("learning", {}).get("tags", [])), "stdout": stdout,
+           "learning_issues": learning_issues(r, started)}
+    if "issue_labels" in expect and issue:
+        ctx["issue_labels"] = [l["name"] for l in gh_json(r, "issue", "view", str(issue), "--json", "labels")["labels"]]
+    if job and job.get("pr"):
+        ctx["pr_state"] = gh_json(r, "pr", "view", str(job["pr"]), "--json", "state")["state"]
+    log = r.jobs_dir / "runner.log"
+    ctx["runner_log"] = log.read_text()[log_offset:] if log.exists() else ""
+    return ctx
+
+
+def cleanup(r, issues, ctx):
+    """Close what this scenario created. Returns warnings for anything that didn't close."""
+    job = ctx.get("job") if ctx else None
+    steps = [(["gh", "issue", "close", str(n)], f"issue #{n}") for n in issues]
+    if job and job.get("pr") and ctx.get("pr_state") == "OPEN":
+        steps.append((["gh", "pr", "close", str(job["pr"]), "--delete-branch"], f"PR #{job['pr']}"))
+    warnings = []
+    for cmd, what in steps:
+        res = run(cmd, r.sandbox)
+        if res.returncode != 0:
+            warnings.append(f"couldn't close {what}: {res.stderr.strip()}")
+    if job and job.get("branch"):
+        res = git(r.sandbox, "push", "-q", "origin", "--delete", job["branch"])
+        if res.returncode != 0 and "remote ref does not exist" not in res.stderr:
+            warnings.append(f"couldn't delete {job['branch']}: {res.stderr.strip()}")
+    return warnings
+
+
+def write_result(r, name, outcome, fails, issue, ctx, warnings):
+    job = ctx.get("job") if ctx else None
+    lines = [f"# {name}: {outcome.upper()}", "",
+             f"- Issue: {f'#{issue}' if issue else 'none'}",
+             f"- Job: {job['id'] + ' at ' + job['stage'] if job else 'none'}",
+             f"- PR: {'#' + str(job['pr']) if job and job.get('pr') else 'none'}",
+             f"- Spent so far: ${r.spend.total():.2f} of ${r.spend.cap:.2f}",
+             f"- Evidence: {r.jobs_dir / job['id'] if job else r.jobs_dir}, {r.out_dir}/{name}.run-*.json", ""]
+    if fails:
+        lines += ["## Failures", "", *(f"- {f}" for f in fails), ""]
+    if warnings:
+        lines += ["## Cleanup", "", *(f"- {w}" for w in warnings), ""]
+    (r.out_dir / f"{name}.md").write_text("\n".join(lines))
+
+
+def partial_ctx(r, issue):
+    """What cleanup needs after a scenario stopped early: the job, and its PR's state if it has one."""
+    job = find_job(r.jobs_dir, issue)
+    ctx = {"job": job}
+    if job and job.get("pr"):
+        try:
+            ctx["pr_state"] = gh_json(r, "pr", "view", str(job["pr"]), "--json", "state")["state"]
+        except ScenarioError:
+            ctx["pr_state"] = None  # unknown: cleanup leaves the PR alone rather than guess
+    return ctx
+
+
+def keychain_ready(r):
+    service = r.original.get("runner", {}).get("keychain_service", "factory-claude-token")
+    return run(["security", "find-generic-password", "-s", service], r.sandbox).returncode == 0
+
+
+def run_scenario(r, name, scenario):
+    """(outcome, notes): outcome is passed, failed or skipped."""
+    if scenario.get("drive") == "runner" and not keychain_ready(r):
+        return "skipped", ["no runner token in the Keychain"]
+    started = utcnow()
+    prior = log_spend(r.jobs_dir, started - timedelta(hours=24))
+    cfg = scenario_config(r.original, scenario.get("config_patch", {}), prior + r.spend.remaining())
+    log = r.jobs_dir / "runner.log"
+    log_offset = len(log.read_text()) if log.exists() else 0
+    issue, ctx, issues = None, None, []
+    try:
+        push_config(r, json.dumps(cfg, indent=2) + "\n", f"chore(e2e): {name} config")
+        setup = r.scenarios_root / name / "setup.py"
+        if setup.is_file() and run([sys.executable, str(setup), str(r.sandbox)], r.sandbox).returncode != 0:
+            raise ScenarioError("setup.py failed")
+        if "title" in scenario:
+            issue = file_issue(r, scenario)
+            issues.append(issue)
+        stdout = drive(r, scenario, name, issue)
+        job = find_job(r.jobs_dir, issue) if issue else None
+        ctx = gather(r, scenario, job, issue, stdout, started, log_offset)
+        issues += ctx["learning_issues"]
+        fails = check_expect(scenario["expect"], ctx)
+    except ScenarioError as exc:
+        fails = [str(exc)]
+        if ctx is None and issue:
+            ctx = partial_ctx(r, issue)
+    warnings = [] if r.keep else cleanup(r, issues, ctx)
+    outcome = "failed" if fails else "passed"
+    write_result(r, name, outcome, fails, issue, ctx, warnings)
+    return outcome, fails
+
+
+def run_all(r, scenarios):
+    results = []
+    try:
+        for name, scenario in scenarios:
+            if r.spend.remaining() <= 0:
+                results.append((name, "capped", ["the spend cap was reached before it started"]))
+                continue
+            outcome, notes = run_scenario(r, name, scenario)
+            results.append((name, outcome, notes))
+    finally:
+        push_config(r, r.original_text, "chore(e2e): restore config")
+    return results
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--sandbox", type=Path, required=True, help="local clone of the sandbox repo")
+    parser.add_argument("--max-usd", type=float, required=True, help="hard cap on this run's spend")
+    parser.add_argument("--only", help="run just this scenario")
+    parser.add_argument("--keep", action="store_true", help="leave the issues, PRs and branches open")
+    opts = parser.parse_args(argv)
+    if opts.max_usd <= 0:
+        print("e2e: --max-usd must be more than 0", file=sys.stderr)
+        return 2
+    sandbox = opts.sandbox.resolve()
+    try:
+        guard(sandbox)
+        scenarios = load_scenarios(SCENARIOS, opts.only)
+    except Refused as exc:
+        print(f"e2e: {exc}", file=sys.stderr)
+        return 2
+    out_dir = RESULTS / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    r = Run(sandbox, opts.max_usd, out_dir, opts.keep, SCENARIOS)
+    try:
+        results = run_all(r, scenarios)
+    except ScenarioError as exc:
+        print(f"e2e: couldn't restore the sandbox config: {exc}", file=sys.stderr)
+        return 1
+    for name, outcome, notes in results:
+        print(f"{outcome.upper():8} {name}" + (f": {'; '.join(notes)}" if notes else ""))
+    print(f"spent ${r.spend.total():.2f} of ${opts.max_usd:.2f}; results in {out_dir}")
+    return 1 if any(outcome in ("failed", "capped") for _, outcome, _ in results) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
