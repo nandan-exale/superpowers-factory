@@ -1,7 +1,7 @@
 {
   "name": "superpowers-factory",
   "description": "Hand Superpowers-approved specs and plans to an unattended software factory that builds each plan as one PR",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": {
     "name": "Nandan Thakur"
   },
