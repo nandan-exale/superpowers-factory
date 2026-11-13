@@ -127,6 +127,43 @@ class StateTest(CiCase):
         with self.assertRaises(ValueError):
             self.runner.extract_state(bad.read_bytes(), self.p.root / "factory/jobs")
 
+    def test_state_commit_runs_no_filter_or_signing_program_from_local_config(self):
+        filter_ran, gpg_ran = self.tmp / "filter-ran", self.tmp / "gpg-ran"
+        fake_gpg = self.tmp / "fake-gpg"
+        fake_gpg.write_text(f"#!/bin/sh\ntouch {gpg_ran}\nexit 1\n")
+        fake_gpg.chmod(0o755)
+        git(self.p.root, "config", "filter.x.clean", f"touch {filter_ran}; cat")
+        git(self.p.root, "config", "commit.gpgsign", "true")
+        git(self.p.root, "config", "gpg.program", str(fake_gpg))
+        self.write(".gitattributes", "* filter=x\n")
+        self.write("001-a/job.json", "{}")
+        commit = self.runner.state_commit(self.runner.state_files(), "")
+        self.assertFalse(filter_ran.exists())
+        self.assertFalse(gpg_ran.exists())
+        self.assertEqual(git(self.p.root, "show", f"{commit}:001-a/job.json"), "{}")
+
+    def test_symlinks_are_not_saved(self):
+        secret = self.tmp / "outside.txt"
+        secret.write_text("not job state")
+        self.write("001-a/job.json", "{}")
+        (self.p.root / "factory/jobs/001-a/link").symlink_to(secret)
+        self.assertEqual(self.runner.state_files(), ["001-a/job.json"])
+
+    def test_save_refuses_when_the_clone_could_run_code_through_git(self):
+        self.write("001-a/job.json", "{}")
+        for key, value in (("filter.x.clean", "cat"), ("credential.helper", "!true")):
+            with self.subTest(key=key):
+                git(self.p.root, "config", key, value)
+                self.assertFalse(self.call(self.runner.save_state))
+                self.assertIn(f"sets {key}", (self.p.root / "factory/jobs/runner.log").read_text())
+                git(self.p.root, "config", "--unset", key)
+        hook = self.p.git_dir / "hooks" / "pre-push"
+        hook.parent.mkdir(exist_ok=True)
+        hook.write_text("#!/bin/sh\nexit 0\n")
+        hook.chmod(0o755)
+        self.assertFalse(self.call(self.runner.save_state))
+        self.assertEqual(git(self.tmp, "--git-dir", str(self.origin), "branch", "--list", "factory-state"), "")
+
 
 FAKE_GH = f"#!{sys.executable}\nimport sys\nsys.stdout.write('[]')\n"
 
@@ -172,6 +209,17 @@ class TickCiTest(CiCase):
         run_claude.assert_not_called()
         self.assertIn("CLAUDE_CODE_OAUTH_TOKEN isn't set; add the FACTORY_CLAUDE_TOKEN secret",
                       (self.p.root / "factory/jobs/runner.log").read_text())
+
+    def test_plain_tick_on_github_actions_still_reads_the_platform_token(self):
+        base, runner = self.runner.load_config()
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}), mock.patch.object(self.runner, "chores"), \
+                mock.patch.object(self.runner, "has_work", return_value=True), \
+                mock.patch.object(self.runner, "read_token", return_value="tok") as read_token, \
+                mock.patch.object(self.runner, "missing_sandbox_tools", return_value=[]), \
+                mock.patch.object(self.runner, "run_claude", return_value=(0, 1)) as run_claude:
+            self.assertEqual(self.runner.tick_body(base, runner, None), 0)
+        read_token.assert_called_once()
+        self.assertEqual(run_claude.call_args.args[0], "tok")
 
 
 class DoctorCiTest(CiCase):
