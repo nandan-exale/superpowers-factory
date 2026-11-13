@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Route a job: every agent after intake gets its model and effort from config.json.
+
+Usage: route <job-id>
+
+A wrapper for `factory/bin/job route`, which does the work, so routing lives in
+one place with the rest of the job's state.
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+JOB = Path(__file__).resolve().parent / "job"
+
+if __name__ == "__main__":
+    sys.exit(subprocess.run([str(JOB), "route", *sys.argv[1:]]).returncode)

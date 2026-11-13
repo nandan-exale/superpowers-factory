@@ -1,0 +1,74 @@
+{
+  "concurrency": 3,
+  "max_rounds": 3,
+  "budgets": { "job_usd": 25, "job_hours": 6, "daily_usd": 100 },
+  "learning": {
+    "threshold": 3,
+    "window_days": 30,
+    "tags": ["missing-test", "weakened-test", "error-handling", "convention", "docs-not-updated",
+             "dead-code", "spec-gap", "input-validation", "secrets", "a11y", "ui-consistency"]
+  },
+  "runner": { "interval_minutes": 15, "max_minutes": 120, "keychain_service": "factory-claude-token" },
+  "base_branch": "main",
+  "merge_method": "merge",
+  "labels": {
+    "queue": "factory",
+    "needs_info": "factory:needs-info",
+    "needs_human": "factory:needs-human",
+    "planned": "factory:planned",
+    "learning": "factory:learning"
+  },
+  "pr_feedback": {
+    "allowed": []
+  },
+  "model_aliases": ["fable", "opus", "sonnet", "haiku"],
+  "effort_levels": ["low", "medium", "high", "xhigh", "max"],
+  "agents": {
+    "intake": { "model": "fable", "effort": "high" },
+    "learner": { "model": "opus", "effort": "high" }
+  },
+  "routing": {
+    "low": {
+      "spec-writer": { "model": "opus",   "effort": "medium" },
+      "builder":     { "model": "opus",   "effort": "medium" },
+      "approver":    { "model": "opus",   "effort": "medium" },
+      "code":        { "model": "haiku",  "effort": "medium" }
+    },
+    "medium": {
+      "spec-writer": { "model": "opus",   "effort": "high" },
+      "builder":     { "model": "opus",   "effort": "high" },
+      "approver":    { "model": "opus",   "effort": "high" },
+      "code":        { "model": "sonnet", "effort": "high" }
+    },
+    "high": {
+      "spec-writer": { "model": "opus",   "effort": "high" },
+      "builder":     { "model": "opus",   "effort": "high" },
+      "approver":    { "model": "opus",   "effort": "high" },
+      "code":        { "model": "sonnet", "effort": "high" }
+    }
+  },
+  "surface_reviewers": {
+    "ui": {
+      "ux": { "model": "sonnet", "effort": "medium" },
+      "ui": { "model": "haiku",  "effort": "medium" }
+    },
+    "security": {
+      "security": { "model": "opus", "effort": "high" }
+    }
+  },
+  "protected_paths": [
+    "factory/checks.sh",
+    "factory/config.json",
+    "factory/*",
+    ".claude/agents/*",
+    ".claude/skills/factory/*"
+  ],
+  "ports": { "base": 5100, "step": 10 },
+  "prices_usd_per_mtok": {
+    "claude-fable-5-2":  { "input": 8.0,  "output": 40.0, "cache_write_5m": 10.0, "cache_write_1h": 16.0, "cache_read": 0.20 },
+    "claude-fable-5-1":  { "input": 10.0, "output": 50.0, "cache_write_5m": 12.5, "cache_write_1h": 20.0, "cache_read": 0.25 },
+    "claude-opus-5-5":   { "input": 4.0,  "output": 20.0, "cache_write_5m": 5.0,  "cache_write_1h": 8.0,  "cache_read": 0.20 },
+    "claude-sonnet-5-5": { "input": 2.0,  "output": 10.0, "cache_write_5m": 2.5,  "cache_write_1h": 4.0,  "cache_read": 0.20 },
+    "claude-haiku-5-5":  { "input": 0.10, "output": 0.50, "cache_write_5m": 0.125, "cache_write_1h": 0.20, "cache_read": 0.01 }
+  }
+}

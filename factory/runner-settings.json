@@ -1,0 +1,60 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Write",
+      "Bash(factory/bin/job *)",
+      "Bash(factory/bin/gate *)",
+      "Bash(factory/bin/route *)",
+      "Bash(git *)",
+      "Bash(gh *)",
+      "Bash(bash factory/checks.sh)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Edit(./.git/**)",
+      "Write(./.git/**)",
+      "Edit(./factory/bin/**)",
+      "Write(./factory/bin/**)",
+      "Edit(./factory/runner-settings.json)",
+      "Write(./factory/runner-settings.json)",
+      "Edit(./factory/config.json)",
+      "Write(./factory/config.json)",
+      "Edit(./factory/checks.sh)",
+      "Write(./factory/checks.sh)",
+      "Edit(./.claude/**)",
+      "Write(./.claude/**)",
+      "Edit(~/.ssh/**)",
+      "Write(~/.ssh/**)",
+      "Edit(~/.claude/**)",
+      "Write(~/.claude/**)",
+      "Edit(~/Library/LaunchAgents/**)",
+      "Write(~/Library/LaunchAgents/**)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f*)",
+      "Bash(git push *+*)",
+      "Bash(git push --force-with-lease*)",
+      "Bash(gh issue edit *--add-label*)",
+      "Bash(gh repo delete*)",
+      "Bash(gh repo edit*)",
+      "Bash(gh api -X DELETE*)",
+      "Bash(gh api --method DELETE*)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "allowUnsandboxedCommands": false,
+    "network": {
+      "allowedDomains": ["github.com", "api.github.com", "*.githubusercontent.com"],
+      "allowLocalBinding": true,
+      "strictAllowlist": true
+    }
+  }
+}

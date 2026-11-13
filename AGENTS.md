@@ -11,7 +11,12 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
   `.claude/skills/factory` is the orchestrator; `.claude/agents/` the agents.
 - `tests/`: stdlib `unittest`. `tests/factory_project.py` builds a throwaway
   project with a bare origin.
-- `scripts/check`: every repo rule. `scripts/check-hook`: the Stop hook.
+- `scripts/check`: every repo rule. The Stop hook is the installed factory's
+  `factory/bin/stop-hook`, which runs `factory/checks.sh` (= `scripts/check`).
+- `factory/`, `.claude/agents/`, `.claude/skills/factory/`: the factory
+  **installed** in this repo to build it (see "Software factory" below). Not the
+  source: change `vendor/factory/` instead. The installed copy changes only
+  through `/factory-update`, by a human.
 - `docs/superpowers/specs`, `docs/superpowers/plans`: approved designs and plans.
 
 ## Invariants
@@ -30,9 +35,32 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
 
 ## Workflow
 
+- Set up a fresh checkout: nothing to install; Python 3.10+ and git are enough.
 - Run `scripts/check` before saying work is done. `scripts/check --fast`
   skips the unit tests. The Stop hook runs it for you when the tree has changes.
 - New features: `superpowers:brainstorming` → spec in `docs/superpowers/specs`,
   `superpowers:writing-plans` → plan in `docs/superpowers/plans`, then TDD.
 - Bug fixes get a regression test in `tests/`.
-- Don't commit or push unless asked. Never force-push without confirmation.
+- Interactive sessions: don't commit or push unless asked. Factory jobs (in a
+  `.worktrees/<job-id>` worktree) commit and push their job branch as their
+  agent instructions say. Nobody force-pushes without a human's confirmation.
+
+## Software factory
+
+`/factory run` builds every open GitHub issue labeled `factory` through
+intake → spec → build → gate → review → approve, one PR per issue. State is in
+`factory/jobs/` (gitignored); `factory/bin/job` is its only writer. Checks:
+`factory/checks.sh`. Dashboard: `cd factory && python3 -m http.server`, then
+open http://localhost:8000/dashboard.html.
+
+Each job works in its own git worktree, a full checkout of the repo at
+`.worktrees/<job-id>` (gitignored). A tool run from the repo root that doesn't
+read `.gitignore` sees those copies too; exclude `.worktrees/` in its config.
+
+Issues labeled `factory:planned` were designed with Superpowers and filed
+with `/factory-handoff`. They skip intake and the spec writer: the factory
+copies the committed spec and plan, and the builder carries out the plan.
+
+This repo is the factory's own source. A job that changes the factory edits
+`vendor/factory/`; the installed copy in `factory/` and `.claude/` is
+protected (`protected_paths`) and only `/factory-update` changes it.

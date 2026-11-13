@@ -1,0 +1,306 @@
+#!/usr/bin/env python3
+"""Check that the software factory is installed correctly in this project.
+
+Usage: doctor [--fast]
+
+Prints PASS, WARN or FAIL per check and exits 1 on any FAIL. --fast skips
+running factory/checks.sh.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+AGENTS = ("intake", "spec-writer", "builder", "reviewer-code",
+          "reviewer-security", "reviewer-ux", "reviewer-ui", "approver", "learner")
+AGENT_KEYS = {"name", "description", "tools"}
+EXECUTABLES = ("factory/checks.sh", "factory/bin/job", "factory/bin/gate", "factory/bin/route",
+               "factory/bin/stop-hook", "factory/bin/doctor", "factory/bin/runner")
+LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned",
+          "factory:learning")
+TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):")
+CHECKS_TAIL = 20
+# Checks run project code, so they never see the runner's Claude credentials.
+SECRET_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
+
+
+def fail(message):
+    return ("FAIL", message)
+
+
+def warn(message):
+    return ("WARN", message)
+
+
+def model_entries(cfg):
+    for role, entry in cfg.get("agents", {}).items():
+        yield f"agents.{role}", entry
+    for risk, roles in cfg.get("routing", {}).items():
+        for role, entry in roles.items():
+            yield f"routing.{risk}.{role}", entry
+    for surface, roles in cfg.get("surface_reviewers", {}).items():
+        for role, entry in roles.items():
+            yield f"surface_reviewers.{surface}.{role}", entry
+
+
+def check_config():
+    cfg = json.loads((REPO / "factory" / "config.json").read_text(encoding="utf-8"))
+    aliases = set(cfg.get("model_aliases", []))
+    efforts = set(cfg.get("effort_levels", []))
+    problems = []
+    for where, entry in model_entries(cfg):
+        if not isinstance(entry, dict):
+            problems.append(fail(f"{where}: expected an object with model and effort"))
+            continue
+        if entry.get("model") not in aliases:
+            problems.append(fail(f"{where}: model {entry.get('model')!r} not in model_aliases"))
+        if entry.get("effort") not in efforts:
+            problems.append(fail(f"{where}: effort {entry.get('effort')!r} not in effort_levels"))
+    budget = cfg.get("budgets")
+    if not isinstance(budget, dict):
+        problems.append(fail("budgets missing; expected job_usd, job_hours and daily_usd"))
+    else:
+        for key in ("job_usd", "job_hours", "daily_usd"):
+            v = budget.get(key, "missing")
+            if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0):
+                problems.append(fail(f"budgets.{key} must be a positive number or null, not {v!r}"))
+    learning = cfg.get("learning")
+    if not isinstance(learning, dict):
+        problems.append(fail("learning missing; expected threshold, window_days and tags"))
+    else:
+        for key in ("threshold", "window_days"):
+            v = learning.get(key)
+            if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+                problems.append(fail(f"learning.{key} must be a positive integer, not {v!r}"))
+        tags = learning.get("tags")
+        if not isinstance(tags, list) or not tags or not all(
+                isinstance(t, str) and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", t) for t in tags):
+            problems.append(fail("learning.tags must be a non-empty list of lowercase-hyphenated names"))
+    if not isinstance(cfg.get("agents", {}).get("learner"), dict):
+        problems.append(fail("agents.learner missing; expected {model, effort}"))
+    return problems
+
+
+def frontmatter_keys(text):
+    """Top-level keys of a leading --- block, or None if there is no closed block."""
+    lines = text.splitlines()
+    if not lines or lines[0] != "---":
+        return None
+    keys = []
+    for line in lines[1:]:
+        if line == "---":
+            return keys
+        match = TOP_LEVEL_KEY.match(line)
+        if match:
+            keys.append(match.group(1))
+    return None
+
+
+def check_agents():
+    problems = []
+    for name in AGENTS:
+        rel = f".claude/agents/{name}.md"
+        path = REPO / rel
+        if not path.is_file():
+            problems.append(fail(f"{rel} missing"))
+            continue
+        keys = frontmatter_keys(path.read_text(encoding="utf-8-sig"))
+        if keys is None:
+            problems.append(fail(f"{rel}: no --- frontmatter block"))
+            continue
+        allowed = AGENT_KEYS | ({"hooks"} if name == "builder" else set())
+        for key in keys:
+            if key == "model":
+                problems.append(fail(f"{rel}: sets model; factory/config.json sets models at spawn time"))
+            elif key not in allowed:
+                problems.append(fail(f"{rel}: unexpected frontmatter key {key!r}"))
+    return problems
+
+
+def check_files():
+    problems = []
+    if not (REPO / ".claude/skills/factory/SKILL.md").is_file():
+        problems.append(fail(".claude/skills/factory/SKILL.md missing"))
+    if not (REPO / "factory" / "manifest.json").is_file():
+        problems.append(fail("factory/manifest.json missing; run /factory-update to write it"))
+    for rel in EXECUTABLES:
+        path = REPO / rel
+        if not path.is_file():
+            problems.append(fail(f"{rel} missing"))
+        elif not os.access(path, os.X_OK):
+            problems.append(fail(f"{rel} is not executable"))
+    return problems
+
+
+def check_gitignore():
+    problems = []
+    for directory in ("factory/jobs/", ".worktrees/"):
+        res = subprocess.run(["git", "check-ignore", "-q", f"{directory}x"], cwd=REPO,
+                             capture_output=True, text=True)
+        if res.returncode == 1:
+            problems.append(fail(f"{directory} is not gitignored"))
+        elif res.returncode != 0:
+            problems.append(fail(f"git check-ignore failed: {res.stderr.strip()}"))
+    return problems
+
+
+def check_stop_hook():
+    path = REPO / ".claude" / "settings.json"
+    if not path.is_file():
+        return [fail(".claude/settings.json missing; it must register factory/bin/stop-hook as a Stop hook")]
+    settings = json.loads(path.read_text(encoding="utf-8-sig"))
+    for group in settings.get("hooks", {}).get("Stop", []):
+        for hook in group.get("hooks", []):
+            if "factory/bin/stop-hook" in hook.get("command", ""):
+                return []
+    return [fail("no Stop hook in .claude/settings.json runs factory/bin/stop-hook")]
+
+
+def check_claude_md():
+    has_agents = (REPO / "AGENTS.md").is_file()
+    claude = REPO / "CLAUDE.md"
+    if not has_agents and not claude.is_file():
+        return [fail("neither AGENTS.md nor CLAUDE.md exists")]
+    if has_agents and claude.is_file() and not claude.samefile(REPO / "AGENTS.md"):
+        lines = [line.strip() for line in claude.read_text(encoding="utf-8-sig").splitlines()]
+        if "@AGENTS.md" not in lines:
+            return [fail("CLAUDE.md doesn't import AGENTS.md; add a line @AGENTS.md")]
+    return []
+
+
+def check_labels():
+    gh = shutil.which("gh")
+    if not gh:
+        return [warn("gh not found; labels not checked")]
+    res = subprocess.run([gh, "label", "list", "--json", "name", "--limit", "200"], cwd=REPO,
+                         capture_output=True, text=True)
+    if res.returncode != 0:
+        return [warn(f"gh label list failed: {res.stderr.strip()}")]
+    names = {label["name"] for label in json.loads(res.stdout)}
+    return [fail(f"label {name!r} missing on GitHub") for name in LABELS if name not in names]
+
+
+RUNNER_ALLOW = ("Bash(factory/bin/job *)", "Bash(factory/bin/gate *)", "Bash(factory/bin/route *)",
+                "Bash(git *)", "Bash(gh *)", "Bash(bash factory/checks.sh)")
+
+
+def launchd_label():
+    """Must match label() in factory/bin/runner (a test keeps them equal)."""
+    slug = re.sub(r"[^a-z0-9]+", "-", str(REPO).lower()).strip("-")
+    digest = hashlib.sha256(str(REPO).encode()).hexdigest()[:8]
+    return f"com.superpowers-factory.{slug}-{digest}"
+
+
+def gh_api(gh, path):
+    res = subprocess.run([gh, "api", path], cwd=REPO, capture_output=True, text=True)
+    try:
+        return json.loads(res.stdout) if res.returncode == 0 else None
+    except ValueError:
+        return None
+
+
+def check_branch_protection(base):
+    """WARN unless GitHub confirms the base branch refuses force pushes and deletion, through
+    classic branch protection or through rulesets."""
+    gh = shutil.which("gh")
+    if not gh or not base:
+        return []
+    classic = gh_api(gh, f"repos/{{owner}}/{{repo}}/branches/{base}/protection")
+    if isinstance(classic, dict) and not any(
+            (classic.get(name) or {}).get("enabled") for name in ("allow_force_pushes", "allow_deletions")):
+        return []
+    rules = gh_api(gh, f"repos/{{owner}}/{{repo}}/rules/branches/{base}")
+    types = {rule.get("type") for rule in rules if isinstance(rule, dict)} if isinstance(rules, list) else set()
+    if {"non_fast_forward", "deletion"} <= types:
+        return []
+    if isinstance(classic, dict):
+        return [warn(f"base branch {base} has no protection against force-push/deletion; "
+                     "enable branch protection on GitHub")]
+    return [warn(f"could not confirm branch protection for {base} (needs admin, or uses rulesets "
+                 "without force-push/deletion rules)")]
+
+
+def check_runner():
+    problems = []
+    rel = "factory/runner-settings.json"
+    path = REPO / rel
+    if not path.is_file():
+        return [fail(f"{rel} missing")]
+    settings = json.loads(path.read_text(encoding="utf-8-sig"))
+    sandbox = settings.get("sandbox") or {}
+    if sandbox.get("enabled") is not True:
+        problems.append(fail(f"{rel}: sandbox.enabled must be true"))
+    if sandbox.get("allowUnsandboxedCommands") is not False:
+        problems.append(fail(f"{rel}: sandbox.allowUnsandboxedCommands must be false"))
+    allow = (settings.get("permissions") or {}).get("allow") or []
+    problems += [fail(f"{rel}: missing allow rule {rule}") for rule in RUNNER_ALLOW if rule not in allow]
+    cfg = json.loads((REPO / "factory" / "config.json").read_text(encoding="utf-8"))
+    service = (cfg.get("runner") or {}).get("keychain_service")
+    if not service:
+        problems.append(fail("factory/config.json has no runner.keychain_service"))
+    elif not shutil.which("security"):
+        problems.append(warn("security not found; Keychain token not checked"))
+    elif subprocess.run(["security", "find-generic-password", "-s", service],
+                        capture_output=True, text=True).returncode != 0:
+        problems.append(warn(f"no Keychain item {service}; run claude setup-token and "
+                             f"security add-generic-password -s {service} -a \"$USER\" -w"))
+    problems += check_branch_protection(cfg.get("base_branch"))
+    if sys.platform == "darwin" and shutil.which("launchctl"):
+        if subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{launchd_label()}"],
+                          capture_output=True, text=True).returncode != 0:
+            problems.append(warn("runner LaunchAgent not loaded; run factory/bin/runner install"))
+    return problems
+
+
+def check_checks():
+    env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
+    res = subprocess.run(["bash", str(REPO / "factory" / "checks.sh")], cwd=REPO,
+                         capture_output=True, text=True, env=env)
+    if res.returncode == 0:
+        return []
+    tail = (res.stdout + res.stderr).splitlines()[-CHECKS_TAIL:]
+    return [fail(f"factory/checks.sh exited {res.returncode}; last lines:")] + [fail(line) for line in tail]
+
+
+CHECKS = [
+    ("config", check_config),
+    ("agents", check_agents),
+    ("files", check_files),
+    ("gitignore", check_gitignore),
+    ("stop-hook", check_stop_hook),
+    ("claude-md", check_claude_md),
+    ("labels", check_labels),
+    ("runner", check_runner),
+    ("checks", check_checks),
+]
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--fast", action="store_true", help="skip running factory/checks.sh")
+    opts = parser.parse_args(argv)
+    failed = False
+    for name, check in CHECKS:
+        if opts.fast and name == "checks":
+            continue
+        try:
+            results = check()
+        except Exception as exc:  # reported as a FAIL so one broken check can't hide the rest
+            results = [fail(f"{type(exc).__name__}: {exc}")]
+        if not results:
+            print(f"PASS {name}")
+        for level, message in results:
+            failed = failed or level == "FAIL"
+            print(f"{level} {name}: {message}")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

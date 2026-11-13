@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+"""Run the software factory unattended.
+
+Usage:
+  runner tick                  one scheduled run: lock, preflight, pull, check the queue, run /factory run headless
+  runner install [--dry-run]   install the launchd LaunchAgent that runs `tick` every runner.interval_minutes
+  runner uninstall             unload and delete the LaunchAgent
+  runner status                LaunchAgent state and the last lines of factory/jobs/runner.log
+
+The Claude token comes from the macOS Keychain item named by
+runner.keychain_service (store it with
+`security add-generic-password -s <service> -a "$USER" -w`). It is passed to
+claude only through its environment, never in arguments, files or logs.
+"""
+
+import fcntl
+import hashlib
+import json
+import os
+import platform
+import plistlib
+import re
+import signal
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+FACTORY = REPO / "factory"
+JOBS = FACTORY / "jobs"
+LOG = JOBS / "runner.log"
+RUNS = JOBS / "runs"
+KEEP_RUNS = 50
+SETTINGS = FACTORY / "runner-settings.json"
+PROMPT = "/factory run"
+CHILD = None  # the running claude process, for the SIGTERM handler
+STRIPPED_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN")
+
+
+def die(message):
+    print(f"runner: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def load_config():
+    """(base branch, validated runner config); ValueError names the bad key."""
+    try:
+        cfg = json.loads((FACTORY / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"factory/config.json unreadable: {exc}")
+    runner = cfg.get("runner") if isinstance(cfg, dict) else None
+    if not isinstance(runner, dict):
+        raise ValueError("factory/config.json has no runner object (interval_minutes, max_minutes, keychain_service)")
+    for key in ("interval_minutes", "max_minutes"):
+        value = runner.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"factory/config.json runner.{key} must be a positive integer, not {value!r}")
+    service = runner.get("keychain_service")
+    if not isinstance(service, str) or not service.strip():
+        raise ValueError("factory/config.json runner.keychain_service must be a non-empty string")
+    if not isinstance(cfg.get("base_branch"), str) or not cfg["base_branch"]:
+        raise ValueError("factory/config.json base_branch must be a non-empty string")
+    return cfg["base_branch"], runner
+
+
+def main(argv):
+    try:
+        if argv == ["tick"]:
+            return cmd_tick()
+        if argv in (["install"], ["install", "--dry-run"]):
+            return cmd_install(dry_run=len(argv) == 2)
+        if argv == ["uninstall"]:
+            return cmd_uninstall()
+        if argv == ["status"]:
+            return cmd_status()
+    except ValueError as exc:
+        die(str(exc))
+    print(__doc__.strip(), file=sys.stderr)
+    return 1
+
+
+def stamp():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def log(line):
+    JOBS.mkdir(parents=True, exist_ok=True)
+    with LOG.open("a") as f:
+        f.write(f"{stamp()} {line}\n")
+
+
+# Sandboxed Bash in the clone can write .git, so no git command run here may execute
+# a hook or fsmonitor program, and none may prompt or wait on ssh.
+GIT_SAFE = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
+GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
+
+
+def git(*args):
+    return subprocess.run(["git", *GIT_SAFE, *args], cwd=REPO, capture_output=True, text=True,
+                          env={**os.environ, **GIT_ENV})
+
+
+RISKY_KEYS = ("credential.helper", "core.askpass", "core.sshcommand")
+
+
+def risky_local_key():
+    """The first key in .git/config (read without the -c overrides) that lets the clone run a
+    program or pull in more config, or None. Global config, such as the user's gh credential
+    helper, is deliberately left alone."""
+    res = subprocess.run(["git", "config", "--local", "--name-only", "--list"], cwd=REPO,
+                         capture_output=True, text=True)
+    for key in res.stdout.splitlines():
+        if (key in RISKY_KEYS or key == "include.path"
+                or (key.startswith("includeif.") and key.endswith(".path"))
+                or (key.startswith("remote.") and key.endswith((".uploadpack", ".receivepack")))
+                or (key.startswith("credential.") and key.endswith(".helper"))):
+            return key
+    return None
+
+
+def hooks_or_fsmonitor_configured():
+    """True if the clone could run code through git: an executable non-sample hook, or
+    core.hooksPath / core.fsmonitor in .git/config."""
+    hooks = git_path("hooks")
+    if hooks.is_dir() and any(f.is_file() and os.access(f, os.X_OK) and not f.name.endswith(".sample")
+                              for f in hooks.iterdir()):
+        return True
+    res = subprocess.run(["git", "config", "--local", "--name-only", "--list"], cwd=REPO,
+                         capture_output=True, text=True)
+    return any(key in ("core.hookspath", "core.fsmonitor") for key in res.stdout.splitlines())
+
+
+def git_path(name):
+    # Without GIT_SAFE: the hooks path asked for here is the configured one, not /dev/null.
+    res = subprocess.run(["git", "rev-parse", "--git-path", name], cwd=REPO, capture_output=True, text=True)
+    return REPO / res.stdout.strip()
+
+
+def first_line(text):
+    return (text.strip().splitlines() or ["?"])[0]
+
+
+def has_work():
+    """True if `job queue` has a resume or new row. Daily-budget waits are not work."""
+    res = subprocess.run([sys.executable, str(FACTORY / "bin" / "job"), "queue"],
+                         cwd=REPO, capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError(first_line(res.stderr or res.stdout))
+    return any(line.split("\t", 1)[0] in {"resume", "new"} for line in res.stdout.splitlines())
+
+
+def read_token(service):
+    res = subprocess.run(["security", "find-generic-password", "-s", service, "-w"],
+                         capture_output=True, text=True)
+    token = res.stdout.strip()
+    return token if res.returncode == 0 and token else None
+
+
+def kill_group(proc):
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def run_claude(token, max_seconds, out_path, err_path):
+    """(exit code or None on timeout, elapsed seconds). Output goes to files, never pipes, so a
+    process that outlives claude with the output open can't keep this call waiting."""
+    global CHILD
+    env = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}
+    env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+    env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "1"  # keep the token out of hooks and tests claude starts
+    env.update(GIT_ENV)
+    env["FACTORY_RUNNER"] = "1"  # plugin SessionStart hooks stay quiet in unattended sessions
+    cmd = ["claude", "-p", PROMPT, "--output-format", "json",
+           "--permission-mode", "dontAsk", "--settings", str(SETTINGS)]
+    start = time.monotonic()
+    with out_path.open("w") as out, err_path.open("w") as err:
+        proc = subprocess.Popen(cmd, cwd=REPO, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                                start_new_session=True)
+        CHILD = proc
+        try:
+            proc.wait(timeout=max_seconds)
+            code = proc.returncode
+        except subprocess.TimeoutExpired:
+            code = None
+        finally:
+            kill_group(proc)  # on purpose, even after a clean exit: stops dev servers claude left behind
+            proc.wait()
+            CHILD = None
+    return code, int(time.monotonic() - start)
+
+
+def on_sigterm(signum, frame):
+    if CHILD is not None:
+        kill_group(CHILD)
+    log("stopped")
+    sys.exit(1)
+
+
+def prune_runs():
+    """Keep the newest KEEP_RUNS runs (a run is its .json plus .stderr.log)."""
+    stems = {}
+    for f in RUNS.iterdir():
+        stems.setdefault(f.name.removesuffix(".stderr.log").removesuffix(".json"), []).append(f)
+    for stem in sorted(stems)[:-KEEP_RUNS]:
+        for f in stems[stem]:
+            f.unlink(missing_ok=True)
+
+
+def cost_of(path):
+    try:
+        return f"${json.loads(path.read_text())['total_cost_usd']:.2f}"
+    except (OSError, ValueError, KeyError, TypeError):
+        return "?"
+
+
+def cmd_tick():
+    try:
+        base, runner = load_config()
+    except ValueError as exc:
+        print(f"runner: {exc}", file=sys.stderr)
+        log(f"error: config: {exc}")
+        return 1
+    lock = open(git_path("factory-runner.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        log("busy")
+        return 0
+    signal.signal(signal.SIGTERM, on_sigterm)
+    if hooks_or_fsmonitor_configured():
+        log("error: git hooks or fsmonitor configured in this clone; remove them")
+        return 1
+    key = risky_local_key()
+    if key:
+        log(f"error: git config in this clone sets {key}; remove it")
+        return 1
+    branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if branch != base:
+        log(f"skipped: on {branch or '?'}, not {base}")
+        return 0
+    if git("status", "--porcelain").stdout.strip():
+        log("skipped: uncommitted changes")
+        return 0
+    pull = git("pull", "--ff-only", "-q", "origin", base)
+    if pull.returncode != 0:
+        log(f"skipped: pull failed: {first_line(pull.stderr)}")
+        return 0
+    try:
+        work = has_work()
+    except RuntimeError as exc:
+        log(f"error: queue: {exc}")
+        return 1
+    if not work:
+        log("idle")
+        return 0
+    token = read_token(runner["keychain_service"])
+    if not token:
+        log(f"error: no token in Keychain item {runner['keychain_service']}; "
+            "run claude setup-token and store it")
+        return 1
+    max_seconds = int(os.environ.get("FACTORY_RUNNER_MAX_SECONDS") or runner["max_minutes"] * 60)
+    RUNS.mkdir(parents=True, exist_ok=True)
+    out_path = RUNS / f"{stamp().replace(':', '')}.json"
+    err_path = out_path.with_name(out_path.name.removesuffix(".json") + ".stderr.log")
+    try:
+        code, seconds = run_claude(token, max_seconds, out_path, err_path)
+    except FileNotFoundError:
+        log("error: claude not found on PATH")
+        return 1
+    except OSError as exc:
+        log(f"error: could not start claude: {exc}")
+        return 1
+    prune_runs()
+    if code is None:
+        log(f"timeout after {seconds}s")
+        return 1
+    log(f"ran exit={code} {seconds}s cost={cost_of(out_path)}")
+    return 0 if code == 0 else 1
+
+
+def label():
+    slug = re.sub(r"[^a-z0-9]+", "-", str(REPO).lower()).strip("-")
+    digest = hashlib.sha256(str(REPO).encode()).hexdigest()[:8]
+    return f"com.superpowers-factory.{slug}-{digest}"
+
+
+def plist_path():
+    return Path.home() / "Library" / "LaunchAgents" / f"{label()}.plist"
+
+
+def domain():
+    return f"gui/{os.getuid()}"
+
+
+def plist_bytes(runner):
+    out = str(JOBS / "runner.launchd.log")
+    return plistlib.dumps({
+        "Label": label(),
+        "ProgramArguments": [sys.executable, str(FACTORY / "bin" / "runner"), "tick"],
+        "WorkingDirectory": str(REPO),
+        "StartInterval": runner["interval_minutes"] * 60,
+        "RunAtLoad": True,
+        "StandardOutPath": out,
+        "StandardErrorPath": out,
+        "EnvironmentVariables": {"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+    })
+
+
+def require_launchd():
+    if platform.system() != "Darwin":
+        die("launchd only (macOS); elsewhere run `factory/bin/runner tick` from cron or systemd")
+
+
+def launchctl(*args):
+    return subprocess.run(["launchctl", *args], capture_output=True, text=True)
+
+
+def cmd_install(dry_run):
+    _, runner = load_config()
+    data = plist_bytes(runner)
+    if dry_run:
+        sys.stdout.write(data.decode())
+        return 0
+    require_launchd()
+    path = plist_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    JOBS.mkdir(parents=True, exist_ok=True)
+    target = f"{domain()}/{label()}"
+    launchctl("bootout", target)
+    deadline = time.monotonic() + 3  # bootout returns before the old agent has finished unloading
+    while launchctl("print", target).returncode == 0 and time.monotonic() < deadline:
+        time.sleep(0.1)
+    path.write_bytes(data)
+    for attempt in range(3):
+        res = launchctl("bootstrap", domain(), str(path))
+        if res.returncode == 0:
+            break
+        if attempt == 2:
+            die(f"launchctl bootstrap failed: {first_line(res.stderr)}")
+        time.sleep(0.5)
+    print(f"installed {path}; runs every {runner['interval_minutes']} min")
+    return 0
+
+
+def cmd_uninstall():
+    require_launchd()
+    launchctl("bootout", f"{domain()}/{label()}")
+    plist_path().unlink(missing_ok=True)
+    print(f"uninstalled {label()}")
+    return 0
+
+
+def cmd_status():
+    require_launchd()
+    loaded = launchctl("print", f"{domain()}/{label()}").returncode == 0
+    path = plist_path()
+    print(f"{label()}: {'loaded' if loaded else 'not loaded'}")
+    print(f"plist: {path}{'' if path.exists() else ' (missing)'}")
+    lines = LOG.read_text().splitlines()[-10:] if LOG.exists() else ["(no runner.log yet)"]
+    print("\n".join(lines))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
