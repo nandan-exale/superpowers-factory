@@ -85,8 +85,39 @@ def run(cmd, cwd=REPO, check=True):
     return res
 
 
+# Seconds to wait before each attempt of a network call that is safe to repeat; tests use zeros.
+NET_WAITS = (0, 2, 5)
+NET_TIMEOUT = 120
+READ_ONLY_GH = {"view", "list", "status", "checks", "diff"}
+GH_API_WRITE_FLAGS = {"-X", "--method", "-f", "-F", "--field", "--raw-field", "--input"}
+NET_GIT = {"fetch", "push", "ls-remote"}
+
+
+def run_net(cmd, cwd=REPO, check=True):
+    """run() for a network call that is safe to repeat: each attempt is time-limited, failures retried."""
+    for wait in NET_WAITS:
+        time.sleep(wait)
+        try:
+            res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=NET_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            res = subprocess.CompletedProcess(cmd, 124, "", f"timed out after {NET_TIMEOUT}s")
+        if res.returncode == 0:
+            return res
+    if check:
+        raise Refused(f"`{' '.join(cmd)}` failed after {len(NET_WAITS)} attempts: "
+                      f"{(res.stderr or res.stdout).strip()}")
+    return res
+
+
+def gh_read_only(args):
+    """True for gh calls that only read, so repeating one can't create or change anything."""
+    if args[:1] == ("api",):  # gh api defaults to POST once a field is given
+        return not any(a.split("=", 1)[0] in GH_API_WRITE_FLAGS or a.startswith("-X") for a in args[1:])
+    return len(args) > 1 and args[1] in READ_ONLY_GH
+
+
 def gh(*args):
-    return run(["gh", *args]).stdout
+    return (run_net if gh_read_only(args) else run)(["gh", *args]).stdout
 
 
 def gh_json(*args):
@@ -847,7 +878,8 @@ def escalate(job, why):
 
 
 def git(job, *args, check=True):
-    return run(["git", *args], cwd=job["worktree"], check=check)
+    runner = run_net if args[:1] and args[0] in NET_GIT else run
+    return runner(["git", *args], cwd=job["worktree"], check=check)
 
 
 def pr_state(job):
@@ -1108,7 +1140,7 @@ def advance(job, stage):
         elif stage == "rejected":
             label("issue", job["issue"], remove=LABELS["queue"])
         else:
-            run(["git", "fetch", "origin", BASE])
+            run_net(["git", "fetch", "origin", BASE])
             Path(job["worktree"]).parent.mkdir(parents=True, exist_ok=True)
             run(["git", "worktree", "add", "-b", job["branch"], job["worktree"], f"origin/{BASE}"])
 
@@ -1446,7 +1478,7 @@ def cmd_planned(job):
     # Marked before validating, so rejecting a refused job also removes the label.
     job["planned"] = True
     d = job_dir(job["id"])
-    run(["git", "fetch", "origin", BASE])
+    run_net(["git", "fetch", "origin", BASE])
     me = operator()
     try:
         author = issue["author"]["login"]
