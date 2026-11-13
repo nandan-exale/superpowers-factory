@@ -654,6 +654,11 @@ def route_agents(risk, surfaces):
 
 def planned_intake_md(issue_number, plan):
     short = plan["commit"][:7]
+    part = ""
+    if "part" in plan:
+        (k, n), (first, last) = plan["part"], plan["tasks"]
+        part = (f"\nThis is part {k} of {n}: build only tasks {first}-{last} of {plan['plan_tasks']}. "
+                "Earlier tasks are already merged on the base branch; later parts build the rest.\n")
     return (
         "DECISION: ACCEPT\n"
         f"RISK: {plan['risk']}\n"
@@ -669,6 +674,7 @@ def planned_intake_md(issue_number, plan):
         "## Scope\n"
         "Build exactly what the plan says, task by task. `spec.md` and `plan.md` in the job\n"
         f"folder are copies of those files at commit `{plan['commit']}`.\n"
+        f"{part}"
         "\n"
         "## Why\n"
         f"Issue #{issue_number} carries the `{LABELS['planned']}` label: its design was\n"
@@ -1563,6 +1569,25 @@ def cmd_agent(job, role):
     print(f"model={setting['model']} effort={setting['effort']}")
 
 
+TASK_HEADING = re.compile(r"^### Task \d+", re.M)
+
+
+def check_part(plan, plan_text, jobs):
+    """Refuse a part whose range is past the plan or whose dependency hasn't merged."""
+    if "part" not in plan:
+        return
+    total = len(TASK_HEADING.findall(plan_text))
+    first, last = plan["tasks"]
+    require(last <= total, f"tasks {first}-{last} is past the plan's {total} tasks")
+    plan["plan_tasks"] = total
+    dep = plan["depends"]
+    if dep:
+        state = dependency_state(dep, jobs)
+        k = plan["part"][0]
+        require(state != "failed", f"part {k - 1} (#{dep}) didn't merge; re-plan or remove the dependency")
+        require(state == "merged", f"part {k - 1} (#{dep}) hasn't merged yet")
+
+
 def cmd_planned(job):
     if job["stage"] != "intake":
         die(f"{job['id']} is in {job['stage']}, not intake")
@@ -1579,6 +1604,8 @@ def cmd_planned(job):
         require(author == me, f"planned issues must be filed by @{me} with /factory-handoff, not @{author}")
         plan = parse_plan_block(issue["body"])
         check_plan_commit(plan)
+        plan_text = run(["git", "show", f"{plan['commit']}:{plan['plan']}"]).stdout
+        check_part(plan, plan_text, {j["issue"]: j for j in read_jobs()})
     except Refused as e:
         escalate(job, f"The handoff block was refused: {e}\n\n"
                       "Fix the spec or plan in an interactive session, reject this job, "
@@ -1586,11 +1613,15 @@ def cmd_planned(job):
         save(advance(sync(job), "needs-human"))
         print(f"PLANNED: REFUSED {e}")
         return
-    for key in ("spec", "plan"):
-        (d / f"{key}.md").write_text(run(["git", "show", f"{plan['commit']}:{plan[key]}"]).stdout)
+    (d / "spec.md").write_text(run(["git", "show", f"{plan['commit']}:{plan['spec']}"]).stdout)
+    (d / "plan.md").write_text(plan_text)
     (d / "intake.md").write_text(planned_intake_md(job["issue"], plan))
     job = {**sync(job), "planned": True, "plan_paths": [plan["spec"], plan["plan"]],
            "agents": route_agents(plan["risk"], plan["surfaces"])}
+    if "part" in plan:
+        k, n = plan["part"]
+        first, last = plan["tasks"]
+        job.update(part=f"{k}/{n}", tasks=f"{first}-{last}", plan_tasks=plan["plan_tasks"])
     job = advance(job, "spec")
     job = advance(job, "build")
     save(sync(job))
