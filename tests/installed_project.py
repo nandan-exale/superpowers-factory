@@ -61,15 +61,23 @@ if sys.argv[1:2] == ["api"]:
 sys.stdout.write(open(os.environ["FAKE_GH_LABELS"]).read())
 """
 
+# The host tools the runner and doctor call, faked so no test reaches the real Keychain, launchd
+# or systemd, and so the platform the tests run on doesn't decide what the scripts find.
+HOST_TOOLS = ("security", "launchctl", "secret-tool", "loginctl", "systemctl", "bwrap", "socat")
+# A healthy Linux host: secret-tool has the token, linger is on, the timer is active.
+HEALTHY_LINUX = {"FAKE_SECRET_TOOL_OUT": "tok-123\n", "FAKE_LOGINCTL_OUT": "Linger=yes\n",
+                 "FAKE_SYSTEMCTL_OUT": "active\n"}
+
 # Records argv to $FAKE_RECORD (one JSON line per call) when set; exits $FAKE_<NAME>_EXIT (default 0);
-# prints $FAKE_<NAME>_OUT when set.
+# prints $FAKE_<NAME>_OUT when set. <NAME> is the tool's name in capitals with - as _.
 FAKE_TOOL = """#!{python}
 import json, os, sys
-name = os.path.basename(sys.argv[0]).upper()
+tool = os.path.basename(sys.argv[0])
+name = tool.upper().replace("-", "_")
 record = os.environ.get("FAKE_RECORD")
 if record:
     with open(record, "a") as f:
-        f.write(json.dumps({{"tool": name.lower(), "argv": sys.argv[1:]}}) + "\\n")
+        f.write(json.dumps({{"tool": tool, "argv": sys.argv[1:]}}) + "\\n")
 sys.stdout.write(os.environ.get(f"FAKE_{{name}}_OUT", ""))
 sys.exit(int(os.environ.get(f"FAKE_{{name}}_EXIT", "0")))
 """
@@ -79,7 +87,12 @@ def load_script(name, path):
     """Import an extensionless script such as factory/bin/runner as a module."""
     loader = importlib.machinery.SourceFileLoader(name, str(path))
     module = importlib.util.module_from_spec(importlib.util.spec_from_loader(name, loader))
-    loader.exec_module(module)
+    # No factory/bin/__pycache__: it would make the project's tree dirty, and the runner skips dirty trees.
+    dont_write, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = dont_write
     return module
 
 
@@ -107,9 +120,11 @@ class InstalledProject:
         tmp = Path(tmp).resolve()
         self.root = tmp / "project"
         self.fakebin = tmp / "fakebin"
+        self.toolbin = tmp / "toolbin"
         self.labels_file = tmp / "labels.json"
         self.root.mkdir()
         self.fakebin.mkdir()
+        self.toolbin.mkdir()
         for rel in COPIED:
             target = self.root / rel
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -124,8 +139,8 @@ class InstalledProject:
         gh = self.fakebin / "gh"
         gh.write_text(FAKE_GH.format(python=sys.executable))
         gh.chmod(0o755)
-        for tool in ("security", "launchctl"):
-            path = self.fakebin / tool
+        for tool in HOST_TOOLS:
+            path = self.toolbin / tool
             path.write_text(FAKE_TOOL.format(python=sys.executable))
             path.chmod(0o755)
         self.set_labels(LABELS)
@@ -168,13 +183,14 @@ class InstalledProject:
         self.labels_file.write_text(json.dumps([{"name": name} for name in names]))
 
     def env(self, gh=True):
-        """Environment for running a factory script: no inherited GIT_*, fake gh or none."""
+        """Environment for running a factory script: no inherited GIT_*, fake host tools, fake gh or none."""
         env = clean_env()
         env["FAKE_GH_LABELS"] = str(self.labels_file)
+        env.update(HEALTHY_LINUX)
         if gh:
-            env["PATH"] = f"{self.fakebin}{os.pathsep}{os.environ.get('PATH', '')}"
+            env["PATH"] = os.pathsep.join((str(self.fakebin), str(self.toolbin), os.environ.get("PATH", "")))
         else:
-            env["PATH"] = "/usr/bin:/bin"
+            env["PATH"] = os.pathsep.join((str(self.toolbin), "/usr/bin", "/bin"))
         return env
 
     def run(self, script, *args, stdin="", gh=True, env=None):

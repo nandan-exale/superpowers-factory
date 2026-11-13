@@ -211,12 +211,14 @@ class TickTest(RunnerCase):
         self.assertEqual(len(runs), 1)
         self.assertEqual(json.loads(runs[0].read_text())["result"], "done")
 
+    @unittest.skipUnless(sys.platform == "darwin", "Keychain only; Linux tokens are in test_runner_linux")
     def test_token_is_read_from_the_configured_keychain_item(self):
         self.set_issues(self.WORK)
         self.runner("tick")
         [call] = self.calls("security")
         self.assertEqual(call["argv"], ["find-generic-password", "-s", "factory-claude-token", "-w"])
 
+    @unittest.skipUnless(sys.platform == "darwin", "Keychain only; Linux tokens are in test_runner_linux")
     def test_missing_token_is_an_error(self):
         self.set_issues(self.WORK)
         res = self.runner("tick", FAKE_SECURITY_EXIT="44", FAKE_SECURITY_OUT="")
@@ -283,6 +285,7 @@ class LaunchAgentTest(RunnerCase):
         self.assertEqual(res.returncode, 0, res.stderr)
         return plistlib.loads(res.stdout.encode())
 
+    @unittest.skipUnless(sys.platform == "darwin", "launchd only; Linux units are in test_runner_linux")
     def test_dry_run_plist(self):
         p = self.plist()
         self.assertTrue(p["Label"].startswith("com.superpowers-factory."))
@@ -524,9 +527,8 @@ class RobustnessTest(RunnerCase):
         self.set_issues(self.WORK)
         bin2 = self.tmp / "bin2"
         bin2.mkdir()
-        for name in ("gh", "security"):
-            shutil.copy2(self.p.fakebin / name, bin2 / name)
-        res = self.runner("tick", PATH=f"{bin2}{os.pathsep}/usr/bin{os.pathsep}/bin")
+        shutil.copy2(self.p.fakebin / "gh", bin2 / "gh")
+        res = self.runner("tick", PATH=os.pathsep.join((str(bin2), str(self.p.toolbin), "/usr/bin", "/bin")))
         self.assertEqual(res.returncode, 1)
         self.assertTrue(self.log_lines()[-1].endswith(" error: claude not found on PATH"))
 

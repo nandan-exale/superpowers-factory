@@ -198,16 +198,11 @@ class LinuxTickTest(RunnerCase):
     def setUp(self):
         super().setUp()
         self.set_issues([{"number": 7, "title": "Build the widget"}])
-        self.linuxbin = self.tmp / "linuxbin"
-        self.linuxbin.mkdir()
-        for tool in ("secret-tool", "bwrap", "socat"):
-            (self.linuxbin / tool).write_text(FAKE.format(python=__import__("sys").executable))
-            (self.linuxbin / tool).chmod(0o755)
         # Only git from the system, so a real bwrap or socat on the host can't leak in.
         gitbin = self.tmp / "gitbin"
         gitbin.mkdir()
         (gitbin / "git").symlink_to(shutil.which("git"))
-        self.path = os.pathsep.join(map(str, (self.p.fakebin, self.linuxbin, gitbin)))
+        self.path = os.pathsep.join(map(str, (self.p.fakebin, self.p.toolbin, gitbin)))
         self.module = load_script(f"runner_tick_{id(self)}", self.p.root / "factory/bin/runner")
         self.module.platform_name = lambda: "Linux"
         self.addCleanup(signal.signal, signal.SIGTERM, signal.getsignal(signal.SIGTERM))
@@ -223,11 +218,17 @@ class LinuxTickTest(RunnerCase):
         path.chmod(mode)
 
     def test_missing_bubblewrap_skips_with_a_log_line(self):
-        (self.linuxbin / "bwrap").unlink()
+        (self.p.toolbin / "bwrap").unlink()
         self.assertEqual(self.tick(FAKE_SECRET_TOOL_OUT="tok-123\n"), 1)
         self.assertEqual(self.calls("claude"), [])
         self.assertTrue(self.log_lines()[-1].endswith(
             "error: bwrap missing; Claude Code's Linux sandbox needs bubblewrap and socat"))
+
+    def test_no_token_is_an_error(self):
+        self.assertEqual(self.tick(FAKE_SECRET_TOOL_EXIT="1"), 1)
+        self.assertEqual(self.calls("claude"), [])
+        self.assertTrue(self.log_lines()[-1].endswith(
+            "error: no token from secret-tool (service factory-claude-token) or ~/.config/factory/claude-token"))
 
     def test_open_token_file_is_refused_with_the_chmod_fix(self):
         self.token_file("file-token\n", 0o644)
