@@ -173,6 +173,23 @@ A live dashboard: `cd factory && python3 -m http.server`, then open
   can also use `/factory <what to change>`.
 - **To stop** a job, close the issue or reject it with `/factory`.
 
+### What needs me?
+
+The factory comments as you, and GitHub doesn't notify you about your own
+comments. So check two places instead:
+
+- **The digest issue.** Once a day after `digest.hour` (local time), the
+  factory posts a report on the pinned issue labeled `factory:digest`. Its
+  first line lists what needs you, for example
+  `Needs you: #12 (needs-human, 2d), #15 (needs-info, 5h)`. A runner posts it
+  on its own; without one, the end of each `/factory run` posts it.
+- **A saved search.** On your repo's Issues tab, search
+  `is:open label:factory:needs-human,factory:needs-info` and save it.
+
+`/factory report` prints the same report (spend, throughput, escalations,
+findings, gate pass rate) without posting it, and the dashboard shows a summary
+strip from `factory/jobs/report.json`.
+
 ### Keeping the factory up to date
 
 When the plugin is newer than a project's factory, Claude offers
@@ -207,6 +224,7 @@ change this file itself; edit it by hand and commit.
 | `protected_paths` | `factory/checks.sh`, `factory/config.json` | Files no job may change. Add paths only when no job should ever touch them. |
 | `ports` | `{"base": 5100, "step": 10}` | Ports given to each job's dev server. |
 | `labels` | `factory`, `factory:planned`, … | GitHub label names, if you need different ones. |
+| `digest` | `{"enabled": true, "hour": 9, "days": 1}` | `enabled`, `hour` (local, 0–23) and `days` (the period the digest covers). Set `enabled` to `false` to stop posting. |
 
 ### Models and effort
 
