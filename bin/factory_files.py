@@ -46,8 +46,8 @@ def vendor_hash(vendor=None):
     return digest.hexdigest()
 
 
-def write_json(path, data, sort_keys=False):
-    Path(path).write_text(json.dumps(data, indent=2, sort_keys=sort_keys, ensure_ascii=False) + "\n",
+def write_json(path, data, sort_keys=False, indent=2):
+    Path(path).write_text(json.dumps(data, indent=indent, sort_keys=sort_keys, ensure_ascii=False) + "\n",
                           encoding="utf-8")
 
 

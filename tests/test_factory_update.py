@@ -58,12 +58,12 @@ class UpdatePlanTest(unittest.TestCase):
     def local(self, rel, text):
         (self.project / rel).write_text(text)
 
-    def test_fresh_install_is_all_unchanged_except_special_files(self):
+    def test_fresh_install_is_all_unchanged_except_owned_checks(self):
         res, groups = self.run_plan()
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual(groups["factory/checks.sh"], "owned")
-        self.assertEqual(groups["factory/config.json"], "config")
-        self.assertEqual(groups["factory/runner-settings.json"], "settings")
+        self.assertEqual(groups["factory/config.json"], "unchanged")
+        self.assertEqual(groups["factory/runner-settings.json"], "unchanged")
         self.assertEqual(groups["factory/bin/job"], "unchanged")
 
     def test_groups(self):
@@ -198,12 +198,12 @@ class UpdatePlanTest(unittest.TestCase):
         _, groups = self.run_plan()
         self.assertEqual(groups["factory/bin/gate"], "unchanged")
 
-    def test_settings_with_only_added_domains_stay_settings(self):
+    def test_settings_with_only_added_domains_are_unchanged(self):
         mine = self.settings_json(self.project)
         mine["sandbox"]["network"]["allowedDomains"].append("registry.npmjs.org")
         (self.project / "factory/runner-settings.json").write_text(json.dumps(mine))
         _, groups = self.run_plan()
-        self.assertEqual(groups["factory/runner-settings.json"], "settings")
+        self.assertEqual(groups["factory/runner-settings.json"], "unchanged")
 
     def test_settings_changed_on_both_sides_is_a_merge(self):
         mine = self.settings_json(self.project)

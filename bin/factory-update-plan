@@ -5,16 +5,18 @@ Usage: factory-update-plan <project> [--apply-safe | --resolved <path>]
 
 Prints `<group>\t<path>` per vendored file. Groups: new, unchanged, safe,
 merge, owned (factory/checks.sh, never touched), config (factory/config.json:
-missing keys added, values kept), settings (factory/runner-settings.json:
+missing keys added, pre-0.2.0 bare model strings turned into {model, effort} keeping
+the model; unchanged when that would change nothing), settings (factory/runner-settings.json:
 upstream file, keeping the domains the project added; upstream's own domains are
 always kept in sync with upstream, so one the project removed comes back; a settings file
 the project changed beyond domains is a merge, or unchanged if upstream didn't
-change it either).
+change it either). config and settings are unchanged when applying would not change the file.
 --apply-safe copies new and safe files, merges config and settings, and
 rewrites factory/manifest.json. merge files are left for the user and keep
 their old manifest entry and the old vendor_hash, so the update stays pending.
 --resolved <path> records that the user settled a merge file; once no merge
-is left the manifest's vendor_hash becomes current.
+is left the manifest's vendor_hash becomes current. The count it prints is every
+file still waiting for a record: merge rows, plus files already edited to match upstream.
 """
 
 import copy
@@ -85,7 +87,7 @@ def classify_settings(project, vendor, manifest):
     mine_core, theirs_core = settings_core(mine), settings_core(theirs)
     base = (manifest or {}).get("settings_core")
     if mine_core == theirs_core or mine_core == base:
-        return "settings"
+        return "settings" if settings_document(mine, theirs, manifest) != mine else "unchanged"
     if base is None:
         return "merge"
     if theirs_core != base:
@@ -103,7 +105,9 @@ def classify(project, vendor, manifest):
         elif not (project / rel).exists():
             rows.append(("new", rel))
         elif rel == CONFIG:
-            rows.append(("config", rel))
+            mine = load_json(project / CONFIG)
+            merged = add_missing(copy.deepcopy(mine), load_json(vendor / CONFIG))
+            rows.append(("config" if merged != mine else "unchanged", rel))
         elif rel == SETTINGS:
             rows.append((classify_settings(project, vendor, manifest), rel))
         else:
@@ -122,13 +126,40 @@ def classify(project, vendor, manifest):
     return rows
 
 
-def add_missing(mine, upstream):
-    """Add upstream keys the project lacks, recursively; never change a project value."""
+def is_entry(value):
+    """True for a {model, effort} setting."""
+    return isinstance(value, dict) and set(value) == {"model", "effort"}
+
+
+def migrate_entry(mine, upstream, aliases):
+    """The project's {model, effort} for an upstream setting, or None to leave `mine` alone.
+    A bare model string (the pre-0.2.0 shape) keeps its model when it is a known alias; a
+    partial object keeps the keys it has."""
+    if isinstance(mine, str):
+        return {"model": mine if mine in aliases else upstream["model"], "effort": upstream["effort"]}
+    if isinstance(mine, dict) and not is_entry(mine) and not set(mine) - {"model", "effort"}:
+        return {**upstream, **mine}
+    return None
+
+
+def add_missing(mine, upstream, aliases=None, path="", notes=None):
+    """Add upstream keys the project lacks, recursively, and bring old-shape model settings up
+    to {model, effort}; never change a model the project chose. `notes` collects the dotted
+    paths of keys that were added to a routing or reviewer table."""
+    if aliases is None:
+        aliases = upstream.get("model_aliases", [])
     for key, value in upstream.items():
+        here = f"{path}.{key}" if path else key
         if key not in mine:
             mine[key] = value
+            if notes is not None and path.split(".")[0] in ("routing", "surface_reviewers") and is_entry(value):
+                notes.append(here)
+        elif is_entry(value):
+            migrated = migrate_entry(mine[key], value, aliases)
+            if migrated is not None:
+                mine[key] = migrated
         elif isinstance(mine[key], dict) and isinstance(value, dict):
-            add_missing(mine[key], value)
+            add_missing(mine[key], value, aliases, here, notes)
     return mine
 
 
@@ -162,8 +193,9 @@ def apply_safe(project, vendor, rows, old):
     if (project / SETTINGS).exists():
         allowed_domains(load_json(project / SETTINGS), SETTINGS)
         allowed_domains(load_json(vendor / SETTINGS), f"{SETTINGS} (plugin copy)")
+    notes = []
     if groups.get(CONFIG) == "config":
-        config = add_missing(load_json(project / CONFIG), load_json(vendor / CONFIG))
+        config = add_missing(load_json(project / CONFIG), load_json(vendor / CONFIG), notes=notes)
     if groups.get(SETTINGS) == "settings":
         settings = settings_document(load_json(project / SETTINGS), load_json(vendor / SETTINGS), old)
     for group, rel in rows:
@@ -174,10 +206,22 @@ def apply_safe(project, vendor, rows, old):
             if rel.startswith("factory/bin/"):
                 dst.chmod(0o755)
     if config is not None and config != load_json(project / CONFIG):
-        write_json(project / CONFIG, config)
+        write_json(project / CONFIG, config, indent=indent_of(project / CONFIG))
+        if notes:
+            print("config: added with upstream defaults (edit factory/config.json to change): " + ", ".join(notes))
     if settings is not None and settings != load_json(project / SETTINGS):
         write_json(project / SETTINGS, settings)
     write_json(project / MANIFEST, new_manifest(vendor, rows, old))
+
+
+def indent_of(path):
+    """The indent of an existing JSON file: a tab, or the width of its first indented line; 2 otherwise."""
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        body = line.lstrip(" \t")
+        if body and body != line and not body.startswith(("}", "]")):
+            lead = line[:len(line) - len(body)]
+            return "\t" if lead[0] == "\t" else len(lead)
+    return 2
 
 
 def pending(rel, manifest, vendor):
@@ -207,7 +251,9 @@ def resolve(project, vendor, rel):
             write_json(project / SETTINGS, doc)
         data["settings_core"] = settings_core(theirs)
         data["settings_domains"] = allowed_domains(theirs, SETTINGS)
-    remaining = [r for group, r in classify(project, vendor, data) if group == "merge"]
+    remaining = [r for group, r in classify(project, vendor, data)
+                 if group == "merge" or (group == "unchanged" and r not in OWNED | {CONFIG}
+                                         and pending(r, data, vendor))]
     current = manifest_data(vendor)["vendor_hash"]
     if not remaining:
         data["vendor_hash"] = current
