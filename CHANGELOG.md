@@ -3,6 +3,20 @@
 All notable changes to superpowers-factory. Newest first. `scripts/release`
 adds each new section.
 
+## [0.5.1] - 2026-11-15
+
+### Fixed
+
+- pass --allowedTools to claude agents
+
+### Changed
+
+- chore: update software factory
+- Merge pull request #39 from nandan-exale/chore/factory-update
+- test: require --allowedTools for every claude agent role
+- test: keep the missing-bwrap test off the real PATH
+- Merge pull request #48 from nandan-exale/fix/claude-allowed-tools
+
 ## [0.5.0] - 2026-11-14
 
 ### Added
