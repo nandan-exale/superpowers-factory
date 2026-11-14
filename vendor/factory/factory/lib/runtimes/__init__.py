@@ -2,6 +2,7 @@
 
 Every adapter has:
   NAME          its config name
+  BINARY        the CLI it starts; orchestrate refuses to run when it isn't on PATH
   CAPS          {"resume": bool, "reports_cost": bool, "reports_tokens": bool, "efforts": [...]}
   build(run)    -> (argv, env). `run` is the dict orchestrator.loop builds: repo, job_id, role,
                    access, model, effort, system_path, settings_dir, stem, resume, session_id.

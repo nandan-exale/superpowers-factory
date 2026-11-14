@@ -29,8 +29,9 @@ def kill_group(proc):
 
 
 class Loop:
-    def __init__(self, cli, pipeline, runtime, say=print, poll=POLL_SECONDS):
+    def __init__(self, cli, pipeline, runtime, say=print, poll=POLL_SECONDS, agent_env=None):
         self.cli, self.pipe, self.rt, self.say, self.poll = cli, pipeline, runtime, say, poll
+        self.agent_env = dict(agent_env or {})  # credentials only agents get
         self.repo = cli.repo
         self.batches = {}        # key (job id, or learning:<tag>) → batch
         self.started = set()     # issues begun this run: a job that stops isn't restarted in the same run
@@ -59,8 +60,8 @@ class Loop:
         try:
             with (runs / f"{stem}.prompt.md").open() as stdin, (runs / f"{stem}.out").open("w") as out, \
                     (runs / f"{stem}.log").open("w") as err:
-                record["proc"] = subprocess.Popen(argv, cwd=spawn.cwd, env={**os.environ, **env}, stdin=stdin,
-                                                  stdout=out, stderr=err, start_new_session=True)
+                record["proc"] = subprocess.Popen(argv, cwd=spawn.cwd, env={**os.environ, **self.agent_env, **env},
+                                                  stdin=stdin, stdout=out, stderr=err, start_new_session=True)
         except OSError as exc:
             batch["done"][i] = Done(spawn, False, None, f"could not start {argv[0]}: {exc}")
             return

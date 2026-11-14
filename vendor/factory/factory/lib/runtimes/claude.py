@@ -3,6 +3,7 @@
 import json
 
 NAME = "claude"
+BINARY = "claude"
 CAPS = {"resume": True, "reports_cost": True, "reports_tokens": True,
         "efforts": ["low", "medium", "high", "xhigh", "max"]}
 
@@ -36,7 +37,7 @@ def settings(repo, role):
 def build(run):
     path = run["settings_dir"] / f"{run['stem']}.settings.json"
     path.write_text(json.dumps(settings(run["repo"], run["role"]), indent=2) + "\n")
-    argv = ["claude", "-p", "--output-format", "json", "--model", run["model"], "--effort", run["effort"],
+    argv = [BINARY, "-p", "--output-format", "json", "--model", run["model"], "--effort", run["effort"],
             "--append-system-prompt-file", str(run["system_path"]), "--tools", tools(run["role"]),
             "--settings", str(path), "--permission-mode", "dontAsk"]
     if run.get("resume"):

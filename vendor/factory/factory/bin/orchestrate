@@ -10,6 +10,8 @@ It prints one line per step and ends with `job summary` and `SPENT: $<usd>`. SIG
 state is in files, so the next run resumes.
 """
 
+import os
+import shutil
 import signal
 import sys
 from pathlib import Path
@@ -23,6 +25,9 @@ from orchestrator.jobcli import JobCli  # noqa: E402
 from orchestrator.loop import Loop  # noqa: E402
 from orchestrator.pipeline import Pipeline  # noqa: E402
 
+# Agents get these back in their own environment; job, gate, gh, git and their hooks never see them.
+SECRET_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
+
 
 def say(line):
     print(line, flush=True)
@@ -32,9 +37,13 @@ def main(argv):
     if not argv or argv[0] != "run" or len(argv) > 2 or (len(argv) == 2 and not argv[1].isdigit()):
         print(__doc__.strip(), file=sys.stderr)
         return 2
+    secrets = {name: os.environ.pop(name) for name in SECRET_ENV if name in os.environ}
     cli = JobCli(REPO)
     runtime = runtimes.load(cli.config().get("runtime", "claude"))
-    loop = Loop(cli, Pipeline(cli, say=say), runtime, say=say)
+    if not shutil.which(runtime.BINARY):
+        print(f"orchestrate: {runtime.BINARY} not found on PATH; install it, then run again", file=sys.stderr)
+        return 1
+    loop = Loop(cli, Pipeline(cli, say=say), runtime, say=say, agent_env=secrets)
 
     def on_sigterm(signum, frame):
         loop.stop()
