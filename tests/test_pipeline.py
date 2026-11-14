@@ -1,6 +1,8 @@
 import json
+import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -119,6 +121,17 @@ class StartTest(PipelineCase):
         self.assertEqual(s.resume, "sess-1")
         self.assertIn(pipeline.prompts.RESUMING, s.prompt)
         self.assertIn(pipeline.prompts.RESUMING, s.fresh_prompt)
+
+    def test_resume_build_names_feedback_newer_than_build_md(self):
+        # `/factory` feedback moves the job to build; the resumed builder must be told to read it.
+        self.set(stage="build", round=2)
+        for rel, age in (("feedback-1.md", 300), ("build.md", 200), ("feedback-2.md", 0)):
+            self.write(rel, "x\n")
+            when = time.time() - age
+            os.utime(self.folder / rel, (when, when))
+        s = self.only(self.p.begin(("resume", "12", "004-x", "build", "round 2"))[1])
+        self.assertIn(pipeline.prompts.feedback(["feedback-2.md"], 2), s.prompt)
+        self.assertNotIn("feedback-1.md", s.prompt)
 
     def test_resume_review_spawns_only_missing_reviewers(self):
         self.set(stage="review", round=1, agents={"reviewers": {"code": {}, "ux": {}}})
