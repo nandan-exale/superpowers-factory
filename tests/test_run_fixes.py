@@ -1,4 +1,4 @@
-"""Fixes from the first real run: evidence block, merge labels, intake prompt."""
+"""Fixes from the first real run: evidence block, merge labels. tests.test_pipeline checks the intake prompt."""
 
 import contextlib
 import io
@@ -6,12 +6,10 @@ import re
 import shutil
 import types
 import unittest
-from pathlib import Path
 from unittest import mock
 
 from budget_case import BudgetCase
 
-SKILL = Path(__file__).resolve().parents[1] / "vendor/factory/.claude/skills/factory/SKILL.md"
 GATE_MD = """GATE: PASS
 COMMIT: 6c404148
 
@@ -203,20 +201,6 @@ class MergeTest(BudgetCase):
         job = self.merge()
         self.assertEqual(job["stage"], "merged")
         self.assertIn(("issue", "edit", "7", "--remove-label", "factory"), self.project.gh_calls)
-
-
-class IntakePromptTest(unittest.TestCase):
-    def test_skill_tells_intake_to_use_the_main_checkout(self):
-        text = SKILL.read_text()
-        intake = text[text.index("Otherwise spawn `intake`"):text.index("**spec.**")]
-        self.assertIn("main checkout", intake)
-        self.assertIn("Worktree:", intake)
-        self.assertIn("doesn't exist yet", intake)
-        self.assertNotIn("Worktree:", text[text.index("**spec.**"):text.index("**build.**")])
-
-    def test_header_format_is_unchanged(self):
-        self.assertIn("Job: <id>. Job folder: <repo>/factory/jobs/<id>/. Main checkout: <repo>. "
-                      "Worktree: <worktree>.", SKILL.read_text())
 
 
 if __name__ == "__main__":

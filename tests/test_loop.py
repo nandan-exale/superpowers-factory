@@ -121,6 +121,17 @@ class LoopTest(LoopCase):
         prompt_files = list((self.folder / "runs").glob("*-reviewer-code.prompt.md"))
         self.assertEqual(prompt_files[0].read_text(), "PROMPT")
 
+    def test_watch_comes_first_and_the_run_ends_with_report_and_digest(self):
+        # Was the skill's /factory run steps 1 and 6.
+        self.cli.answer("job", "watch", out="WATCH: 003-y red\n")
+        self.cli.answer("job", "digest", out="DIGEST: posted\n")
+        self.loop([]).run()
+        jobs = [a for a, _ in self.cli.calls if a[0] == "job"]
+        self.assertEqual(jobs[0], ("job", "watch"))
+        self.assertIn("WATCH: 003-y red", self.lines)
+        self.assertLess(jobs.index(("job", "report", "--write")), jobs.index(("job", "digest")))
+        self.assertIn("DIGEST: posted", self.lines)
+
     def test_a_failing_agent_is_retried_once_then_reported(self):
         self.env = {"FAKE_EXIT_builder": "1"}
         lp = self.loop([self.spawn("builder")])

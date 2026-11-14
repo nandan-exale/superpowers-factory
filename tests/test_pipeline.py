@@ -127,6 +127,29 @@ class StartTest(PipelineCase):
         self.assertEqual((s.role, s.own), ("reviewer-ux", ("round-1/review-ux.md",)))
         self.assertTrue(s.prompt.endswith("Review round 1. Port: 5141."))
 
+    def test_worktree_is_ensured_before_the_first_spawn(self):
+        # Was the skill's "run factory/bin/job ensure-worktree <id>" before the first spawn.
+        self.set(stage="spec")
+        self.p.begin(("resume", "12", "004-x", "spec", ""))
+        jobs = self.cli.called("job")
+        self.assertLess(jobs.index(("job", "ensure-worktree", "004-x")),
+                        jobs.index(("job", "agent", "004-x", "spec-writer")))
+
+    def test_spec_writer_works_in_the_worktree_with_the_full_header(self):
+        # Was the skill's intake and spec wording: only intake is told the worktree doesn't exist yet.
+        self.set(stage="spec")
+        s = self.only(self.p.begin(("resume", "12", "004-x", "spec", ""))[1])
+        self.assertEqual(s.cwd, self.repo / ".worktrees/004-x")
+        self.assertIn(f"Worktree: {self.repo / '.worktrees/004-x'}. ", s.prompt)
+        self.assertIn("Base: origin/main.", s.prompt)  # base_branch from config.json
+
+    def test_risk_ok_resume_goes_back_to_merging(self):
+        # Was the skill's "A needs-human job with the note `factory:risk-ok added`".
+        self.set(stage="needs-human")
+        self.assertEqual(self.p.begin(("resume", "12", "004-x", "needs-human", "factory:risk-ok added"))[1], [])
+        jobs = self.cli.called("job")
+        self.assertLess(jobs.index(("job", "advance", "004-x", "merging")), jobs.index(("job", "merge", "004-x")))
+
     def test_lost_worktree_finishes_the_job(self):
         self.set(stage="spec")
         self.cli.answer("job", "ensure-worktree", "004-x", out="004-x: needs-human: worktree gone\n")
