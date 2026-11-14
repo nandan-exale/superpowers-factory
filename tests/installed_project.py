@@ -15,6 +15,11 @@ sys.path.insert(0, str(PLUGIN / "bin"))
 
 from factory_files import AGENTS, LIB  # noqa: E402
 
+# A script loaded in this process finds `runtimes` already imported from the plugin's copy, not from its
+# project's factory/lib: Python caches the package once, and a project's folder is deleted with its test.
+sys.path.insert(0, str(VENDOR / "factory" / "lib"))
+import runtimes  # noqa: E402,F401
+
 COPIED = (
     ".claude/skills/factory/SKILL.md",
     *(f"factory/agents/{name}.md" for name in AGENTS),

@@ -18,6 +18,11 @@ class ManifestTest(unittest.TestCase):
         for rel in ff.FILES:
             self.assertTrue((ff.VENDOR / rel).is_file(), rel)
 
+    def test_every_vendored_lib_file_is_listed(self):
+        lib = ff.VENDOR / "factory" / "lib"
+        for path in sorted(lib.rglob("*.py")):
+            self.assertIn(path.relative_to(ff.VENDOR).as_posix(), ff.FILES)
+
     def test_install_skill_copies_every_listed_file(self):
         text = (REPO / "skills/factory-install/SKILL.md").read_text()
         for rel in ff.FILES:

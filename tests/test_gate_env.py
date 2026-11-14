@@ -29,6 +29,17 @@ class GateEnvTest(unittest.TestCase):
         for name in SECRETS:
             self.assertNotIn(name, seen)
 
+    def test_checks_run_without_other_runtimes_credentials(self):
+        gate = load_script("gate_other_under_test", VENDOR / "factory/bin/gate")
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "checks.sh"
+            script.write_text('echo "${OPENAI_API_KEY:-unset} ${CURSOR_API_KEY:-unset}"\n')
+            with mock.patch.object(gate, "CHECKS", script), \
+                    mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk", "CURSOR_API_KEY": "cur"}):
+                code, out, _ = gate.run_checks(tmp)
+        self.assertEqual(code, 0)
+        self.assertIn("unset unset", out)
+
 
 class GateHookCase(unittest.TestCase):
     """gate --hook against a job whose worktree fails checks.sh."""

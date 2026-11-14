@@ -66,6 +66,48 @@ class WorkflowTest(CiCase):
         with self.assertRaises(SystemExit):
             self.out(self.runner.cmd_workflow, "latest")
 
+    def set_runtime(self, name):
+        path = self.p.root / "factory/config.json"
+        cfg = json.loads(path.read_text())
+        cfg["runtime"] = name
+        path.write_text(json.dumps(cfg))
+
+    def test_codex_installs_its_cli_and_maps_its_secret(self):
+        self.set_runtime("codex")
+        code, text = self.out(self.runner.cmd_workflow, "1.2.3")
+        self.assertEqual(code, 0)
+        self.assertIn("npm install -g @openai/codex@1.2.3", text)
+        self.assertIn("OPENAI_API_KEY: ${{ secrets.FACTORY_CODEX_TOKEN }}", text)
+        self.assertIn("GH_TOKEN: ${{ secrets.FACTORY_GH_TOKEN }}", text)
+        for absent in ("claude-code", "FACTORY_CLAUDE_TOKEN", "bubblewrap"):
+            self.assertNotIn(absent, text)
+        self.assertTrue(all((len(l) - len(l.lstrip(" "))) % 2 == 0 for l in text.splitlines()))
+
+    def test_copilot_maps_no_secret_and_keeps_gh_token(self):
+        self.set_runtime("copilot")
+        code, text = self.out(self.runner.cmd_workflow, "1.2.3")
+        self.assertEqual(code, 0)
+        self.assertIn("npm install -g @github/copilot@1.2.3", text)
+        tick = text.split("name: Factory tick", 1)[1].split("- name:", 1)[0]
+        self.assertEqual([l.strip() for l in tick.split("env:", 1)[1].strip().splitlines()],
+                         ["GH_TOKEN: ${{ secrets.FACTORY_GH_TOKEN }}"])
+
+    def test_cursor_is_refused_on_actions(self):
+        self.set_runtime("cursor")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as exit_:
+            self.out(self.runner.cmd_workflow, "1.2.3")
+        self.assertEqual(exit_.exception.code, 1)
+        self.assertIn("cursor's CLI has no pinned npm package", err.getvalue())
+
+    def test_cli_version_and_claude_version_are_the_same_flag(self):
+        for flag in ("--cli-version", "--claude-version"):
+            code, text = self.out(self.runner.main, ["workflow", flag, "2.1.3"])
+            self.assertEqual(code, 0)
+            self.assertIn("@anthropic-ai/claude-code@2.1.3", text)
+            self.assertIn("CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.FACTORY_CLAUDE_TOKEN }}", text)
+            self.assertIn("bubblewrap socat", text)
+
 
 class AskForCredentials(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -306,11 +348,40 @@ class TickCiTest(CiCase):
 
     def test_token_comes_from_the_environment_and_leaves_it(self):
         with mock.patch.dict(os.environ, {"CLAUDE_CODE_OAUTH_TOKEN": "tok"}):
-            self.assertEqual(self.runner.ci_token(), "tok")
+            self.assertEqual(self.runner.ci_token("CLAUDE_CODE_OAUTH_TOKEN"), "tok")
             self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", os.environ)
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
-            self.assertIsNone(self.runner.ci_token())
+            self.assertIsNone(self.runner.ci_token("CLAUDE_CODE_OAUTH_TOKEN"))
+
+    def test_codex_ci_tick_reads_its_key_and_removes_it(self):
+        path = self.p.root / "factory/config.json"
+        path.write_text(json.dumps({**json.loads(path.read_text()), "runtime": "codex"}))
+        seen = {}
+
+        def tick_body(base, runner, token):
+            seen.update(token=token, left="OPENAI_API_KEY" in os.environ)
+            return 0
+
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}), \
+                mock.patch.object(self.runner, "tick_body", tick_body), \
+                mock.patch.object(self.runner, "restore_state", return_value=True), \
+                mock.patch.object(self.runner, "save_state", return_value=True), \
+                mock.patch.object(self.runner.signal, "signal"):
+            self.assertEqual(self.runner.cmd_tick(ci=True), 0)
+        self.assertEqual(seen, {"token": "sk-test", "left": False})
+
+    def test_missing_codex_secret_names_it(self):
+        path = self.p.root / "factory/config.json"
+        path.write_text(json.dumps({**json.loads(path.read_text()), "runtime": "codex"}))
+        self.p.commit_all("codex")
+        base, runner = self.runner.load_config()
+        with mock.patch.object(self.runner, "chores"), mock.patch.object(self.runner, "has_work", return_value=True), \
+                mock.patch.object(self.runner, "run_orchestrate") as run_orchestrate:
+            self.assertEqual(self.runner.tick_body(base, runner, ""), 1)
+        run_orchestrate.assert_not_called()
+        self.assertIn("OPENAI_API_KEY isn't set; add the FACTORY_CODEX_TOKEN secret",
+                      (self.p.root / "factory/jobs/runner.log").read_text())
 
     def test_missing_token_with_work_logs_the_secret_to_add(self):
         base, runner = self.runner.load_config()

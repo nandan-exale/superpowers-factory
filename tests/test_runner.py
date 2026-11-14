@@ -18,13 +18,16 @@ from installed_project import VENDOR, InstalledProject, git, load_script
 
 FAKE_ORCHESTRATE = """#!{python}
 import json, os, signal, sys, time
+CREDENTIALS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CURSOR_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
 with open(os.environ["FAKE_RECORD"], "a") as f:
     f.write(json.dumps({{"tool": "orchestrate", "argv": sys.argv[1:],
         "has_token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") == "tok-123",
         "has_api_key": "ANTHROPIC_API_KEY" in os.environ,
         "has_base_url": "ANTHROPIC_BASE_URL" in os.environ,
         "scrub": os.environ.get("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"),
-        "runner": os.environ.get("FACTORY_RUNNER")}}) + "\\n")
+        "runner": os.environ.get("FACTORY_RUNNER"),
+        "env": {{k: v for var in CREDENTIALS for k, v in ((var + "_set", var in os.environ),
+                                                          (var + "_is_test", os.environ.get(var) == "tok-123"))}}}}) + "\\n")
 def stopped(signum, frame):
     open(os.environ["FAKE_RECORD"] + ".sigterm", "w").close()
     sys.exit(1)
@@ -135,6 +138,17 @@ class RunnerCase(unittest.TestCase):
     def log_lines(self):
         path = self.p.root / "factory/jobs/runner.log"
         return path.read_text().splitlines() if path.exists() else []
+
+    def put_on_path(self, name):
+        """A fake agent CLI that records that it ran (the tick only checks it is installed)."""
+        path = self.p.fakebin / name
+        path.write_text(FAKE_CLAUDE.format(python=sys.executable))
+        path.chmod(0o755)
+
+    def token_lookups(self):
+        """The Keychain or secret-tool lookups this tick made, as (tool, service) pairs."""
+        return [(c["tool"], c["argv"][c["argv"].index("-s") + 1] if c["tool"] == "security" else c["argv"][-1])
+                for c in self.calls("security") + self.calls("secret-tool")]
 
     def edit_config(self, change):
         path = self.p.root / "factory/config.json"
@@ -284,6 +298,60 @@ class TickTest(RunnerCase):
         res = self.runner("tick", FAKE_ORCHESTRATE_EXIT="3")
         self.assertEqual(res.returncode, 1)
         self.assertIn(" ran exit=3 ", self.log_lines()[-1])
+
+    def test_codex_runtime_gets_its_key_and_no_other_credential(self):
+        self.edit_config(lambda c: c.update(runtime="codex"))
+        self.put_on_path("codex")
+        self.set_issues(self.WORK)
+        res = self.runner("tick", ANTHROPIC_API_KEY="leak", CURSOR_API_KEY="leak", CLAUDE_CODE_OAUTH_TOKEN="leak")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        [call] = self.calls("orchestrate")
+        env = call["env"]
+        self.assertTrue(env["OPENAI_API_KEY_is_test"])
+        self.assertFalse(env["ANTHROPIC_API_KEY_set"] or env["CURSOR_API_KEY_set"] or env["CLAUDE_CODE_OAUTH_TOKEN_set"])
+        self.assertTrue(set(self.token_lookups()) <= {("security", "factory-codex-token"),
+                                                       ("secret-tool", "factory-codex-token")})
+        self.assertTrue(self.token_lookups())
+        self.assertNotIn("tok-123", "\n".join(self.log_lines()))
+
+    @unittest.skipUnless(sys.platform == "darwin", "Keychain only; Linux tokens are in test_runner_linux")
+    def test_missing_codex_token_names_its_keychain_item(self):
+        self.edit_config(lambda c: c.update(runtime="codex"))
+        self.put_on_path("codex")
+        self.set_issues(self.WORK)
+        res = self.runner("tick", FAKE_SECURITY_EXIT="44", FAKE_SECURITY_OUT="")
+        self.assertEqual(res.returncode, 1)
+        self.assertTrue(self.log_lines()[-1].endswith(
+            "error: no token in Keychain item factory-codex-token; store your codex credential there"))
+
+    def test_copilot_needs_no_stored_credential(self):
+        self.edit_config(lambda c: c.update(runtime="copilot"))
+        self.put_on_path("copilot")
+        self.set_issues(self.WORK)
+        res = self.runner("tick", FAKE_SECURITY_EXIT="44", FAKE_SECURITY_OUT="", FAKE_SECRET_TOOL_EXIT="1",
+                          FAKE_SECRET_TOOL_OUT="", CLAUDE_CODE_OAUTH_TOKEN="leak")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        [call] = self.calls("orchestrate")
+        self.assertFalse(any(call["env"][f"{var}_set"] for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+                                                                     "CURSOR_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")))
+        self.assertEqual(self.token_lookups(), [])
+
+    def test_missing_cli_names_the_runtime_binary(self):
+        self.edit_config(lambda c: c.update(runtime="cursor"))
+        self.set_issues(self.WORK)
+        bin2 = self.tmp / "bin2"
+        bin2.mkdir()
+        shutil.copy2(self.p.fakebin / "gh", bin2 / "gh")
+        res = self.runner("tick", PATH=os.pathsep.join((str(bin2), str(self.p.toolbin), "/usr/bin", "/bin")))
+        self.assertEqual(res.returncode, 1)
+        self.assertTrue(self.log_lines()[-1].endswith(" error: cursor-agent not found on PATH"))
+        self.assertEqual(self.calls("orchestrate"), [])
+
+    def test_unknown_runtime_is_a_config_error(self):
+        self.edit_config(lambda c: c.update(runtime="nope"))
+        res = self.runner("tick")
+        self.assertEqual(res.returncode, 1)
+        self.assertRegex(self.log_lines()[-1], r" error: config: .*runtime 'nope'")
 
     def test_every_tick_logs_exactly_one_line(self):
         self.runner("tick")
