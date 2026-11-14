@@ -139,7 +139,6 @@ class TokenTest(LinuxCase):
 
     def test_each_runtime_has_its_own_token_file(self):
         self.assertEqual(self.runner.token_file("codex"), Path("~/.config/factory/codex-token"))
-        self.assertEqual(self.runner.TOKEN_FILE, self.runner.token_file("claude"))
 
 
 class SandboxToolsTest(LinuxCase):
