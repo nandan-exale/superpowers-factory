@@ -4,7 +4,7 @@
 Usage:
   gate <job-id>            write round-N/checks.md; exit 0 on PASS, 1 on FAIL
   gate <job-id> --merge    same, as round-N/merge-checks.md (job merge runs it)
-  gate --hook              builder SubagentStop hook: run the checks once, exit 2 on failure
+  gate --hook              the builder's Stop hook: run the checks once, exit 2 on failure
 
 The gate runs the main checkout's factory/checks.sh inside the job's worktree,
 so a branch can't change the checks it is judged by. It also fails when the
@@ -134,14 +134,20 @@ def gate(job_id, merge):
     sys.exit(0 if verdict == "PASS" else 1)
 
 
+def job_from_transcript(event):
+    """The job id from the first prompt line `Job: <id>.` of a subagent's transcript."""
+    path = event.get("agent_transcript_path") or event["transcript_path"]
+    with open(Path(path).expanduser()) as f:
+        content = json.loads(f.readline())["message"]["content"]
+    prompt = content if isinstance(content, str) else " ".join(b.get("text", "") for b in content)
+    return prompt.split("Job: ", 1)[1].split(".", 1)[0]
+
+
 def hook():
     event = json.load(sys.stdin)
     if event.get("stop_hook_active"):
         sys.exit(0)  # one nudge per stop; the gate decides
-    with open(Path(event["agent_transcript_path"]).expanduser()) as f:
-        content = json.loads(f.readline())["message"]["content"]
-    prompt = content if isinstance(content, str) else " ".join(b.get("text", "") for b in content)
-    job_id = prompt.split("Job: ", 1)[1].split(".", 1)[0]
+    job_id = os.environ.get("FACTORY_JOB") or job_from_transcript(event)
     job = json.loads((FACTORY / "jobs" / job_id / "job.json").read_text())
     code, log, _ = run_checks(job["worktree"])
     if code != 0:
