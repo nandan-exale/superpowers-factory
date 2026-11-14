@@ -166,9 +166,20 @@ class Pipeline:
         job = self.cli.state(job_id)
         return [self.make(job_id, "spec-writer", self.head(job), job["worktree"], ("spec.md",))]
 
+    def unread_feedback(self, job_id):
+        """feedback-<k>.md written after build.md: the user's feedback (or PR comments) no builder has had."""
+        folder = self.folder(job_id)
+        build = folder / "build.md"
+        since = build.stat().st_mtime_ns if build.exists() else -1
+        files = [p for p in folder.glob("feedback-*.md") if p.stat().st_mtime_ns > since]
+        return [p.name for p in sorted(files, key=lambda p: int(re.sub(r"\D", "", p.name) or 0))]
+
     def builder(self, job_id, why="", resuming=False):
         job = self.cli.state(job_id)
         n, port = job["round"], prompts.port(self.cfg, job_id, "builder")
+        files = self.unread_feedback(job_id) if resuming and not why else []
+        if files:
+            why = prompts.feedback(files, n)
         session = (job.get("sessions") or {}).get("builder")
         same_agent = prompts.build(self.head(job), n, port, why)
         # A fresh builder after round 1, or on a resume, must first find out how far the last one got.

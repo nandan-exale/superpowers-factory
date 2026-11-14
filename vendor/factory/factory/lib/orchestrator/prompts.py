@@ -56,5 +56,10 @@ def pr_arrived(files, n):
     return f"PR comments arrived: read {' '.join(files)} and address them, push, and update build.md for round {n}."
 
 
+def feedback(files, n):
+    return (f"The user gave feedback: read {' '.join(files)} and address them, push, and update build.md "
+            f"for round {n}.")
+
+
 def refused(text):
     return f"The factory refused your result:\n\n{text}\n\nFix that, then reply again."
