@@ -135,6 +135,13 @@ def check_config():
             names = watch.get("ignore_workflows", [])
             if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
                 problems.append(fail("watch.ignore_workflows must be a list of workflow names"))
+    notify = cfg.get("notify")
+    if notify is not None:
+        command = notify.get("command") if isinstance(notify, dict) else None
+        if not isinstance(command, list) or not command or not all(isinstance(a, str) for a in command):
+            problems.append(fail("notify.command must be a non-empty list of strings"))
+        elif not (os.access(command[0], os.X_OK) or shutil.which(command[0])):
+            problems.append(warn(f"notify.command: {command[0]} not found; the factory can't notify you"))
     risky = cfg.get("risky_paths", [])
     if not isinstance(risky, list) or not all(isinstance(p, str) and p for p in risky):
         problems.append(fail("risky_paths must be a list of glob strings"))
