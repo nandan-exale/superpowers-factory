@@ -3,17 +3,19 @@
 Every adapter has:
   NAME          its config name
   BINARY        the CLI it starts; orchestrate refuses to run when it isn't on PATH
+  NPM_PACKAGE   the npm package that installs BINARY, or None when npm can't
   CAPS          {"resume": bool, "reports_cost": bool, "reports_tokens": bool, "efforts": [...]}
   build(run)    -> (argv, env). `run` is the dict orchestrator.loop builds: repo, job_id, role,
-                   access, model, effort, system_path, settings_dir, stem, resume, session_id.
-                   The prompt goes to the process on stdin.
+                   access, model, effort, system_path, prompt_path, settings_dir, stem, resume,
+                   session_id. The prompt goes to the process on stdin; an adapter may rewrite
+                   prompt_path before the loop opens it.
   parse(stdout) -> {"session_id", "model", "usage", "cost_usd", "cost_source", "cost_by_model",
                    "error"}; ValueError when stdout has no result.
 """
 
 import importlib
 
-NAMES = ("claude",)
+NAMES = ("claude", "codex", "opencode", "copilot", "cursor")
 
 
 def load(name):
