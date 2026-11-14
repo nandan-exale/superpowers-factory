@@ -46,19 +46,19 @@
     "cursor":   { "tiers": {}, "efforts": [], "credential_env": "CURSOR_API_KEY" }
   },
   "agents": {
-    "intake": { "tier": "frontier", "effort": "high" },
+    "intake": { "tier": "strong", "effort": "high" },
     "learner": { "tier": "strong", "effort": "high" }
   },
   "routing": {
     "low": {
       "spec-writer": { "tier": "strong",   "effort": "medium" },
-      "builder":     { "tier": "strong",   "effort": "medium" },
+      "builder":     { "tier": "balanced", "effort": "medium" },
       "approver":    { "tier": "strong",   "effort": "medium" },
       "code":        { "tier": "fast",     "effort": "medium" }
     },
     "medium": {
       "spec-writer": { "tier": "strong",   "effort": "high" },
-      "builder":     { "tier": "strong",   "effort": "high" },
+      "builder":     { "tier": "balanced", "effort": "high" },
       "approver":    { "tier": "strong",   "effort": "high" },
       "code":        { "tier": "balanced", "effort": "high" }
     },
