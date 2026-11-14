@@ -66,7 +66,12 @@ def agent_prompt(agent):
 
 
 def model_for(agent, cfg):
-    """{model, effort} the factory gives `agent` on a medium-risk job."""
+    """{model, effort} the factory gives `agent` on a medium-risk job, with its tier as Claude's model."""
+    setting = setting_for(agent, cfg)
+    return {"model": cfg["runtimes"]["claude"]["tiers"][setting["tier"]], "effort": setting["effort"]}
+
+
+def setting_for(agent, cfg):
     if agent in cfg.get("agents", {}):
         return cfg["agents"][agent]
     role = agent.removeprefix("reviewer-")
