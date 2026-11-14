@@ -28,7 +28,9 @@ class JobCli:
         self.bin = self.repo / "factory" / "bin"
 
     def _run(self, argv, stdin=None):
-        res = subprocess.run(argv, cwd=self.repo, input=stdin, capture_output=True, text=True)
+        # Without input, the child gets /dev/null: it must never wait on the terminal orchestrate runs in.
+        feed = {"input": stdin} if stdin is not None else {"stdin": subprocess.DEVNULL}
+        res = subprocess.run(argv, cwd=self.repo, capture_output=True, text=True, **feed)
         return Out(res.returncode, res.stdout, res.stderr)
 
     def job(self, *args, stdin=None):
