@@ -43,6 +43,10 @@ factory/bin/route
 factory/bin/orchestrate
 factory/lib/runtimes/__init__.py
 factory/lib/runtimes/claude.py
+factory/lib/runtimes/codex.py
+factory/lib/runtimes/opencode.py
+factory/lib/runtimes/copilot.py
+factory/lib/runtimes/cursor.py
 factory/lib/orchestrator/__init__.py
 factory/lib/orchestrator/agents.py
 factory/lib/orchestrator/jobcli.py
@@ -87,10 +91,17 @@ It must be non-interactive, must not rewrite files (no `--fix`, no
   Add a path only when no job should ever change it. They are fnmatch
   patterns, so `*` also matches `/`.
 - `ports`: move `base` if the project already uses ports 5100–5199.
-- Leave `concurrency`, `max_rounds`, `model_aliases`, `effort_levels`,
-  `agents`, `routing`, `surface_reviewers` and `prices_usd_per_mtok` as they
-  are unless the user asks. Every agent's model and effort is set there, never
-  in `factory/agents/`.
+- `runtime`: the agent CLI that runs the factory's agents, one of `claude`,
+  `codex`, `opencode`, `copilot` or `cursor` (its CLI on `PATH` and logged
+  in). For anything but `claude`, set the model id for each tier routing uses
+  (`fast`, `balanced`, `strong`, `frontier`) in `runtimes.<runtime>.tiers`;
+  for codex, prices in `runtimes.codex.prices_usd_per_mtok` (without them its
+  cost shows as n/a). Copilot and cursor report no cost: set
+  `budgets.job_runs` and `budgets.daily_runs`.
+- Leave `concurrency`, `max_rounds`, `agents`, `routing`,
+  `surface_reviewers` and the rest of `runtimes` as they are unless the user
+  asks. Every agent's tier and effort is set there, never in
+  `factory/agents/`.
 
 **Agents.** The checklists are general on purpose. Tailor them to the stack
 without changing their structure, file names, first-line formats or one-line
@@ -173,8 +184,8 @@ so the install must be on that branch there before the first run.
 
 Then tell the user, in a few lines:
 
-- Label one or two small issues `factory`, then run `/factory run` in Claude
-  Code, or `factory/bin/orchestrate run` in a terminal, from the project root.
+- Label one or two small issues `factory`, then run `/factory run` in your
+  agent, or `factory/bin/orchestrate run` in a terminal, from the project root.
 - Every job ends as a PR. The approver merges what it approves; the rest wait
   labeled `factory:needs-human`. Approve one by merging it on GitHub, or tell
   the factory what to change with `/factory <anything>`.
