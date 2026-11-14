@@ -225,5 +225,12 @@
     "enabled": true,
     "max_minutes": 60,
     "ignore_workflows": []
+  },
+  "notify": {
+    "command": [
+      "osascript",
+      "-e",
+      "display notification (system attribute \"FACTORY_NOTIFY_MESSAGE\") with title (system attribute \"FACTORY_NOTIFY_TITLE\")"
+    ]
   }
 }
