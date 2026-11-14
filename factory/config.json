@@ -4,7 +4,9 @@
   "budgets": {
     "job_usd": 15,
     "job_hours": 6,
-    "daily_usd": 100
+    "daily_usd": 100,
+    "job_runs": null,
+    "daily_runs": null
   },
   "learning": {
     "threshold": 3,
@@ -43,81 +45,68 @@
   "pr_feedback": {
     "allowed": []
   },
-  "model_aliases": [
-    "fable",
-    "opus",
-    "sonnet",
-    "haiku"
-  ],
-  "effort_levels": [
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max"
-  ],
   "agents": {
     "intake": {
-      "model": "sonnet",
+      "tier": "balanced",
       "effort": "high"
     },
     "learner": {
-      "model": "sonnet",
+      "tier": "balanced",
       "effort": "high"
     }
   },
   "routing": {
     "low": {
       "spec-writer": {
-        "model": "sonnet",
+        "tier": "balanced",
         "effort": "medium"
       },
       "builder": {
-        "model": "sonnet",
+        "tier": "balanced",
         "effort": "medium"
       },
       "approver": {
-        "model": "sonnet",
+        "tier": "balanced",
         "effort": "medium"
       },
       "code": {
-        "model": "haiku",
+        "tier": "fast",
         "effort": "medium"
       }
     },
     "medium": {
       "spec-writer": {
-        "model": "sonnet",
+        "tier": "balanced",
         "effort": "high"
       },
       "builder": {
-        "model": "sonnet",
+        "tier": "balanced",
         "effort": "high"
       },
       "approver": {
-        "model": "sonnet",
+        "tier": "balanced",
         "effort": "high"
       },
       "code": {
-        "model": "sonnet",
+        "tier": "balanced",
         "effort": "high"
       }
     },
     "high": {
       "spec-writer": {
-        "model": "opus",
+        "tier": "strong",
         "effort": "high"
       },
       "builder": {
-        "model": "opus",
+        "tier": "strong",
         "effort": "high"
       },
       "approver": {
-        "model": "sonnet",
+        "tier": "balanced",
         "effort": "high"
       },
       "code": {
-        "model": "sonnet",
+        "tier": "balanced",
         "effort": "high"
       }
     }
@@ -125,17 +114,17 @@
   "surface_reviewers": {
     "ui": {
       "ux": {
-        "model": "sonnet",
+        "tier": "balanced",
         "effort": "medium"
       },
       "ui": {
-        "model": "haiku",
+        "tier": "fast",
         "effort": "medium"
       }
     },
     "security": {
       "security": {
-        "model": "opus",
+        "tier": "strong",
         "effort": "high"
       }
     }
@@ -150,43 +139,6 @@
   "ports": {
     "base": 5100,
     "step": 10
-  },
-  "prices_usd_per_mtok": {
-    "claude-fable-5-2": {
-      "input": 8.0,
-      "output": 40.0,
-      "cache_write_5m": 10.0,
-      "cache_write_1h": 16.0,
-      "cache_read": 0.2
-    },
-    "claude-fable-5-1": {
-      "input": 10.0,
-      "output": 50.0,
-      "cache_write_5m": 12.5,
-      "cache_write_1h": 20.0,
-      "cache_read": 0.25
-    },
-    "claude-opus-5-5": {
-      "input": 4.0,
-      "output": 20.0,
-      "cache_write_5m": 5.0,
-      "cache_write_1h": 8.0,
-      "cache_read": 0.2
-    },
-    "claude-sonnet-5-5": {
-      "input": 2.0,
-      "output": 10.0,
-      "cache_write_5m": 2.5,
-      "cache_write_1h": 4.0,
-      "cache_read": 0.2
-    },
-    "claude-haiku-5-5": {
-      "input": 0.1,
-      "output": 0.5,
-      "cache_write_5m": 0.125,
-      "cache_write_1h": 0.2,
-      "cache_read": 0.01
-    }
   },
   "digest": {
     "enabled": true,
@@ -232,5 +184,87 @@
       "-e",
       "display notification (system attribute \"FACTORY_NOTIFY_MESSAGE\") with title (system attribute \"FACTORY_NOTIFY_TITLE\")"
     ]
-  }
+  },
+  "runtimes": {
+    "claude": {
+      "prices_usd_per_mtok": {
+        "claude-fable-5-2": {
+          "input": 8.0,
+          "output": 40.0,
+          "cache_write_5m": 10.0,
+          "cache_write_1h": 16.0,
+          "cache_read": 0.2
+        },
+        "claude-fable-5-1": {
+          "input": 10.0,
+          "output": 50.0,
+          "cache_write_5m": 12.5,
+          "cache_write_1h": 20.0,
+          "cache_read": 0.25
+        },
+        "claude-opus-5-5": {
+          "input": 4.0,
+          "output": 20.0,
+          "cache_write_5m": 5.0,
+          "cache_write_1h": 8.0,
+          "cache_read": 0.2
+        },
+        "claude-sonnet-5-5": {
+          "input": 2.0,
+          "output": 10.0,
+          "cache_write_5m": 2.5,
+          "cache_write_1h": 4.0,
+          "cache_read": 0.2
+        },
+        "claude-haiku-5-5": {
+          "input": 0.1,
+          "output": 0.5,
+          "cache_write_5m": 0.125,
+          "cache_write_1h": 0.2,
+          "cache_read": 0.01
+        }
+      },
+      "tiers": {
+        "fast": "haiku",
+        "balanced": "sonnet",
+        "strong": "opus",
+        "frontier": "fable"
+      },
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "credential_env": "CLAUDE_CODE_OAUTH_TOKEN"
+    },
+    "codex": {
+      "tiers": {},
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "credential_env": "OPENAI_API_KEY",
+      "prices_usd_per_mtok": {}
+    },
+    "opencode": {
+      "tiers": {},
+      "efforts": [],
+      "credential_env": null,
+      "prices_usd_per_mtok": {}
+    },
+    "copilot": {
+      "tiers": {},
+      "efforts": [],
+      "credential_env": null
+    },
+    "cursor": {
+      "tiers": {},
+      "efforts": [],
+      "credential_env": "CURSOR_API_KEY"
+    }
+  },
+  "runtime": "claude"
 }

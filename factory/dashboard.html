@@ -409,6 +409,11 @@ function links(job) {
   return out.join('')
 }
 
+// A runtime that reports no cost (and has no token prices) shows how many agent runs the job took.
+function costText(job) {
+  return job.cost_known === false ? `n/a (${job.runs} runs)` : `$${Number(job.cost_usd).toFixed(2)}`
+}
+
 function card(job, rounds) {
   const live = LIVE.has(job.stage)
   const human = job.stage === 'needs-human'
@@ -420,7 +425,7 @@ function card(job, rounds) {
   const risk = job.intake?.risk
   const meta = [
     risk ? `<span class="risk-${esc(risk)}">${esc(risk)}</span>` : '',
-    `<span>$${Number(job.cost_usd).toFixed(2)}${job.job_usd ? ` / $${Number(job.job_usd).toFixed(2)}` : ''}</span>`,
+    `<span>${costText(job)}${job.cost_known !== false && job.job_usd ? ` / $${Number(job.job_usd).toFixed(2)}` : ''}</span>`,
     `<span>${elapsed(job)}</span>`,
   ].join('')
   return `
@@ -547,7 +552,7 @@ const firstLines = new Map()
 async function refreshDrawer() {
   const job = jobs.find((j) => j.id === openJobId)
   if (!job) return
-  $('d-num').textContent = `${job.id} · ${job.stage}${job.round ? ` · round ${job.round}` : ''} · $${Number(job.cost_usd).toFixed(2)} · ${elapsed(job)}`
+  $('d-num').textContent = `${job.id} · ${job.stage}${job.round ? ` · round ${job.round}` : ''} · ${costText(job)} · ${elapsed(job)}`
   $('d-title').textContent = job.title
   $('d-links').innerHTML = links(job)
 

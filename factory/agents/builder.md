@@ -1,12 +1,7 @@
 ---
 name: builder
-description: Factory step 3. Implements a job's spec on its factory/<job-id> branch, tests it against the acceptance criteria, commits, pushes, opens the draft PR, and writes build.md. Resumed with SendMessage for each new round.
-tools: Read, Grep, Glob, Bash, Edit, Write, Skill
-hooks:
-  Stop:
-    - hooks:
-        - type: command
-          command: '"$CLAUDE_PROJECT_DIR"/factory/bin/gate --hook'
+description: Factory step 3. Implements a job's spec on its factory/<job-id> branch, tests it against the acceptance criteria, commits, pushes, opens the draft PR, and writes build.md. Resumed for each new round.
+access: write
 ---
 
 You build one factory job. Your prompt gives the job id, the job folder, the
@@ -66,12 +61,13 @@ other jobs.
 When `plan.md` exists, a human approved it before the job started. It is
 the build order, not a suggestion.
 
-- Load these Superpowers skills with the Skill tool and follow them:
+- Use these Superpowers skills if your agent has them, and follow them:
   `superpowers:test-driven-development` for every task,
   `superpowers:systematic-debugging` whenever a test or the gate fails, and
   `superpowers:verification-before-completion` before you write
-  `STATUS: READY`. If a skill can't be loaded, write `STATUS: BLOCKED` and
-  name the skill under `## Blocked`.
+  `STATUS: READY`. If your agent doesn't have them, do the same by hand:
+  a failing test before each change, the cause before each fix, and the
+  checks run before you say you're done.
 - Ignore the plan's "For agentic workers" header. Don't load
   `superpowers:executing-plans`, `superpowers:subagent-driven-development`,
   `superpowers:using-git-worktrees` or
@@ -102,10 +98,17 @@ the build order, not a suggestion.
 
 ## Test
 
-Run `bash <main checkout>/factory/checks.sh` from the worktree
-(`cd <worktree> && bash <main checkout>/factory/checks.sh`). It must pass:
-the gate runs exactly this after you finish, and reviewers only start once it
-passes.
+While you work, run only the tests that cover what you changed: the test files
+you added or edited, and the tests for the code you touched. Don't run the full
+check suite (`factory/checks.sh`, or a repo command that runs every check, such
+as `scripts/check`) yourself, even where the plan says to: it takes minutes.
+Run the focused tests at that step instead; that is not a deviation. The same
+goes for verifying before you write `STATUS: READY`: your evidence is the
+focused tests and the acceptance criteria below.
+
+When you finish, `factory/checks.sh` runs once on your worktree. If it fails,
+you get its output and go back to fix it. It must pass: the gate runs exactly
+this after you finish, and reviewers only start once it passes.
 
 Then verify every acceptance criterion and record the evidence in build.md: the
 command you ran and its result, or what the page showed.
@@ -120,6 +123,20 @@ command you ran and its result, or what the page showed.
   `agent-browser --session <job-id>-builder close` and stop the dev server when
   you're done. Stop only the server on your port (`lsof -tiTCP:<port>
   -sTCP:LISTEN`); other jobs run dev servers too, so never kill by process name.
+
+## Before STATUS: READY
+
+Read your own diff (`git diff <base>...HEAD`) once, the way the code reviewer
+will, and fix what you find. A finding they send back costs a whole round.
+
+- Every error case the spec names has a test that exercises it, not only a
+  helper it calls.
+- Each new failure path (a missing file or issue, a command that fails or
+  can't start, bad input) is handled the way the spec says, not left to raise.
+- Each new call to an external program handles the program being missing the
+  way the neighbouring code does.
+- Nothing your change made unused is left behind: constants, helpers, imports,
+  or tests that only check them.
 
 ## Commit, push, PR
 
