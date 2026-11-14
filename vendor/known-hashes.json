@@ -252,16 +252,19 @@
     "0d99674338850e7f3d76d6c76588e9c2551656d24f203b1c9841c026ed890ec8"
   ],
   "factory/lib/orchestrator/jobcli.py": [
+    "0e26eaf1f48ee069df44603c001cbfd953061b3e169e32f8ede306e15acecd00",
     "b6e110df3bb4eb79a444ea16bb8ad4ac532b718de04873bb47e43ebd5473199f"
   ],
   "factory/lib/orchestrator/loop.py": [
     "05d3a707fbe3a7d3627e70dcd178fa89b0526d3a257c6df24dd3d14921436885"
   ],
   "factory/lib/orchestrator/pipeline.py": [
+    "5e736c48dc7593827ddcb7cc2de70b92f47b15aed9ff134a2d60f6fab2680f97",
     "6df6031ca8554927c97549ca36e13d2e0a50481c330129db6910739b7cee56d9"
   ],
   "factory/lib/orchestrator/prompts.py": [
-    "06584c376e482b7689c6c0647d527da9575c067c19e71d348f38cb05ada1ccfa"
+    "06584c376e482b7689c6c0647d527da9575c067c19e71d348f38cb05ada1ccfa",
+    "2fe4057328f4fdf48c92547d17bb0e034ca3bafa8ca9bcd071313dc75b6de8b1"
   ],
   "factory/lib/orchestrator/readonly.py": [
     "37354b7917ad57163af41efef6d8f6a08137f5bb87c8a1eb0889595bad71c40f"

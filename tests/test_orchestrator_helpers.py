@@ -1,3 +1,4 @@
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -80,6 +81,26 @@ class JobCliTest(unittest.TestCase):
             self.assertEqual(out.out.strip(), "args advance 001-x spec hi")
             self.assertFalse(cli.job("bad").ok)
             self.assertEqual(cli.job("bad").code, 3)
+
+    def test_scripts_never_read_the_orchestrator_s_stdin(self):
+        # A `job` call without input must not wait on (or read) the terminal orchestrate runs in.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "factory" / "bin").mkdir(parents=True)
+            (repo / "factory" / "bin" / "job").write_text("import sys\nprint(repr(sys.stdin.read()))\n")
+            code = ("import sys; sys.path.insert(0, sys.argv[1]); from orchestrator import jobcli; "
+                    "print(jobcli.JobCli(sys.argv[2]).job('queue').out, end='')")
+            lib = str(PLUGIN / "vendor" / "factory" / "factory" / "lib")
+            proc = subprocess.Popen([sys.executable, "-c", code, lib, tmp], stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE, text=True)
+            self.addCleanup(proc.stdin.close)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                self.fail("job waited on the orchestrator's stdin")
+            self.assertEqual(proc.stdout.read().strip(), "''")
+            proc.stdout.close()
 
 
 if __name__ == "__main__":
