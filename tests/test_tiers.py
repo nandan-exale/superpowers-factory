@@ -41,7 +41,7 @@ class TierCase(unittest.TestCase):
 
 class TierTest(TierCase):
     def test_claude_resolves_tier_to_alias(self):
-        self.configure()
+        self.configure(agents__intake={"tier": "frontier", "effort": "high"})
         self.assertEqual(self.agent("intake"), ["model=fable effort=high"])
 
     def test_other_runtime_uses_its_tiers_and_nearest_lower_effort(self):

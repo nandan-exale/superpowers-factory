@@ -4,13 +4,14 @@ import json
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 
 from factory_project import FactoryProject
 
 INTAKE = "DECISION: {decision}\nRISK: {risk}\nSURFACES: {surfaces}\nRESCOPED: no\n\n## Summary\n- test\n"
 LOW = {
     "spec-writer": {"tier": "strong", "effort": "medium"},
-    "builder": {"tier": "strong", "effort": "medium"},
+    "builder": {"tier": "balanced", "effort": "medium"},
     "approver": {"tier": "strong", "effort": "medium"},
     "reviewers": {"code": {"tier": "fast", "effort": "medium"}},
 }
@@ -78,10 +79,16 @@ class RouteTest(RoutingTestCase):
             "security": {"tier": "strong", "effort": "high"},
         })
 
+    def test_medium_risk_builder_is_balanced(self):
+        # Builders were 71% of the factory's tokens; Opus builds only high-risk jobs by default.
+        self.accept("medium")
+        self.route()
+        self.assertEqual(self.job.load(self.job_id)["agents"]["builder"], {"tier": "balanced", "effort": "high"})
+
     def test_route_prints_every_agent(self):
         self.accept("low")
         out = self.route()
-        self.assertIn("builder strong/medium", out)
+        self.assertIn("builder balanced/medium", out)
         self.assertIn("code fast/medium", out)
 
     def test_route_refuses_job_intake_did_not_accept(self):
@@ -132,12 +139,12 @@ class RouteValidationTest(RoutingTestCase):
 
 class AgentTest(RoutingTestCase):
     def test_intake_from_config(self):
-        self.assertEqual(self.agent("intake"), "model=fable effort=high")
+        self.assertEqual(self.agent("intake"), "model=opus effort=high")
 
     def test_routed_agent_and_reviewer(self):
         self.accept("medium", "ui")
         self.route()
-        self.assertEqual(self.agent("builder"), "model=opus effort=high")
+        self.assertEqual(self.agent("builder"), "model=sonnet effort=high")
         self.assertEqual(self.agent("reviewer-ux"), "model=sonnet effort=medium")
 
     def test_role_before_routing_exits(self):
@@ -162,11 +169,11 @@ class AgentTest(RoutingTestCase):
         self.assertEqual(self.agent("builder"), "model=sonnet effort=low")
 
     def test_missing_tier_exits_naming_the_key(self):
-        self.edit_config(lambda c: c["runtimes"]["claude"]["tiers"].pop("frontier"))
+        self.edit_config(lambda c: c["runtimes"]["claude"]["tiers"].pop("strong"))
         res = subprocess.run([str(self.project.repo / "factory" / "bin" / "job"), "agent", self.job_id, "intake"],
                              capture_output=True, text=True)
         self.assertEqual(res.returncode, 1)
-        self.assertIn("runtimes.claude.tiers.frontier isn't set", res.stderr)
+        self.assertIn("runtimes.claude.tiers.strong isn't set", res.stderr)
 
 
 class RouteWrapperTest(RoutingTestCase):
@@ -177,6 +184,12 @@ class RouteWrapperTest(RoutingTestCase):
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("code fast/medium", res.stdout)
         self.assertEqual(json.loads((self.d / "job.json").read_text())["agents"], LOW)
+
+
+class DefaultAgentsTest(unittest.TestCase):
+    def test_intake_runs_on_the_strong_tier(self):
+        cfg = json.loads((Path(__file__).resolve().parents[1] / "vendor/factory/factory/config.json").read_text())
+        self.assertEqual(cfg["agents"]["intake"], {"tier": "strong", "effort": "high"})
 
 
 if __name__ == "__main__":

@@ -35,7 +35,7 @@ class AgentTest(EvalCase):
             self.ev.agent_prompt("nope")
 
     def test_model_for_each_kind_of_agent(self):
-        self.assertEqual(self.ev.model_for("intake", self.cfg), {"model": "fable", "effort": "high"})
+        self.assertEqual(self.ev.model_for("intake", self.cfg), {"model": "opus", "effort": "high"})
         self.assertEqual(self.ev.model_for("reviewer-code", self.cfg), {"model": "sonnet", "effort": "high"})
         self.assertEqual(self.ev.model_for("approver", self.cfg), {"model": "opus", "effort": "high"})
         self.assertEqual(self.ev.model_for("reviewer-security", self.cfg), {"model": "opus", "effort": "high"})

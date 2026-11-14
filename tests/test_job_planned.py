@@ -56,7 +56,7 @@ class PlannedSuccessTest(PlannedTestCase):
         self.assertTrue(job["planned"])
         self.assertEqual(job["agents"], {
             "spec-writer": {"tier": "strong", "effort": "high"},
-            "builder": {"tier": "strong", "effort": "high"},
+            "builder": {"tier": "balanced", "effort": "high"},
             "approver": {"tier": "strong", "effort": "high"},
             "reviewers": {"code": {"tier": "balanced", "effort": "high"},
                           "ux": {"tier": "balanced", "effort": "medium"},
@@ -83,7 +83,7 @@ class PlannedSuccessTest(PlannedTestCase):
         self.project.set_issue(plan_body(self.project.sha, risk="low", surfaces="[]"))
         self.job.cmd_planned(self.load())
         self.assertEqual(self.load()["agents"]["reviewers"], {"code": {"tier": "fast", "effort": "medium"}})
-        self.assertEqual(self.load()["agents"]["builder"], {"tier": "strong", "effort": "medium"})
+        self.assertEqual(self.load()["agents"]["builder"], {"tier": "balanced", "effort": "medium"})
 
     def test_planned_job_records_its_spec_and_plan_paths(self):
         self.job.cmd_planned(self.load())
