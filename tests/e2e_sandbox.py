@@ -59,7 +59,9 @@ with open(os.environ["FAKE_RECORD"], "a") as f:
 '''
 
 FAKE_SECURITY = r'''
-import os, sys
+import json, os, sys
+with open(os.environ["FAKE_RECORD"], "a") as f:
+    f.write(json.dumps({"tool": "security", "argv": sys.argv[1:]}) + "\n")
 sys.exit(int(os.environ.get("FAKE_SECURITY_EXIT", "1")))
 '''
 
@@ -113,6 +115,9 @@ class E2ESandbox:
 
     def claude_calls(self):
         return [c for c in self.calls() if isinstance(c, dict) and c["tool"] == "claude"]
+
+    def security_calls(self):
+        return [c["argv"] for c in self.calls() if isinstance(c, dict) and c["tool"] == "security"]
 
     def orchestrate_calls(self):
         return [c for c in self.calls() if isinstance(c, dict) and c["tool"] == "orchestrate"]

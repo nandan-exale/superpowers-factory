@@ -358,5 +358,39 @@ class MainTest(E2ECase):
         self.assertEqual(self.sb.orchestrate_calls(), [])
         self.assertFalse(any(c[:2] == ["issue", "create"] for c in self.sb.gh_calls()))
 
+    TIERS = [a for t in ("fast", "balanced", "strong", "frontier") for a in ("--tier", f"{t}=m1")]
+
+    def test_runtime_and_tiers_go_into_the_scenario_config(self):
+        self.scenario("happy", HAPPY)
+        code, out = self.main("--max-usd", "5", "--runtime", "codex", *self.TIERS)
+        self.assertEqual(code, 0, out)
+        cfg = json.loads(git(self.tmp, "--git-dir", str(self.sb.bare), "show", "main~1:factory/config.json"))
+        self.assertEqual(cfg["runtime"], "codex")
+        self.assertEqual(cfg["runtimes"]["codex"]["tiers"],
+                         {"fast": "m1", "balanced": "m1", "strong": "m1", "frontier": "m1"})
+        self.assertEqual(cfg["runtimes"]["codex"]["efforts"], ["low", "medium", "high"])
+        self.assertEqual(cfg["budgets"]["job_usd"], 3)
+        self.assertEqual(self.sb.origin_config()["runtime"], "claude")
+
+    def test_another_runtime_needs_every_tier(self):
+        self.scenario("happy", HAPPY)
+        code, out = self.main("--max-usd", "5", "--runtime", "codex")
+        self.assertEqual(code, 2, out)
+        self.assertIn("--runtime codex needs --tier for fast, balanced, strong, frontier", out)
+        code, out = self.main("--max-usd", "5", "--runtime", "codex", "--tier", "fast=m1")
+        self.assertEqual(code, 2, out)
+        self.assertIn("--runtime codex needs --tier for balanced, strong, frontier", out)
+        self.assertEqual(self.sb.orchestrate_calls(), [])
+
+    def test_a_bad_tier_is_refused(self):
+        code, out = self.main("--max-usd", "5", "--tier", "huge=m1")
+        self.assertEqual(code, 2, out)
+        self.assertIn("--tier huge=m1", out)
+
+    def test_a_runner_scenario_looks_for_the_runtime_s_token(self):
+        self.scenario("tick", {**HAPPY, "drive": "runner"})
+        self.main("--max-usd", "5", "--runtime", "codex", *self.TIERS)
+        self.assertEqual(self.sb.security_calls(), [["find-generic-password", "-s", "factory-codex-token"]])
+
     def test_a_cap_of_zero_is_refused(self):
         self.assertEqual(self.main("--max-usd", "0")[0], 2)

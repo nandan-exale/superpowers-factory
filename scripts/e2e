@@ -2,6 +2,7 @@
 """Run real factory scenarios on a disposable sandbox repo, under a hard spend cap.
 
 Usage: scripts/e2e --sandbox <local clone of the sandbox repo> --max-usd 10 [--only <scenario>] [--keep]
+                   [--runtime <name> --tier fast=<model> --tier balanced=<model> ...]
 
 Spends real money with real agents: run it by hand, never in CI. Scenarios are
 tests/e2e/<name>/scenario.json; results go to e2e-results/<timestamp>/.
@@ -21,6 +22,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 PLUGIN = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PLUGIN / "vendor" / "factory" / "factory" / "lib"))
+import runtimes  # noqa: E402
+
+TIERS = ("fast", "balanced", "strong", "frontier")
 SCENARIOS = PLUGIN / "tests" / "e2e"
 RESULTS = PLUGIN / "e2e-results"
 NUMBERED = re.compile(r"\s*\d+\.\s+(.*)")
@@ -111,9 +116,26 @@ def deep_merge(base, patch):
     return out
 
 
-def scenario_config(original, patch, daily_usd):
-    """The sandbox config for a scenario: its patch, then the daily budget the cap allows."""
-    return deep_merge(deep_merge(original, patch), {"budgets": {"daily_usd": round(daily_usd, 2)}})
+def scenario_config(original, patch, daily_usd, runtime_patch=None):
+    """The sandbox config for a scenario: the --runtime patch, its patch, then the daily budget the cap allows."""
+    base = deep_merge(original, runtime_patch or {})
+    return deep_merge(deep_merge(base, patch), {"budgets": {"daily_usd": round(daily_usd, 2)}})
+
+
+def runtime_patch(name, tier_args):
+    """The config patch for --runtime and its --tier name=model pairs; Refused names what's missing."""
+    tiers = {}
+    for arg in tier_args:
+        tier, _, model = arg.partition("=")
+        if tier not in TIERS or not model:
+            raise Refused(f"--tier {arg} must be <tier>=<model>, tier one of {', '.join(TIERS)}")
+        tiers[tier] = model
+    if name == "claude" and not tiers:
+        return {}
+    missing = [t for t in TIERS if t not in tiers]
+    if name != "claude" and missing:
+        raise Refused(f"--runtime {name} needs --tier for {', '.join(missing)}")
+    return {"runtime": name, "runtimes": {name: {"tiers": tiers}}}
 
 
 def utcnow():
@@ -333,8 +355,9 @@ class Run:
     """One e2e invocation: the sandbox and the repo the guard checked, its original config, the spend and
     where results go."""
 
-    def __init__(self, sandbox, repo, cap, out_dir, keep, scenarios_root):
+    def __init__(self, sandbox, repo, cap, out_dir, keep, scenarios_root, runtime_patch=None):
         self.sandbox, self.repo, self.out_dir, self.keep = sandbox, repo, out_dir, keep
+        self.runtime_patch = runtime_patch or {}
         self.scenarios_root = scenarios_root
         self.jobs_dir = sandbox / "factory" / "jobs"
         self.config_path = sandbox / "factory" / "config.json"
@@ -487,7 +510,13 @@ def partial_ctx(r, issue):
 
 
 def keychain_ready(r):
-    service = r.original.get("runner", {}).get("keychain_service", "factory-claude-token")
+    """The runner's Keychain item for the runtime is there, named as factory/bin/runner names it."""
+    cfg = deep_merge(r.original, r.runtime_patch)
+    name = cfg.get("runtime", "claude")
+    if not (cfg.get("runtimes", {}).get(name) or {}).get("credential_env"):
+        return True
+    service = cfg.get("runner", {}).get("keychain_service", "factory-claude-token") if name == "claude" \
+        else f"factory-{name}-token"
     return run(["security", "find-generic-password", "-s", service], r.sandbox).returncode == 0
 
 
@@ -497,7 +526,7 @@ def run_scenario(r, name, scenario):
         return "skipped", ["no runner token in the Keychain"]
     started = utcnow()
     prior = log_spend(r.jobs_dir, started - timedelta(hours=24))
-    cfg = scenario_config(r.original, scenario.get("config_patch", {}), prior + r.spend.remaining())
+    cfg = scenario_config(r.original, scenario.get("config_patch", {}), prior + r.spend.remaining(), r.runtime_patch)
     log = r.jobs_dir / "runner.log"
     log_offset = len(log.read_text()) if log.exists() else 0
     issue, ctx, issues = None, None, []
@@ -544,12 +573,16 @@ def main(argv=None):
     parser.add_argument("--max-usd", type=float, required=True, help="hard cap on this run's spend")
     parser.add_argument("--only", help="run just this scenario")
     parser.add_argument("--keep", action="store_true", help="leave the issues, PRs and branches open")
+    parser.add_argument("--runtime", default="claude", choices=runtimes.NAMES, help="the agent CLI to run on")
+    parser.add_argument("--tier", action="append", default=[], metavar="TIER=MODEL",
+                        help="the runtime's model for a tier; every tier for a runtime other than claude")
     opts = parser.parse_args(argv)
     if opts.max_usd <= 0:
         print("e2e: --max-usd must be more than 0", file=sys.stderr)
         return 2
     sandbox = opts.sandbox.resolve()
     try:
+        patch = runtime_patch(opts.runtime, opts.tier)
         repo = guard(sandbox)
         scenarios = load_scenarios(SCENARIOS, opts.only)
     except Refused as exc:
@@ -557,7 +590,7 @@ def main(argv=None):
         return 2
     out_dir = RESULTS / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out_dir.mkdir(parents=True, exist_ok=True)
-    r = Run(sandbox, repo, opts.max_usd, out_dir, opts.keep, SCENARIOS)
+    r = Run(sandbox, repo, opts.max_usd, out_dir, opts.keep, SCENARIOS, patch)
     try:
         results = run_all(r, scenarios)
     except ScenarioError as exc:

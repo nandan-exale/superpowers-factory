@@ -24,9 +24,9 @@ class EvalCase(unittest.TestCase):
 
 
 class AgentTest(EvalCase):
-    def test_agent_prompt_drops_frontmatter_and_reads_tools(self):
-        body, tools = self.ev.agent_prompt("intake")
-        self.assertEqual(tools, ["Read", "Grep", "Glob", "Write"])
+    def test_agent_prompt_drops_frontmatter_and_reads_access(self):
+        body, access = self.ev.agent_prompt("intake")
+        self.assertEqual(access, "read")
         self.assertFalse(body.startswith("---"))
         self.assertIn("DECISION: ACCEPT", body)
 
@@ -41,6 +41,14 @@ class AgentTest(EvalCase):
         self.assertEqual(self.ev.model_for("reviewer-security", self.cfg), {"model": "opus", "effort": "high"})
         with self.assertRaisesRegex(self.ev.Stop, "no model"):
             self.ev.model_for("reviewer-nope", self.cfg)
+
+    def test_model_for_another_runtime_uses_its_tiers_and_efforts(self):
+        cfg = self.ev.with_tiers(self.cfg, "codex", {t: f"m-{t}" for t in ("fast", "balanced", "strong", "frontier")})
+        self.assertEqual(self.ev.model_for("reviewer-code", cfg, "codex"), {"model": "m-balanced", "effort": "high"})
+        cfg["routing"]["medium"]["code"]["effort"] = "max"
+        self.assertEqual(self.ev.model_for("reviewer-code", cfg, "codex")["effort"], "high")
+        cfg = self.ev.with_tiers(self.cfg, "cursor", {t: "c1" for t in ("fast", "balanced", "strong", "frontier")})
+        self.assertEqual(self.ev.model_for("intake", cfg, "cursor"), {"model": "c1", "effort": "none"})
 
 
 REVIEW = "VERDICT: CHANGES\n\n## Findings\n1. [missing-test] a.py:1 add one\n2. [other:x] b\n\n## Notes\n1. [secrets] no\n"
@@ -62,6 +70,13 @@ class CheckTest(EvalCase):
         (d / "expect.json").write_text(json.dumps({"output": "x.md", "bogus": 1}))
         problems = self.ev.validate_case(d)
         self.assertEqual(len(problems), 3, problems)  # no input.md, unknown key, checks nothing
+
+    def test_a_case_must_name_its_output_file(self):
+        d = self.tmp / "case"
+        d.mkdir()
+        (d / "input.md").write_text("x")
+        (d / "expect.json").write_text(json.dumps({"verdict": "PASS"}))
+        self.assertEqual(self.ev.validate_case(d), ["expect.json has no output (the file the agent writes)"])
 
 
 class BaselineTest(EvalCase):
@@ -86,7 +101,22 @@ if out:
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w") as f:
         f.write(os.environ.get("FAKE_TEXT", ""))
-print(json.dumps({"total_cost_usd": float(os.environ.get("FAKE_COST", "0.10")), "result": "done"}))
+print(json.dumps({"type": "result", "total_cost_usd": float(os.environ.get("FAKE_COST", "0.10")), "result": "done"}))
+'''
+
+# cursor-agent -p ... <prompt>: one JSON result with token usage and no cost.
+FAKE_CURSOR = r'''
+import json, os, sys
+args = sys.argv[1:]
+with open(os.environ["FAKE_RECORD"], "a") as f:
+    f.write(json.dumps({"argv0": os.path.basename(sys.argv[0]), "argv": args, "cwd": os.getcwd()}) + "\n")
+out = os.environ.get("FAKE_OUT_REL")
+if out:
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    with open(out, "w") as f:
+        f.write(os.environ.get("FAKE_TEXT", ""))
+print(json.dumps({"type": "result", "is_error": False, "session_id": "c-1",
+                  "usage": {"inputTokens": 10, "outputTokens": 5}}))
 '''
 
 
@@ -107,8 +137,9 @@ class RunTest(EvalCase):
             {"output": "factory/jobs/eval/round-1/review-code.md", "verdict": "CHANGES"}))
         fakebin = self.tmp / "bin"
         fakebin.mkdir()
-        (fakebin / "claude").write_text(f"#!{sys.executable}\n{FAKE_CLAUDE}")
-        (fakebin / "claude").chmod(0o755)
+        for name, body in (("claude", FAKE_CLAUDE), ("cursor-agent", FAKE_CURSOR)):
+            (fakebin / name).write_text(f"#!{sys.executable}\n{body}")
+            (fakebin / name).chmod(0o755)
         self.record = self.tmp / "record.jsonl"
         self.env = {"PATH": f"{fakebin}{os.pathsep}{os.environ['PATH']}", "FAKE_RECORD": str(self.record),
                     "FAKE_OUT_REL": "factory/jobs/eval/round-1/review-code.md",
@@ -136,11 +167,11 @@ class RunTest(EvalCase):
         self.assertEqual(argv[argv.index("--model") + 1], "sonnet")
         self.assertEqual(argv[argv.index("--effort") + 1], "high")
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
-        allowed = argv[argv.index("--allowedTools") + 1].split(",")
-        self.assertIn("Write(./**)", allowed)
-        self.assertIn("Bash(git *)", allowed)
-        self.assertNotIn("Bash", allowed)
-        self.assertFalse(argv[argv.index("--append-system-prompt") + 1].startswith("---"))
+        self.assertEqual(argv[argv.index("--tools") + 1], "Read,Grep,Glob,Bash,Write")
+        for flag in ("--settings", "--no-session-persistence", "--strict-mcp-config"):
+            self.assertIn(flag, argv)
+        self.assertEqual(argv[argv.index("--max-budget-usd") + 1], "5.00")
+        self.assertIn(f"{first['cwd']}/factory/jobs/eval/runs/", argv[argv.index("--append-system-prompt-file") + 1])
 
     def test_workspace_has_the_change_and_the_deletion_on_a_branch(self):
         root = self.tmp / "ws"
@@ -171,6 +202,42 @@ class RunTest(EvalCase):
         self.assertEqual(len(self.calls()), 2)
         self.assertIn("spend cap", out)
         self.assertFalse(self.ev.BASELINE.exists())
+
+    TIERS = [a for t in ("fast", "balanced", "strong", "frontier") for a in ("--tier", f"{t}=c1")]
+
+    def test_another_runtime_runs_through_its_adapter(self):
+        code, out = self.main("--samples", "2", "--runtime", "cursor", *self.TIERS)
+        self.assertEqual(code, 0, out)
+        first, second = self.calls()
+        self.assertEqual(first["argv0"], "cursor-agent")
+        self.assertEqual(first["argv"][first["argv"].index("--model") + 1], "c1")
+        self.assertIn("Job folder: ", first["argv"][-1])  # cursor takes the prompt as its last argument
+        self.assertIn("reviewer-code/off-by-one: 1.00", out)  # the case's output file was read and passed
+        self.assertIn("cost n/a (2 runs of 2)", out)
+
+    def test_another_runtime_is_capped_by_runs(self):
+        code, out = self.main("--samples", "3", "--max-runs", "2", "--runtime", "cursor", *self.TIERS)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(len(self.calls()), 2)
+        self.assertIn("run cap", out)
+
+    def test_another_runtime_needs_every_tier(self):
+        code, out = self.main("--runtime", "cursor", "--tier", "fast=c1")
+        self.assertEqual(code, 2, out)
+        self.assertIn("--runtime cursor needs --tier for balanced, strong, frontier", out)
+        self.assertEqual(self.calls(), [])
+
+    def test_the_baseline_stays_claude_s(self):
+        code, out = self.main("--update-baseline", "--runtime", "cursor", *self.TIERS)
+        self.assertEqual(code, 2, out)
+        self.assertIn("--update-baseline", out)
+        self.assertFalse(self.ev.BASELINE.exists())
+
+    def test_a_missing_cli_exits_2(self):
+        path = os.pathsep.join((str(self.tmp / "bin"), "/usr/bin", "/bin"))  # no codex the host may have
+        code, out = self.main("--runtime", "codex", *self.TIERS, PATH=path)
+        self.assertEqual(code, 2, out)
+        self.assertIn("codex isn't on PATH", out)
 
     def test_logged_out_claude_exits_2(self):
         code, out = self.main(FAKE_AUTH_EXIT="1")
