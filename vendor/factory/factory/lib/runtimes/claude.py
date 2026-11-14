@@ -38,9 +38,12 @@ def settings(repo, role):
 def build(run):
     path = run["settings_dir"] / f"{run['stem']}.settings.json"
     path.write_text(json.dumps(settings(run["repo"], run["role"]), indent=2) + "\n")
+    # No user settings: a user's `ask` rule (say Bash(git commit:*)) beats our allow, and with no
+    # one to answer it the call is denied. runner-settings carries the deny rules agents need.
     argv = [BINARY, "-p", "--output-format", "json", "--model", run["model"], "--effort", run["effort"],
             "--append-system-prompt-file", str(run["system_path"]), "--tools", tools(run["role"]),
-            "--settings", str(path), "--permission-mode", "dontAsk"]
+            "--settings", str(path), "--setting-sources", "project,local",
+            "--permission-mode", "dontAsk"]
     if run.get("resume"):
         argv += ["--resume", run["resume"]]
     elif run.get("session_id"):
