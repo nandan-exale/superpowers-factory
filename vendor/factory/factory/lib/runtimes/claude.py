@@ -4,6 +4,7 @@ import json
 
 NAME = "claude"
 BINARY = "claude"
+NPM_PACKAGE = "@anthropic-ai/claude-code"
 CAPS = {"resume": True, "reports_cost": True, "reports_tokens": True,
         "efforts": ["low", "medium", "high", "xhigh", "max"], "stop_hook": True, "silent_new_session": False}
 

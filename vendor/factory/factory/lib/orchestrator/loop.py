@@ -53,7 +53,7 @@ class Loop:
         (runs / f"{stem}.prompt.md").write_text(spawn.prompt)
         run = {"repo": self.repo, "job_id": spawn.job_id, "role": spawn.role, "access": agent["access"],
                "model": spawn.model, "effort": spawn.effort, "system_path": runs / f"{stem}.system.md",
-               "settings_dir": runs, "stem": stem, "resume": spawn.resume,
+               "prompt_path": runs / f"{stem}.prompt.md", "settings_dir": runs, "stem": stem, "resume": spawn.resume,
                "session_id": None if spawn.resume else str(uuid.uuid4())}
         argv, env = self.rt.build(run)
         record = {"spawn": spawn, "stem": stem, "runs": runs, "started": utc(), "proc": None}

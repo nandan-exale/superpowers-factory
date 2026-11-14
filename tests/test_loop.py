@@ -121,6 +121,19 @@ class LoopTest(LoopCase):
         prompt_files = list((self.folder / "runs").glob("*-reviewer-code.prompt.md"))
         self.assertEqual(prompt_files[0].read_text(), "PROMPT")
 
+    def test_an_adapter_may_rewrite_the_prompt_file_before_it_is_read(self):
+        lp = self.loop([self.spawn("builder")])
+        build = lp.rt.build
+
+        def rewriting(run):
+            run["prompt_path"].write_text("SYSTEM\n\n" + run["prompt_path"].read_text())
+            return build(run)
+
+        lp.rt.build = rewriting
+        lp.run()
+        prompt, = (self.folder / "runs").glob("*-builder.prompt.md")
+        self.assertEqual(prompt.read_text(), "SYSTEM\n\nPROMPT")
+
     def test_watch_comes_first_and_the_run_ends_with_report_and_digest(self):
         # Was the skill's /factory run steps 1 and 6.
         self.cli.answer("job", "watch", out="WATCH: 003-y red\n")

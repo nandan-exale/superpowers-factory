@@ -113,6 +113,13 @@ class NudgeTest(PipelineCase):
         self.p.after("004-x", [self.done(self.builder_spawn())])
         self.assertEqual(self.cli.called("gate", "--check"), [])
 
+    def test_runtime_that_hides_lost_sessions_gets_the_resuming_prompt(self):
+        self.p = Pipeline(self.cli, say=self.lines.append, caps={"stop_hook": False, "silent_new_session": True})
+        self.set(stage="build", round=2, sessions={"builder": "ses_1"})
+        s = self.only(self.p.builder("004-x", "Fix it."))
+        self.assertEqual(s.resume, "ses_1")
+        self.assertIn(pipeline.prompts.RESUMING, s.prompt)
+
     def test_make_reports_note_lines(self):
         self.cli.answer("job", "agent", "004-x", "spec-writer",
                         out="model=m effort=high\nNOTE: effort max → high (codex supports low, medium, high)\n")

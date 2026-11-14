@@ -191,7 +191,8 @@ class Pipeline:
         # A fresh builder after round 1, or on a resume, must first find out how far the last one got.
         fresh = prompts.build(self.head(job), n, port, " ".join(w for w in (why, prompts.RESUMING) if w)) \
             if resuming or n > 1 else same_agent
-        if resuming:
+        # A runtime that silently starts a new session for a lost one can't tell us to start fresh.
+        if resuming or (session and self.caps.get("silent_new_session")):
             same_agent = fresh
         return [self.make(job_id, "builder", same_agent if session else fresh, job["worktree"], (),
                           resume=session, fresh_prompt=fresh if session else None)]

@@ -8,8 +8,10 @@ PLUGIN = Path(__file__).resolve().parents[1]
 LIB = PLUGIN / "vendor" / "factory" / "factory" / "lib"
 FIXTURES = PLUGIN / "tests" / "fixtures" / "runtimes" / "claude"
 sys.path.insert(0, str(LIB))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import runtimes  # noqa: E402
+from runtime_contract import RuntimeContract  # noqa: E402
 from runtimes import claude  # noqa: E402
 
 
@@ -20,6 +22,12 @@ class LoadTest(unittest.TestCase):
     def test_unknown_runtime_names_the_known_ones(self):
         with self.assertRaisesRegex(ValueError, "unknown runtime 'nope'; known: claude"):
             runtimes.load("nope")
+
+    def test_every_runtime_is_known(self):
+        self.assertEqual(runtimes.NAMES, ("claude", "codex", "opencode", "copilot", "cursor"))
+
+    def test_claude_names_its_npm_package(self):
+        self.assertEqual(claude.NPM_PACKAGE, "@anthropic-ai/claude-code")
 
 
 class BuildTest(unittest.TestCase):
@@ -104,6 +112,22 @@ class ParseTest(unittest.TestCase):
     def test_missing_cost_is_none(self):
         r = claude.parse(json.dumps({"type": "result", "session_id": "s", "is_error": False}))
         self.assertEqual((r["cost_usd"], r["cost_source"], r["model"], r["cost_by_model"]), (None, None, None, {}))
+
+
+class ClaudeContractTest(RuntimeContract, unittest.TestCase):
+    NAME = "claude"
+    RESULT = "result.json"
+
+    def test_recorded_resume_keeps_the_session(self):
+        first = self.rt.parse((self.fixtures / self.RESULT).read_text())
+        again = self.rt.parse((self.fixtures / "resumed.json").read_text())
+        self.assertEqual(again["session_id"], first["session_id"])
+
+    def test_recorded_error_is_an_error_or_unreadable(self):
+        try:
+            self.assertTrue(self.rt.parse((self.fixtures / "error.json").read_text())["error"])
+        except ValueError:
+            pass
 
 
 if __name__ == "__main__":
