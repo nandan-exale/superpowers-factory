@@ -144,7 +144,8 @@ class TokenTest(LinuxCase):
 class SandboxToolsTest(LinuxCase):
     def test_missing_bubblewrap_is_named(self):
         (self.bin / "bwrap").unlink()
-        with mock.patch.dict(os.environ, self.env):
+        # Only the fake bin dir: CI images can ship a real /usr/bin/bwrap.
+        with mock.patch.dict(os.environ, {**self.env, "PATH": str(self.bin)}):
             self.assertEqual(self.runner.missing_sandbox_tools(), ["bwrap"])
 
 

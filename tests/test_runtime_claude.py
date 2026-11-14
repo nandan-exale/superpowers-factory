@@ -63,6 +63,14 @@ class BuildTest(unittest.TestCase):
         written = json.loads((self.runs / "s.settings.json").read_text())
         self.assertEqual(written, {"permissions": {"deny": ["Read(./.env)"]}, "sandbox": {"enabled": True}})
 
+    def test_every_role_allows_its_own_tools(self):
+        # With CLAUDE_CODE_SUBPROCESS_ENV_SCRUB set, Claude Code 2.1.322 forces the permission mode to
+        # default, ignoring dontAsk; without explicit allowedTools, reads outside the worktree (the
+        # job folder) are refused and the spec writer can't write spec.md.
+        for role in ("intake", "spec-writer", "builder", "approver", "learner", "reviewer-code"):
+            argv, _ = claude.build(self.run_for(role))
+            self.assertEqual(argv[argv.index("--allowedTools") + 1], claude.tools(role), role)
+
     def test_user_settings_are_not_loaded(self):
         # A user-level `ask` rule such as Bash(git commit:*) beats runner-settings' allow, and with
         # no one to answer it the builder's commit is denied.
