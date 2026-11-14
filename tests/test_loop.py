@@ -189,6 +189,74 @@ class OrchestrateScriptTest(unittest.TestCase):
         self.assertIn("orchestrate run", res.stderr)
         self.assertTrue(os.access(script, os.X_OK))
 
+    FAKE_JOB = """import json, os, sys
+with open(os.environ["FAKE_RECORD"], "a") as f:
+    f.write(json.dumps({"tool": "job", "args": sys.argv[1:],
+                        "token": "CLAUDE_CODE_OAUTH_TOKEN" in os.environ}) + "\\n")
+answers = {"watch": "WATCH: off", "queue": "resume\\t12\\t004-x\\tspec\\tround 0",
+           "ensure-worktree": "WORKTREE: 004-x present", "agent": "model=haiku effort=low",
+           "advance": "BUDGET: 004-x → needs-human (test)"}
+if sys.argv[1] in answers:
+    print(answers[sys.argv[1]])
+"""
+    FAKE_CLAUDE = """import json, os, sys
+with open(os.environ["FAKE_RECORD"], "a") as f:
+    f.write(json.dumps({"tool": "claude", "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")}) + "\\n")
+print(json.dumps({"type": "result", "session_id": "s", "is_error": False, "total_cost_usd": 0.01}))
+"""
+
+    def project(self, root):
+        """A project with the vendored orchestrate, lib, agents and settings, a fake job and one spec job."""
+        vendor = PLUGIN / "vendor" / "factory" / "factory"
+        (root / "factory" / "bin").mkdir(parents=True)
+        shutil.copy2(vendor / "bin" / "orchestrate", root / "factory" / "bin" / "orchestrate")
+        for name in ("lib", "agents"):
+            shutil.copytree(vendor / name, root / "factory" / name, ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copy2(vendor / "runner-settings.json", root / "factory" / "runner-settings.json")
+        (root / "factory" / "config.json").write_text(json.dumps({"base_branch": "main"}))
+        (root / "factory" / "bin" / "job").write_text(self.FAKE_JOB)
+        worktree = root / ".worktrees" / "004-x"
+        worktree.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q"], cwd=worktree, check=True)
+        folder = root / "factory" / "jobs" / "004-x"
+        folder.mkdir(parents=True)
+        (folder / "job.json").write_text(json.dumps({"id": "004-x", "issue": 12, "stage": "spec", "round": 0,
+                                                     "worktree": str(worktree), "branch": "factory/004-x"}))
+        fakebin = root / "fakebin"
+        fakebin.mkdir()
+        (fakebin / "claude").write_text(f"#!{sys.executable}\n{self.FAKE_CLAUDE}")
+        (fakebin / "claude").chmod(0o755)
+        return fakebin
+
+    def orchestrate(self, root, path):
+        record = root / "record.jsonl"
+        env = {**os.environ, "PATH": path, "FAKE_RECORD": str(record), "CLAUDE_CODE_OAUTH_TOKEN": "tok",
+               "ANTHROPIC_API_KEY": "key"}
+        res = subprocess.run([sys.executable, str(root / "factory" / "bin" / "orchestrate"), "run", "12"],
+                             capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+        calls = [json.loads(line) for line in record.read_text().splitlines()] if record.exists() else []
+        return res, calls
+
+    def test_only_agents_get_the_credentials(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fakebin = self.project(root)
+            res, calls = self.orchestrate(root, os.pathsep.join((str(fakebin), "/usr/bin", "/bin")))
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertEqual([c["token"] for c in calls if c["tool"] == "claude"], ["tok"])
+        jobs = [c for c in calls if c["tool"] == "job"]
+        self.assertIn(["record-run", "004-x", "spec-writer"], [c["args"] for c in jobs])
+        self.assertEqual([c["args"] for c in jobs if c["token"]], [])
+
+    def test_refuses_before_any_job_when_the_cli_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.project(root)
+            res, calls = self.orchestrate(root, os.pathsep.join(("/usr/bin", "/bin")))
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("claude not found on PATH", res.stderr)
+        self.assertEqual(calls, [])
+
     def test_leaves_no_bytecode_in_the_project(self):
         """The runner skips a dirty tree, so importing factory/lib must not write __pycache__ there."""
         with tempfile.TemporaryDirectory() as tmp:

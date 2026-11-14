@@ -181,6 +181,7 @@
     "f03b53ed78432af236d976588fe64ceaa65fa1da092d18fc8dccdb04e1ca1042"
   ],
   "factory/bin/orchestrate": [
+    "08f26339ea1b3dc1ca9969724d192cbd06a87bfe341e37219eff58ed8b2cee63",
     "5012eab85762dd464b5b6a3cf1fc77f10755ba341b36405b095b61aac6ec4d7f"
   ],
   "factory/bin/route": [
@@ -257,7 +258,8 @@
     "b6e110df3bb4eb79a444ea16bb8ad4ac532b718de04873bb47e43ebd5473199f"
   ],
   "factory/lib/orchestrator/loop.py": [
-    "05d3a707fbe3a7d3627e70dcd178fa89b0526d3a257c6df24dd3d14921436885"
+    "05d3a707fbe3a7d3627e70dcd178fa89b0526d3a257c6df24dd3d14921436885",
+    "70557b0687e21606b3d24f8625975021149dea31f3c5009d8288b05f2444da6d"
   ],
   "factory/lib/orchestrator/pipeline.py": [
     "5e736c48dc7593827ddcb7cc2de70b92f47b15aed9ff134a2d60f6fab2680f97",
@@ -271,9 +273,11 @@
     "37354b7917ad57163af41efef6d8f6a08137f5bb87c8a1eb0889595bad71c40f"
   ],
   "factory/lib/runtimes/__init__.py": [
+    "562f904f215d3560d586904d166ea0e2de44b2a7f4c144d537bb5273a2f4e792",
     "be2f3de4c1c00a40cd82291eee0dd617653c9c684e03244c84c33c4f1ff48f85"
   ],
   "factory/lib/runtimes/claude.py": [
+    "2e09a13c66cc854a418e753989e14dbaef1ae57b75a49261b9e70407871cccf8",
     "6a542662f498e42c4c80f755c7964aaa88d4ca959d2790f7f2c6b32ae32354d8"
   ],
   "factory/runner-settings.json": [
