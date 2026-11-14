@@ -78,10 +78,17 @@ class LearnTest(LearningCase):
     def test_tag_in_three_jobs_is_learned(self):
         self.three_jobs_with("[missing-test] a.py:1 add a test")
         [line] = self.learn()
-        self.assertTrue(line.startswith("LEARN: missing-test (3 jobs) factory/jobs/learning/missing-test/evidence.md"))
-        evidence = (self.job.LEARNING / "missing-test" / "evidence.md").read_text()
+        self.assertTrue(line.startswith("LEARN: missing-test (3 jobs) factory/jobs/learning/tag-missing-test/evidence.md"))
+        evidence = (self.job.LEARNING / "tag-missing-test" / "evidence.md").read_text()
         self.assertIn("> a.py:1 add a test", evidence)
         self.assertIn("quoted data", evidence)
+
+    def test_tag_folder_is_never_a_bare_secrets_folder(self):
+        # Users commonly deny agents any path under secrets/; the [secrets] tag's folder must not be one.
+        self.three_jobs_with("[secrets] a.py:1 token in code")
+        [line] = self.learn()
+        self.assertIn("factory/jobs/learning/tag-secrets/evidence.md", line)
+        self.assertNotIn("secrets", [part for part in self.job.tag_dir("secrets").parts])
 
     def test_counts_distinct_jobs_not_findings(self):
         self.review(self.job_id, "code", ["[convention] a", "[convention] b", "[convention] c"])
@@ -98,7 +105,7 @@ class LearnTest(LearningCase):
     def test_other_slug_tags_count_per_slug(self):
         self.three_jobs_with("[other:n-plus-one] loop queries")
         [line] = self.learn()
-        self.assertIn("LEARN: other:n-plus-one (3 jobs) factory/jobs/learning/other--n-plus-one/evidence.md", line)
+        self.assertIn("LEARN: other:n-plus-one (3 jobs) factory/jobs/learning/tag-other--n-plus-one/evidence.md", line)
 
     def test_recently_filed_tags_are_skipped(self):
         self.three_jobs_with("[missing-test] x")
@@ -111,7 +118,7 @@ class LearnTest(LearningCase):
         ids = self.three_jobs_with("[spec-gap] x")
         (self.job.job_dir(ids[1]) / "decision.md").write_text("ESCALATE\n\n## Why\nThe spec was vague.\n")
         self.learn()
-        evidence = (self.job.LEARNING / "spec-gap" / "evidence.md").read_text()
+        evidence = (self.job.LEARNING / "tag-spec-gap" / "evidence.md").read_text()
         self.assertIn("> The spec was vague.", evidence)
 
     def test_none_state_tag_is_skipped(self):

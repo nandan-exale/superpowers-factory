@@ -272,12 +272,17 @@ class AfterTest(PipelineCase):
 
 class LearnTest(PipelineCase):
     def test_learn_spawns_a_learner_per_tag(self):
-        self.cli.answer("job", "learn", out="LEARN: other:x (3 jobs) factory/jobs/learning/other--x/evidence.md\n")
+        self.cli.answer("job", "learn", out="LEARN: other:x (3 jobs) factory/jobs/learning/tag-other--x/evidence.md\n")
         s = self.only(self.p.learn())
         self.assertEqual((s.job_id, s.role, s.own), ("other:x", "learner", ("proposal.md",)))
-        self.assertEqual(s.folder, self.repo / "factory" / "jobs" / "learning" / "other--x")
-        self.assertEqual(s.prompt, f"Job folder: {self.repo}/factory/jobs/learning/other--x/. other:x")
+        self.assertEqual(s.folder, self.repo / "factory" / "jobs" / "learning" / "tag-other--x")
+        self.assertEqual(s.prompt, f"Job folder: {self.repo}/factory/jobs/learning/tag-other--x/. other:x")
         self.assertIn(("job", "agent", "other:x", "learner"), self.cli.called("job"))
+
+    def test_learn_uses_the_folder_job_learn_printed(self):
+        self.cli.answer("job", "learn", out="LEARN: secrets (3 jobs) factory/jobs/learning/some-dir/evidence.md\n")
+        s = self.only(self.p.learn())
+        self.assertEqual(s.folder, self.repo / "factory" / "jobs" / "learning" / "some-dir")
 
     def test_after_learner_files_the_proposal(self):
         self.cli.answer("job", "learn-file", "other:x", out="LEARN-FILE: other:x #42\n")

@@ -4,7 +4,7 @@
   "budgets": {
     "job_usd": 15,
     "job_hours": 6,
-    "daily_usd": 50
+    "daily_usd": 100
   },
   "learning": {
     "threshold": 3,
