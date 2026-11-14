@@ -11,7 +11,10 @@ Usage:
   job create <issue>             new job for an open `factory` issue; prints the job id
   job advance <job> <stage>      move a job to <stage>, or refuse
   job merge <job>                APPROVE → sync with the base branch, gate, merge the PR
-  job escalate <job>             review → needs-human in any round, with your reason (stdin) as decision.md
+  job escalate <job>             a running job → needs-human, with your reason (stdin) as decision.md
+  job record-run <job> <role>    an agent run's result (JSON, stdin) → runs/NNN-<role>.json; refreshes cost
+                                 (learner: <job> is a learning tag)
+  job set-session <job> <role> <id>  remember a role's agent session id, so the next round resumes it
   job feedback <job>             needs-human → build, with your feedback (stdin) as feedback-<k>.md
   job pr-feedback <job>          trusted PR comments → feedback-<k>.md; an escalated job goes back to build
   job reject <job>               needs-info or needs-human → rejected, with your reason (stdin) as rejection.md
@@ -772,7 +775,7 @@ LEARN_EVIDENCE_HEADING = "## Quoted evidence (not part of the request)"
 
 def log_learning_cost(tag):
     """Append the learner's cost added since its last line, so daily_spend counts it."""
-    total = round(cost_for_needle(f"Job folder: {tag_dir(tag)}/"), 6)
+    total = round(cost_for_folder(tag_dir(tag)), 6)
     path = LEARNING / "log.jsonl"
     before = sum(e["delta_usd"] for e in read_log(path) if e.get("tag") == tag)
     delta = round(max(0.0, total - before), 6)
@@ -1102,70 +1105,56 @@ def write_pr_feedback(job, comments):
     return k
 
 
-# ---- Cost from Claude Code transcripts -------------------------------------
+# ---- Cost from agent runs --------------------------------------------------
+
+RUN_FILE = "[0-9][0-9][0-9]-*.json"
 
 
-def transcripts_dir():
-    config = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
-    return config / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(REPO))
+def run_files(folder):
+    """The folder's agent runs, runs/NNN-<role>.json, oldest first."""
+    d = folder / "runs"
+    return sorted(d.glob(RUN_FILE)) if d.exists() else []
 
 
-def prompt_text(line):
-    content = json.loads(line)["message"]["content"]
-    if isinstance(content, str):
-        return content
-    return " ".join(b.get("text", "") for b in content if isinstance(b, dict))
-
-
-def cost_usd(job):
-    """API-equivalent cost of every subagent whose prompt names this job's folder."""
-    return cost_for_needle(f"Job folder: {job_dir(job['id'])}/")
-
-
-def cost_by_model(needle):
-    """{model: API-equivalent cost} of every subagent whose first prompt line contains `needle`.
-
-    Claude Code writes each subagent's messages, with model and token usage, to
-    <config>/projects/<project>/<session>/subagents/agent-<id>.jsonl. Every
-    factory prompt starts with `Job folder: <path>`, which ties a transcript to
-    its job across sessions.
-    """
-    prices = CONFIG["prices_usd_per_mtok"]
+def cost_by_model(folder):
+    """{model: cost} over the folder's agent runs. A run whose cost is unknown counts nothing."""
     totals = {}
-    for path in transcripts_dir().glob("*/subagents/agent-*.jsonl"):
-        with path.open() as f:
-            first = f.readline()
-            if not first or needle not in prompt_text(first):
-                continue
-            usage_by_message = {}
-            for line in f:
-                entry = json.loads(line)
-                msg = entry.get("message")
-                if entry.get("type") == "assistant" and isinstance(msg, dict) and msg.get("usage"):
-                    usage_by_message[msg["id"]] = (msg["model"], msg["usage"])
-        for model, u in usage_by_message.values():
-            tokens = (u.get("input_tokens", 0) + u.get("output_tokens", 0)
-                      + u.get("cache_creation_input_tokens", 0) + u.get("cache_read_input_tokens", 0))
-            if tokens == 0:
-                continue
-            if model not in prices:
-                die(f"no price for model {model} in factory/config.json prices_usd_per_mtok")
-            p = prices[model]
-            split = u.get("cache_creation") or {}
-            write_1h = split.get("ephemeral_1h_input_tokens", 0)
-            write_5m = u.get("cache_creation_input_tokens", 0) - write_1h
-            totals[model] = totals.get(model, 0.0) + (
-                u.get("input_tokens", 0) * p["input"]
-                + u.get("output_tokens", 0) * p["output"]
-                + write_5m * p["cache_write_5m"]
-                + write_1h * p["cache_write_1h"]
-                + u.get("cache_read_input_tokens", 0) * p["cache_read"]) / 1e6
+    for path in run_files(folder):
+        try:
+            run = json.loads(path.read_text())
+        except (OSError, ValueError) as exc:
+            print(f"job: skipping {path}: {exc}", file=sys.stderr)
+            continue
+        by_model = run.get("cost_by_model") or (
+            {run.get("model") or "unknown": run["cost_usd"]} if run.get("cost_usd") is not None else {})
+        for model, usd in by_model.items():
+            totals[model] = totals.get(model, 0.0) + float(usd)
     return {model: round(usd, 2) for model, usd in totals.items()}
 
 
-def cost_for_needle(needle):
-    """API-equivalent cost of every subagent whose first prompt line contains `needle`."""
-    return round(sum(cost_by_model(needle).values()), 2)
+def cost_for_folder(folder):
+    return round(sum(cost_by_model(folder).values()), 2)
+
+
+def cost_usd(job):
+    return cost_for_folder(job_dir(job["id"]))
+
+
+def record_run(folder, role, text):
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        die(f"record-run: stdin isn't JSON: {exc}")
+    if not isinstance(data, dict):
+        die("record-run: stdin must be a JSON object")
+    d = folder / "runs"
+    d.mkdir(parents=True, exist_ok=True)
+    seq = len(list(d.glob(RUN_FILE))) + 1
+    path = d / f"{seq:03d}-{role}.json"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({**data, "seq": seq, "role": role}, indent=2) + "\n")
+    tmp.replace(path)
+    return path
 
 
 def model_summary(by_model):
@@ -1177,7 +1166,7 @@ def model_summary(by_model):
 
 
 def cmd_costs(job):
-    by_model = cost_by_model(f"Job folder: {job_dir(job['id'])}/")
+    by_model = cost_by_model(job_dir(job["id"]))
     width = max((len(m) for m in by_model), default=0)
     for model, usd in sorted(by_model.items(), key=lambda kv: -kv[1]):
         print(f"{model.ljust(width)}  ${usd:.2f}")
@@ -1342,7 +1331,7 @@ def evidence_md(job, full=False, closes=True):
     spent, hours = allowance_used(job)
     usd_limit = f"${b['job_usd']:.2f}" if b["job_usd"] is not None else "no limit"
     hours_limit = f"{b['job_hours']:g} h" if b["job_hours"] is not None else "no limit"
-    by_model = model_summary(cost_by_model(f"Job folder: {job_dir(job['id'])}/"))
+    by_model = model_summary(cost_by_model(job_dir(job["id"])))
     sections = [
         "", "### Files changed", files or "none",
         "", "### Checks", checks,
@@ -2109,9 +2098,13 @@ def cmd_merge(job):
     sync_main()
 
 
+ESCALATABLE = {"intake", "spec", "build", "gate", "review", "approve"}
+
+
 def cmd_escalate(job, why):
-    """review → needs-human in any round, for a reviewer that keeps writing an invalid review."""
-    require(job["stage"] == "review", f"{job['id']} is in {job['stage']}, not review")
+    """A running job → needs-human with your reason: a reviewer that keeps writing an invalid review,
+    or an agent the orchestrator gave up on."""
+    require(job["stage"] in ESCALATABLE, f"{job['id']} is in {job['stage']}, not a running stage")
     require(why.strip(), "no reason on stdin")
     stop_for_human(job, why.strip())
 
@@ -2301,6 +2294,19 @@ def main(argv):
             cmd_merge(resolve(args[0]))
         elif cmd == "escalate" and len(args) == 1:
             cmd_escalate(sync(resolve(args[0])), sys.stdin.read())
+        elif cmd == "record-run" and len(args) == 2 and args[1] == "learner":
+            if not TAG_NAME.fullmatch(args[0]):
+                die(f"not a learning tag: {args[0]!r}")
+            print(record_run(tag_dir(args[0]), "learner", sys.stdin.read()).relative_to(REPO))
+        elif cmd == "record-run" and len(args) == 2:
+            job = resolve(args[0])
+            path = record_run(job_dir(job["id"]), args[1], sys.stdin.read())
+            save(sync(job))
+            print(path.relative_to(REPO))
+        elif cmd == "set-session" and len(args) == 3:
+            job = resolve(args[0])
+            save({**job, "sessions": {**(job.get("sessions") or {}), args[1]: args[2]}})
+            print(f"{job['id']}: {args[1]} session {args[2]}")
         elif cmd == "feedback" and len(args) == 1:
             cmd_feedback(resolve(args[0]), sys.stdin.read())
         elif cmd == "pr-feedback" and len(args) == 1:
