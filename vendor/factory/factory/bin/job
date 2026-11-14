@@ -2350,6 +2350,20 @@ def cmd_agent(job, role):
 TASK_HEADING = re.compile(r"^### Task \d+", re.M)
 
 
+def part_plan_text(plan, plan_text):
+    """A part's plan.md: the plan's header and its own tasks, so its agents don't carry the rest."""
+    if "part" not in plan:
+        return plan_text
+    starts = [m.start() for m in TASK_HEADING.finditer(plan_text)]
+    first, last = plan["tasks"]
+    ends = starts[1:] + [len(plan_text)]
+    tasks = "".join(plan_text[starts[i]:ends[i]] for i in range(first - 1, last))
+    note = (f"> This part's copy of the plan: only tasks {first}-{last} of {len(starts)}. "
+            f"The full plan is `{plan['plan']}` at {plan['commit'][:12]}; earlier tasks are already "
+            f"on the base branch.\n\n")
+    return plan_text[:starts[0]] + note + tasks
+
+
 def check_part(plan, plan_text, jobs):
     """Refuse a part whose range is past the plan or whose dependency hasn't merged."""
     if "part" not in plan:
@@ -2392,7 +2406,7 @@ def cmd_planned(job):
         print(f"PLANNED: REFUSED {e}")
         return
     (d / "spec.md").write_text(run(["git", "show", f"{plan['commit']}:{plan['spec']}"]).stdout)
-    (d / "plan.md").write_text(plan_text)
+    (d / "plan.md").write_text(part_plan_text(plan, plan_text))
     (d / "intake.md").write_text(planned_intake_md(job["issue"], plan))
     job = {**sync(job), "planned": True, "plan_paths": [plan["spec"], plan["plan"]],
            "agents": route_agents(plan["risk"], plan["surfaces"])}
