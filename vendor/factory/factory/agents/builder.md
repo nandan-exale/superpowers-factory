@@ -98,10 +98,17 @@ the build order, not a suggestion.
 
 ## Test
 
-Run `bash <main checkout>/factory/checks.sh` from the worktree
-(`cd <worktree> && bash <main checkout>/factory/checks.sh`). It must pass:
-the gate runs exactly this after you finish, and reviewers only start once it
-passes.
+While you work, run only the tests that cover what you changed: the test files
+you added or edited, and the tests for the code you touched. Don't run the full
+check suite (`factory/checks.sh`, or a repo command that runs every check, such
+as `scripts/check`) yourself, even where the plan says to: it takes minutes.
+Run the focused tests at that step instead; that is not a deviation. The same
+goes for verifying before you write `STATUS: READY`: your evidence is the
+focused tests and the acceptance criteria below.
+
+When you finish, `factory/checks.sh` runs once on your worktree. If it fails,
+you get its output and go back to fix it. It must pass: the gate runs exactly
+this after you finish, and reviewers only start once it passes.
 
 Then verify every acceptance criterion and record the evidence in build.md: the
 command you ran and its result, or what the page showed.

@@ -1,5 +1,6 @@
 """A throwaway project with a bare origin and the vendored factory scripts."""
 
+import atexit
 import contextlib
 import importlib.machinery
 import importlib.util
@@ -7,6 +8,7 @@ import io
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -27,6 +29,22 @@ def git(cwd, *args):
     return res.stdout.strip()
 
 
+_TEMPLATE = None
+
+
+def _template():
+    global _TEMPLATE
+    if _TEMPLATE is None:
+        tmp = tempfile.TemporaryDirectory(prefix="factory-project-template-")
+        atexit.register(tmp.cleanup)
+        root = Path(tmp.name).resolve()
+        project = FactoryProject.__new__(FactoryProject)
+        project.origin, project.repo = root / "origin.git", root / "project"
+        project._build(root)
+        _TEMPLATE = project
+    return _TEMPLATE
+
+
 def plan_body(commit, spec=SPEC_PATH, plan=PLAN_PATH, risk="medium", surfaces="[ui]"):
     return (
         "Build the widget.\n\n"
@@ -41,6 +59,17 @@ class FactoryProject:
         root = Path(root).resolve()
         self.origin = root / "origin.git"
         self.repo = root / "project"
+        template = _template()
+        shutil.copytree(template.origin, self.origin, symlinks=True)
+        shutil.copytree(template.repo, self.repo, symlinks=True)
+        config = self.repo / ".git" / "config"
+        config.write_text(config.read_text().replace(str(template.origin), str(self.origin)))
+        self.sha = template.sha
+        self.gh_calls = []
+        self.issue = None
+
+    def _build(self, root):
+        """The ~10 git calls a project costs; done once per process, then copied."""
         git(root, "init", "-q", "--bare", "-b", "main", str(self.origin))
         git(self.origin, "config", "receive.autogc", "false")
         git(root, "clone", "-q", str(self.origin), str(self.repo))
@@ -61,8 +90,6 @@ class FactoryProject:
         git(self.repo, "commit", "-q", "-m", "init")
         git(self.repo, "push", "-q", "-u", "origin", "main")
         self.sha = git(self.repo, "rev-parse", "HEAD")
-        self.gh_calls = []
-        self.issue = None
 
     def unpushed_commit(self):
         """A commit that exists locally but not on origin/main."""
