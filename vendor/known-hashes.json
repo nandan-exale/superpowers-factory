@@ -290,7 +290,8 @@
   "factory/lib/runtimes/__init__.py": [
     "1d2f88f80c3b7af056280bcc25c3669ac8780fb4dcb2e0e5031356a8f6adfdf4",
     "562f904f215d3560d586904d166ea0e2de44b2a7f4c144d537bb5273a2f4e792",
-    "be2f3de4c1c00a40cd82291eee0dd617653c9c684e03244c84c33c4f1ff48f85"
+    "be2f3de4c1c00a40cd82291eee0dd617653c9c684e03244c84c33c4f1ff48f85",
+    "cc99b50f3e753bde46ee19a1a84f81ea64be0abb48100ab6251decf5f2ca6b3a"
   ],
   "factory/lib/runtimes/claude.py": [
     "06c347696c0c9c9ec25bae5ce9d27735d6fd90a22c393b00240527599dd3e828",
