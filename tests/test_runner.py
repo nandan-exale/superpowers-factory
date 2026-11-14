@@ -586,6 +586,29 @@ class InstallRaceTest(RunnerCase):
         self.assertEqual([a[0] for a in self.launchctl_calls()].count("bootstrap"), 3)
 
 
+class MissingToolTest(RunnerCase):
+    def load_runner(self):
+        return load_script(f"runner_missing_{id(self)}", self.p.root / "factory/bin/runner")
+
+    def test_missing_security_means_no_token_and_spawns_nothing(self):
+        runner = self.load_runner()
+        with mock.patch.object(runner.shutil, "which", return_value=None), \
+                mock.patch.object(runner.subprocess, "run") as run:
+            self.assertIsNone(runner.read_keychain("x"))
+        run.assert_not_called()
+
+    def test_missing_launchctl_is_a_clear_error(self):
+        runner = self.load_runner()
+        err = io.StringIO()
+        with mock.patch.object(runner.shutil, "which", return_value=None), \
+                mock.patch.object(runner.subprocess, "run") as run, \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            runner.launchctl("print", "x")
+        self.assertNotEqual(raised.exception.code, 0)
+        self.assertIn("launchctl not found", err.getvalue())
+        run.assert_not_called()
+
+
 class LabelTest(RunnerCase):
     def modules(self, path):
         runner = load_script("runner_label", VENDOR / "factory/bin/runner")
