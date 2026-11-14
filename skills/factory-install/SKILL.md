@@ -6,12 +6,50 @@ description: Use when the user wants to set up the software factory (with Superp
 # Factory install
 
 Install the factory from this plugin into the project in the current working
-directory. The source is `vendor/factory/` two levels above this skill's base
-directory (`<skill base>/../../vendor/factory`). Call it `$VENDOR`.
+directory. The source is the plugin's `vendor/factory/`, `$VENDOR`, found
+below.
 
 Announce: "I'm using factory-install to set up the software factory here."
 
-## 0. Superpowers must be installed
+## Find the plugin
+
+The plugin's files are two levels above this skill's base directory when the
+plugin is installed whole (Claude Code). An agent that installed only the
+skill folders (`npx skills add`) doesn't have them, so fetch them:
+
+```bash
+PLUGIN="<skill base>/../.."
+if [ ! -d "$PLUGIN/vendor/factory" ]; then
+  TAG=$(git ls-remote --tags --refs https://github.com/nandan-exale/superpowers-factory 'v*' \
+        | sed 's#.*refs/tags/##' | sort -V | tail -1)
+  PLUGIN=$(mktemp -d)/superpowers-factory
+  git clone --depth 1 --branch "$TAG" https://github.com/nandan-exale/superpowers-factory "$PLUGIN"
+fi
+VENDOR="$PLUGIN/vendor/factory"; BIN="$PLUGIN/bin"
+```
+
+Ask your human partner before the clone: say it downloads the plugin's
+release `<TAG>` from GitHub into a temporary folder.
+
+## 0. Choose the runtime
+
+Ask which agent CLI runs the factory's agents:
+claude, codex, opencode, copilot or cursor. One runtime per project; changing
+it later is one key in `factory/config.json`. Check its CLI is installed (`claude`, `codex`,
+`opencode`, `copilot` or `cursor-agent` on `PATH`) and logged in.
+
+For anything but claude, ask for the model id for each tier the routing uses:
+`fast`, `balanced`, `strong`, `frontier` (two or more tiers may share a
+model). Write them to `runtimes.<runtime>.tiers` after the copy, and set
+`runtime`. For codex, also ask whether to add prices for those models to
+`runtimes.codex.prices_usd_per_mtok` (without them its cost shows as n/a).
+For opencode, ask which environment variable holds its model provider's key
+(for example `OPENROUTER_API_KEY`) and write it to
+`runtimes.opencode.credential_env`. For copilot and cursor, which report no
+cost, set `budgets.job_runs` (suggest 40) and `budgets.daily_runs` (suggest
+150) and say why: the dollar budgets can't see their spend.
+
+## 1. Superpowers must be installed
 
 Your available skills must include `superpowers:test-driven-development`,
 `superpowers:systematic-debugging` and
@@ -19,7 +57,7 @@ Your available skills must include `superpowers:test-driven-development`,
 for planned jobs. If any is missing, tell your human partner to install
 Superpowers and stop.
 
-## 1. Follow the upstream installer, with these overrides
+## 2. Follow the upstream installer, with these overrides
 
 Read `$VENDOR/INSTALL.md` and follow it, with these changes:
 
@@ -46,7 +84,7 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   ```
 
 - **Step 1 (Copy), manifest:** right after copying, before adapting any file,
-  run `"<skill base>/../../bin/factory-manifest" .`. It records each copied
+  run `"$BIN/factory-manifest" .`. It records each copied
   file's pristine hash in `factory/manifest.json` (commit it with the
   install), so `/factory-update` can tell your adaptations from upstream
   changes later.
@@ -75,10 +113,13 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   `CLAUDE.md`, create `CLAUDE.md` containing the single line `@AGENTS.md`.
   If it has both and `CLAUDE.md` has no `@AGENTS.md` line, append one. If it
   uses only `CLAUDE.md`, change nothing. If `CLAUDE.md` is a symlink to
-  `AGENTS.md`, change nothing.
+  `AGENTS.md`, change nothing. For other runtimes the section goes in
+  `AGENTS.md`, which they all read; don't create `CLAUDE.md`.
 
-- **Step 2 (Adapt), Stop hook:** register `factory/bin/stop-hook` for
-  interactive sessions. It runs `factory/checks.sh` when a session stops
+- **Step 2 (Adapt), Stop hook:** register the
+  Stop hook only when the runtime is `claude`; other agents don't run Claude
+  Code's hooks, and the gate runs `checks.sh` for every runtime. Register
+  `factory/bin/stop-hook` for interactive sessions. It runs `factory/checks.sh` when a session stops
   with changes that haven't passed yet, and blocks the stop once if they
   fail. Merge this into `.claude/settings.json`, creating the file if it
   doesn't exist. Keep every existing key and hook: append to an existing
@@ -119,7 +160,9 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   runner, so it never works in the checkout they edit; (2) run
   `claude setup-token`, then
   `security add-generic-password -s factory-claude-token -a "$USER" -w`
-  and paste the token at its prompt; (3) in that clone, run
+  and paste the token at its prompt (another runtime's credential, the
+  value of its `credential_env`, goes in `factory-<runtime>-token` instead;
+  copilot needs none, it uses gh's login); (3) in that clone, run
   `factory/bin/runner install`. Never ask for, read or store the token.
 
 - **Step 2 (Adapt), GitHub Actions runner (optional, off by default):** ask
@@ -129,17 +172,21 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
      warn: "Scheduled workflows run with this repo's secrets. Forks can't
      reach them, but anyone with write access can change the workflow." Go on
      only if they confirm.
-  2. Write the workflow, pinned to the installed Claude Code:
+  2. Write the workflow, pinned to the installed agent CLI (`<cli>` is
+     `claude`, `codex`, `opencode` or `copilot`; cursor can't run on
+     Actions, so the runner refuses it):
 
      ```bash
      mkdir -p .github/workflows
-     factory/bin/runner workflow --claude-version "$(claude --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" \
+     factory/bin/runner workflow --cli-version "$(<cli> --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" \
        > .github/workflows/factory-runner.yml
      ```
 
   3. Tell them to create two repository secrets themselves (never ask for
      their values, and never run `gh secret set` with a value yourself):
-     - `FACTORY_CLAUDE_TOKEN`: the output of `claude setup-token`;
+     - `FACTORY_CLAUDE_TOKEN`: the output of `claude setup-token` (for
+       another runtime, `FACTORY_<RUNTIME>_TOKEN` with its credential;
+       copilot needs none);
      - `FACTORY_GH_TOKEN`: a fine-grained personal access token (or GitHub
        App token) for this repo only, with Contents, Issues and Pull
        requests read/write and Actions read. `GITHUB_TOKEN` isn't enough:
@@ -159,13 +206,12 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   (`git status` and `git diff`), suggest the message
   `chore: install software factory`, and let them commit and push.
 
-## 2. Tell them how to use it
+## 3. Tell them how to use it
 
 - Design with `superpowers:brainstorming`, plan with `superpowers:writing-plans`,
   then run `/factory-handoff` instead of executing the plan here.
-- Start a fresh Claude Code session in this project before the first
-  `/factory run`: the factory's agents (`builder`, `reviewer-code`, …) only
-  load at session start, so this session can't spawn them.
+- Run `/factory run` in your agent, or `factory/bin/orchestrate run` in a
+  terminal.
 - Ordinary `factory` issues still work as upstream, through intake.
 - `factory/bin/doctor` checks the install at any time; `--fast` skips the
   project's checks.

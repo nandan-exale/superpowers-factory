@@ -6,10 +6,29 @@ description: Use when the user wants to update the software factory installed in
 # Factory update
 
 Update the factory in the current project from this plugin. The scripts are
-in `bin/` two levels above this skill's base directory
-(`<skill base>/../../bin`). Call that `$BIN`.
+in the plugin's `bin/`, `$BIN`, found below.
 
 Announce: "I'm using factory-update to update the software factory here."
+
+## Find the plugin
+
+The plugin's files are two levels above this skill's base directory when the
+plugin is installed whole (Claude Code). An agent that installed only the
+skill folders (`npx skills add`) doesn't have them, so fetch them:
+
+```bash
+PLUGIN="<skill base>/../.."
+if [ ! -d "$PLUGIN/vendor/factory" ]; then
+  TAG=$(git ls-remote --tags --refs https://github.com/nandan-exale/superpowers-factory 'v*' \
+        | sed 's#.*refs/tags/##' | sort -V | tail -1)
+  PLUGIN=$(mktemp -d)/superpowers-factory
+  git clone --depth 1 --branch "$TAG" https://github.com/nandan-exale/superpowers-factory "$PLUGIN"
+fi
+VENDOR="$PLUGIN/vendor/factory"; BIN="$PLUGIN/bin"
+```
+
+Ask your human partner before the clone: say it downloads the plugin's
+release `<TAG>` from GitHub into a temporary folder.
 
 1. Run `"$BIN/factory-update-plan" .` and show the result grouped:
    - `new`, `safe`: will be copied from the plugin;
@@ -30,7 +49,7 @@ Announce: "I'm using factory-update to update the software factory here."
 2. Ask your human partner to go ahead. On yes, run
    `"$BIN/factory-update-plan" . --apply-safe`.
 3. For each `merge` file: show `diff -u <project file> <plugin vendor file>`
-   (the vendor file is `<skill base>/../../vendor/factory/<path>`), say in
+   (the vendor file is `$VENDOR/<path>`), say in
    one line what upstream changed and what the project changed, and ask:
    keep the project's version, take upstream's, or merge both. For "merge
    both", edit the project file to carry upstream's change into the
