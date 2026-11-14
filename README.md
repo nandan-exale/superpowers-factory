@@ -27,6 +27,7 @@ and how much it may spend.
 - [Everyday use](#everyday-use)
 - [Configuration](#configuration)
 - [Hands-off running](#hands-off-running)
+- [Using another agent](#using-another-agent)
 - [The learning loop](#the-learning-loop)
 - [Safety: what stays with you](#safety-what-stays-with-you)
 - [Troubleshooting](#troubleshooting)
@@ -373,6 +374,55 @@ the runner writes, and missing worktrees are recreated from their pushed
 branches. Work a run didn't push is redone by the next one. If saving state
 fails twice, the run goes red and keeps `factory/jobs` as a workflow
 artifact. Check the setup with `factory/bin/doctor --ci`.
+
+---
+
+## Using another agent
+
+The factory's agents can run under Claude Code, OpenAI Codex CLI, OpenCode,
+GitHub Copilot CLI or Cursor CLI: one per project, set by `runtime` in
+`factory/config.json` (`claude`, `codex`, `opencode`, `copilot`, `cursor`).
+
+- **Install the skills** in any of these agents with
+  `npx skills add nandan-exale/superpowers-factory`. An agent that got only
+  the skill folders fetches the rest of the plugin (a tagged release) when
+  `/factory-install` runs, after asking you.
+- **`/factory-install` asks for the runtime** and, for anything but Claude,
+  the model id for each tier routing uses (`fast`, `balanced`, `strong`,
+  `frontier`), written to `runtimes.<runtime>.tiers`. Routing names tiers, so
+  nothing else changes. The factory section goes in `AGENTS.md`, which every
+  one of these agents reads.
+- **Run it** with `/factory run` in your agent, or `factory/bin/orchestrate
+  run` in a terminal.
+
+What differs per runtime:
+
+| | Cost | Resume | Notes |
+|---|---|---|---|
+| `claude` | reported by the CLI | yes | Stop hook runs `checks.sh` in interactive sessions |
+| `opencode` | reported by the CLI | yes, but it can't tell a lost session from a new one, so a lost one starts over | |
+| `codex` | tokens × `runtimes.codex.prices_usd_per_mtok`; `n/a` until you set prices | yes | |
+| `cursor` | tokens × `runtimes.cursor.prices_usd_per_mtok`; `n/a` until you set prices | yes | not on GitHub Actions (its CLI has no pinned npm package) |
+| `copilot` | `n/a` | yes | uses your `gh` login; no stored credential |
+
+- **Unknown cost.** Where cost is `n/a (<k> runs)`, the dollar budgets can't
+  see the spend: set `budgets.job_runs` (agent runs per job) and
+  `budgets.daily_runs` (per 24 hours). `factory/bin/doctor` warns until you do.
+- **Checks before the gate.** Only Claude Code runs the Stop hook. On other
+  runtimes the builder gets one nudge to fix failing checks before the gate,
+  and the gate runs `checks.sh` on every runtime.
+- **Deny rules bind only Claude Code.** `factory/runner-settings.json`'s rules
+  (secret files, force pushes) are Claude Code settings. Other agents aren't
+  held to them; the factory checks after each read-only agent that it changed
+  nothing but its own file, and the runner hands each agent only its own
+  runtime's credential. `doctor` says so.
+- **Runner credentials.** The runner reads the credential from the Keychain
+  item `factory-<runtime>-token` (Claude keeps `runner.keychain_service`), or
+  on Linux from `secret-tool` (service `factory-<runtime>-token`) or
+  `~/.config/factory/<runtime>-token` (mode 600). On GitHub Actions the secret
+  is `FACTORY_<RUNTIME>_TOKEN` (for example `FACTORY_CODEX_TOKEN`), and
+  `factory/bin/runner workflow --cli-version X.Y.Z` pins that runtime's CLI.
+  Only Claude Code needs bubblewrap and socat.
 
 ---
 
