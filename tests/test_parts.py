@@ -75,7 +75,8 @@ class QueueDependsTest(BudgetCase):
             self.job.dependency_state(7, {})
 
 
-PLAN = "# Widget plan\n\n### Task 1: Spin\n\n### Task 2: Stop\n\n### Task 3: Wobble\n"
+PLAN = ("# Widget plan\n\n**Goal:** spin widgets.\n\n---\n\n"
+        "### Task 1: Spin\n\nSpin it.\n\n### Task 2: Stop\n\nStop it.\n\n### Task 3: Wobble\n\nWobble it.\n")
 
 
 class PlannedPartTest(BudgetCase):
@@ -120,6 +121,31 @@ class PlannedPartTest(BudgetCase):
         out, job = self.planned("part: 2/2\ntasks: 2-3\ndepends: #5\n")
         self.assertIn("PLANNED: REFUSED part 1 (#5) hasn't merged yet", out)
         self.assertEqual(job["stage"], "needs-human")
+
+    def plan_md(self):
+        return (self.d / "plan.md").read_text()
+
+    def test_a_part_gets_the_header_and_only_its_tasks(self):
+        # Parts 1-3 of one 1,785-line plan each carried all 17 tasks to build 5 or 6 of them.
+        self.planned("part: 2/2\ntasks: 2-3\ndepends: #5\n")
+        plan = self.plan_md()
+        for kept in ("# Widget plan", "**Goal:** spin widgets.", "### Task 2: Stop", "Stop it.",
+                     "### Task 3: Wobble", "Wobble it."):
+            self.assertIn(kept, plan)
+        self.assertNotIn("### Task 1", plan)
+        self.assertNotIn("Spin it.", plan)
+
+    def test_a_part_plan_says_what_was_left_out_and_where_the_rest_is(self):
+        self.planned("part: 1/2\ntasks: 1-1\n")
+        plan = self.plan_md()
+        self.assertIn("### Task 1: Spin", plan)
+        self.assertNotIn("### Task 2", plan)
+        self.assertIn("only tasks 1-1 of 3", plan)
+        self.assertIn(f"`docs/superpowers/plans/2026-11-12-widget.md` at {self.sha[:12]}", plan)
+
+    def test_a_whole_plan_job_gets_the_plan_unchanged(self):
+        self.planned("")
+        self.assertEqual(self.plan_md(), PLAN)
 
 
 if __name__ == "__main__":
