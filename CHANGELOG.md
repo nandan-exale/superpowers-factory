@@ -3,6 +3,117 @@
 All notable changes to superpowers-factory. Newest first. `scripts/release`
 adds each new section.
 
+## [0.5.0] - 2026-11-14
+
+### Added
+
+- runtime adapters, starting with claude -p
+- agent prompts move to factory/agents with an access level
+- install, update and checks follow the agents to factory/agents
+- job records agent runs and costs them from run files
+- gate hook reads the job from FACTORY_JOB
+- orchestrator helpers for agents, scripts and prompts
+- read-only check for agents that may only write their own file
+- the factory pipeline as code
+- orchestrate runs the pipeline with agents as child processes
+- /factory run starts factory/bin/orchestrate
+- runner ticks factory/bin/orchestrate
+- e2e drives factory/bin/orchestrate
+- external-binaries check requires a which guard for non-baseline tools
+- config names a runtime and routes by model tier
+- job agent resolves a role's tier to the runtime's model
+- doctor checks tiers and the runtime's models
+- checks and /factory-update know tiers; old configs migrate
+- run caps and n/a cost for runtimes that report no cost
+- runtimes without a stop hook get one checks nudge before the gate
+- adapters name their binary and may rewrite the prompt file
+- Codex CLI runtime adapter
+- OpenCode runtime adapter; a resumed builder on it always gets the resuming prompt
+- Copilot CLI runtime adapter
+- Cursor CLI runtime adapter
+- runner passes each runtime its own credential and installs its CLI
+- builder and install wording for any agent
+- plugin skills find the plugin and install for any runtime
+- doctor checks the configured runtime's CLI, hooks and budgets
+- scripts/e2e and scripts/eval run on any runtime
+- run notify.command when a job waits on a human
+- Sonnet builders below high risk, Opus intake
+- a part job's plan.md holds only its own tasks
+
+### Fixed
+
+- a resumed builder is told about feedback newer than build.md
+- scripts the orchestrator runs never read its stdin
+- orchestrate refuses without its CLI and gives credentials only to agents
+- runner guards security and launchctl with shutil.which
+- scripts/eval gives each agent its tier's Claude model
+- prefix learning folders with tag- so no tag names a secrets/ folder
+- drop the runner's unused STRIPPED_ENV and TOKEN_FILE
+- builders run focused tests, not the full suite
+- factory agents ignore user-level settings
+- reviewers raise every blocking finding in one round
+- builder checks its own diff before READY
+- wait out usage limits instead of escalating jobs
+
+### Changed
+
+- docs: phase 6 portable runtime design and 6a plan
+- test: recorded claude -p output for the runtime adapter
+- chore: update software factory
+- test: claude adapter builds argv and parses recorded output
+- test: run files, sessions and wider escalate
+- test: gate hook job from the environment
+- test: orchestrator helpers
+- test: read-only check
+- test: pipeline steps, retries, budgets and learning
+- test: orchestrator loop, retries, read-only rule and stop
+- test: parts wording reads the agents from factory/agents
+- test: the factory skill hands the run to the script
+- test: resumed build names the user's feedback
+- test: job calls without input get no stdin
+- test: runner starts orchestrate with the token in its environment
+- docs: the orchestrator script, agents folder and run files
+- test: orchestrate keeps the token from job children and needs claude on PATH
+- Merge pull request #18 from nandan-exale/factory/009-run-the-factory-from
+- Merge pull request #20 from nandan-exale/factory/010-factory-learning-add-an
+- docs: phase 6b plan for the other agent CLIs
+- test: recorded codex, opencode and cursor output for the runtime adapters
+- test: tier resolution, effort fallback and legacy settings
+- test: run caps, token pricing and n/a cost
+- test: gate --check and the builder nudge
+- test: learning folder names carry the tag- prefix
+- Merge pull request #25 from nandan-exale/factory/011-run-the-factory-under
+- test: a contract every runtime adapter passes against recorded output
+- test: codex adapter against recorded output
+- test: opencode adapter against recorded output
+- test: copilot adapter against the recorded event shape
+- test: cursor adapter against recorded output
+- Merge pull request #26 from nandan-exale/factory/012-run-the-factory-under
+- test: runner credentials and workflow per runtime; install copies every adapter
+- test: doctor runtime checks
+- docs: using the factory with another agent
+- test: no assertion on the removed TOKEN_FILE
+- Merge pull request #27 from nandan-exale/factory/013-run-the-factory-under
+- docs: install into other agents with npx plugins add
+- Merge pull request #28 from nandan-exale/docs/npx-plugins-install
+- test: build each project fixture once per process and copy it
+- perf: scripts/check runs test modules in parallel
+- Merge pull request #29 from nandan-exale/perf/test-suite
+- Merge pull request #30 from nandan-exale/fix/agent-permissions
+- Merge pull request #31 from nandan-exale/fix/reviewer-rounds
+- Merge pull request #32 from nandan-exale/fix/builder-self-check
+- docs: design and plan for notifying when a job waits on a human
+- docs: notify.command in the README
+- Merge pull request #33 from nandan-exale/feat/notify-waiting
+- Merge pull request #34 from nandan-exale/fix/usage-limits
+- docs: routing by tier, and the builder defaults
+- Merge pull request #35 from nandan-exale/feat/cheaper-routing
+- chore: approver escalates install changes by behaviour, not every vendored edit
+- Merge pull request #36 from nandan-exale/chore/approver-rule
+- Merge pull request #37 from nandan-exale/feat/trim-part-plans
+- chore: notify by macOS notification when a factory job waits
+- Merge pull request #38 from nandan-exale/chore/repo-notify
+
 ## [0.4.0] - 2026-11-13
 
 ### Added
