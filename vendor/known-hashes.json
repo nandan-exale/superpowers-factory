@@ -129,6 +129,7 @@
     "516913ecceed151effdb050d64efec8df047abad62ee099924fe6899d509c686",
     "739ce0756248fff46beabeb05fb00109ddd0c1102d0011390e33d662ae042e88",
     "d35f12ae5666aa7ddd3e8a371c56762fa8362709a884bdc4184b1bbeb1490854",
+    "ee7e12492cf5fffe54fe7ad5064cca8c68289148e33ee1f418189209e7e26e3c",
     "f103965d70168f7f75a16276f3401d5de54b16836b9c0a9c0693d6c34350b891"
   ],
   "factory/bin/job": [
@@ -151,6 +152,7 @@
     "550dd00bd1bbb6d68b80503fe4d931b548676a8a1ae2e711023c3a3a91f155b4",
     "573bfeebd0f8839f8153c165db024e3a51b0332f9080985639f52051e96358a7",
     "581b18ee84478149624c79890aef9e74600f053846bdd03a379c160f59056bc5",
+    "592dd4b4c416c7a7bb513d87dd8651ec0f464c7f97ba1df962b4f79b01c91720",
     "5d1fb38814d611b7eab29e4e00234959081c0b33b0836f1eb5abbf542c03d578",
     "6154e84366ff2a63151b4bf1f5d9703bfc51fb006fd1535e967eb46dee92ec26",
     "6e55dd09c9a1ffce507714351e75ec8285d3315adb11f541457b87be0a07e578",
@@ -177,7 +179,9 @@
     "e8036eec27efce436e71b47ce4472fc88a97ef83ea5a9923f041a5d4ce0b85a8",
     "f03b53ed78432af236d976588fe64ceaa65fa1da092d18fc8dccdb04e1ca1042"
   ],
-  "factory/bin/orchestrate": [],
+  "factory/bin/orchestrate": [
+    "5012eab85762dd464b5b6a3cf1fc77f10755ba341b36405b095b61aac6ec4d7f"
+  ],
   "factory/bin/route": [
     "31aced93230c3cd8d2819f297d6868d4c7f3bafba25009ee16673da8d8f7ad5a",
     "e245d96e93203c4551ccbcde3dd0b9b8698d0dc167a4b142837a26aea986e3ec"
@@ -240,13 +244,27 @@
     "99508421e333900965f8e2f5c5572fa1a7b78542189cd2abb6a5358ba43dbd95",
     "d70d409b3b5b9a9bbd85c37aef11aa75c86d727ba885724dbaf7c7a163fde202"
   ],
-  "factory/lib/orchestrator/__init__.py": [],
-  "factory/lib/orchestrator/agents.py": [],
-  "factory/lib/orchestrator/jobcli.py": [],
-  "factory/lib/orchestrator/loop.py": [],
-  "factory/lib/orchestrator/pipeline.py": [],
-  "factory/lib/orchestrator/prompts.py": [],
-  "factory/lib/orchestrator/readonly.py": [],
+  "factory/lib/orchestrator/__init__.py": [
+    "d5cc3761e383e901c58dbd4f4b8f9442081dfb349e590c0debaec74446e0a924"
+  ],
+  "factory/lib/orchestrator/agents.py": [
+    "0d99674338850e7f3d76d6c76588e9c2551656d24f203b1c9841c026ed890ec8"
+  ],
+  "factory/lib/orchestrator/jobcli.py": [
+    "b6e110df3bb4eb79a444ea16bb8ad4ac532b718de04873bb47e43ebd5473199f"
+  ],
+  "factory/lib/orchestrator/loop.py": [
+    "05d3a707fbe3a7d3627e70dcd178fa89b0526d3a257c6df24dd3d14921436885"
+  ],
+  "factory/lib/orchestrator/pipeline.py": [
+    "6df6031ca8554927c97549ca36e13d2e0a50481c330129db6910739b7cee56d9"
+  ],
+  "factory/lib/orchestrator/prompts.py": [
+    "06584c376e482b7689c6c0647d527da9575c067c19e71d348f38cb05ada1ccfa"
+  ],
+  "factory/lib/orchestrator/readonly.py": [
+    "37354b7917ad57163af41efef6d8f6a08137f5bb87c8a1eb0889595bad71c40f"
+  ],
   "factory/lib/runtimes/__init__.py": [
     "be2f3de4c1c00a40cd82291eee0dd617653c9c684e03244c84c33c4f1ff48f85"
   ],
