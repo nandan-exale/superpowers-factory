@@ -210,7 +210,23 @@ that part is rejected or its issue is closed unmerged, the next part stops at
 ### What needs me?
 
 The factory comments as you, and GitHub doesn't notify you about your own
-comments. So check two places instead:
+comments. So set up a notification, or check two places instead:
+
+- **A notify command.** Set `notify.command` in `factory/config.json` and the
+  factory runs it whenever a job moves to needs-human or needs-info. It runs
+  without a shell; the details arrive as `FACTORY_NOTIFY_TITLE`,
+  `FACTORY_NOTIFY_MESSAGE`, `FACTORY_NOTIFY_URL`, `FACTORY_NOTIFY_STAGE` and
+  `FACTORY_NOTIFY_JOB`. A macOS desktop notification:
+
+  ```json
+  "notify": {"command": ["osascript", "-e", "display notification (system attribute \"FACTORY_NOTIFY_MESSAGE\") with title (system attribute \"FACTORY_NOTIFY_TITLE\")"]}
+  ```
+
+  For your phone, point it at a small script that sends the same variables to
+  ntfy.sh: `curl -H "Title: $FACTORY_NOTIFY_TITLE" -H "Click: $FACTORY_NOTIFY_URL" -d "$FACTORY_NOTIFY_MESSAGE" ntfy.sh/<your-topic>`.
+  The command runs where the factory runs, so a desktop notification works for
+  `/factory run` and the macOS runner, not on GitHub Actions. If it fails, the
+  factory prints a `NOTE:` and carries on.
 
 - **The digest issue.** Once a day after `digest.hour` (local time), the
   factory posts a report on the pinned issue labeled `factory:digest`. Its
@@ -259,6 +275,7 @@ change this file itself; edit it by hand and commit.
 | `ports` | `{"base": 5100, "step": 10}` | Ports given to each job's dev server. |
 | `labels` | `factory`, `factory:planned`, … | GitHub label names, if you need different ones. |
 | `digest` | `{"enabled": true, "hour": 9, "days": 1}` | `enabled`, `hour` (local, 0–23) and `days` (the period the digest covers). Set `enabled` to `false` to stop posting. |
+| `notify` | none | `{"command": [...]}`: a program and its arguments, run whenever a job moves to needs-human or needs-info. See "What needs me?". |
 
 ### Models and effort
 
