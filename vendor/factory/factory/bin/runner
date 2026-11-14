@@ -182,6 +182,8 @@ def token_problem():
 
 
 def read_keychain(service):
+    if not shutil.which("security"):
+        return None
     res = subprocess.run(["security", "find-generic-password", "-s", service, "-w"],
                          capture_output=True, text=True)
     token = res.stdout.strip()
@@ -647,6 +649,8 @@ def install_systemd(runner, dry_run):
 
 
 def launchctl(*args):
+    if not shutil.which("launchctl"):
+        die("launchctl not found; the macOS runner needs launchd")
     return subprocess.run(["launchctl", *args], capture_output=True, text=True)
 
 
