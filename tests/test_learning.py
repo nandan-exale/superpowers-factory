@@ -5,7 +5,6 @@ import os
 import re
 import time
 import unittest
-from pathlib import Path
 
 from budget_case import AGENTS, BudgetCase
 
@@ -158,7 +157,7 @@ class LearnFileTest(LearningCase):
             return "https://github.com/o/r/issues/42\n" if args[:2] == ("issue", "create") else ""
         self.job.gh = fake_gh
         self.learner_cost = 0.0
-        self.job.cost_for_needle = lambda needle: self.learner_cost
+        self.job.cost_for_folder = lambda folder: self.learner_cost
         d = self.job.tag_dir("missing-test")
         d.mkdir(parents=True)
         (d / "evidence.md").write_text("# Recurring finding: missing-test\n\n> a.py:1 add a test @someone\n")
@@ -307,7 +306,7 @@ class LearnFileTest(LearningCase):
         self.assertEqual(len([c for c in self.issue_calls if c[:2] == ("issue", "create")]), 1)
 
 class LearnerCostTest(LearningCase):
-    """The learner's cost is found from a real transcript, with no stub."""
+    """The learner's cost is read from its run file, with no stub."""
 
     def setUp(self):
         super().setUp()
@@ -316,35 +315,15 @@ class LearnerCostTest(LearningCase):
         d.mkdir(parents=True)
         (d / "evidence.md").write_text("# Recurring finding: missing-test\n")
         (d / "proposal.md").write_text("PROPOSAL: X\n\n## Problem\nx\n")
-        skill = (Path(__file__).resolve().parents[1] / "vendor/factory/.claude/skills/factory/SKILL.md").read_text()
-        self.template = "Job folder: <repo>/factory/jobs/learning/<tag-dir>/."
-        self.skill = skill
-
-    def write_transcript(self, first_line):
-        sub = self.job.transcripts_dir() / "session-1" / "subagents"
-        sub.mkdir(parents=True)
-        (sub / "agent-x.jsonl").write_text(
-            json.dumps({"message": {"content": first_line}}) + "\n"
-            + json.dumps({"type": "assistant", "message": {
-                "id": "m1", "model": "claude-opus-5-5",
-                "usage": {"input_tokens": 1_000_000, "output_tokens": 0}}}) + "\n")
-
-    def test_skill_prompt_form_is_the_absolute_job_folder_form(self):
-        self.assertIn(self.template, self.skill)
+        (d / "runs").mkdir()
+        (d / "runs" / "001-learner.json").write_text(json.dumps(
+            {"cost_usd": 4.0, "cost_by_model": {"claude-opus-5-5": 4.0}}))
 
     def test_learn_file_logs_the_cost_of_a_learner_started_the_way_the_skill_says(self):
-        prompt = self.template.replace("<repo>", str(self.job.REPO)).replace("<tag-dir>", "missing-test")
-        self.write_transcript(f"{prompt} missing-test")
         self.run_main("learn-file", "missing-test")
         [entry] = self.job.read_log(self.job.LEARNING / "log.jsonl")
         self.assertAlmostEqual(entry["delta_usd"], 4.0)
         self.assertAlmostEqual(self.job.daily_spend(), 4.0)
-
-    def test_relative_job_folder_does_not_match(self):
-        self.write_transcript("Job folder: factory/jobs/learning/missing-test/. missing-test")
-        self.run_main("learn-file", "missing-test")
-        [entry] = self.job.read_log(self.job.LEARNING / "log.jsonl")
-        self.assertEqual(entry["delta_usd"], 0)
 
 
 class EscalateTest(LearningCase):
@@ -366,7 +345,8 @@ class EscalateTest(LearningCase):
         self.assertEqual((self.d / "decision.md").read_text().split("\n")[0], "ESCALATE")
         self.assertTrue(self.gh_calls("issue", "comment") or self.gh_calls("pr", "comment"))
 
-    def test_escalate_outside_review_dies(self):
+    def test_escalate_outside_a_running_stage_dies(self):
+        self.job.save({**self.job.load(self.job_id), "stage": "needs-human"})
         with self.assertRaises(SystemExit):
             self.escalate()
 

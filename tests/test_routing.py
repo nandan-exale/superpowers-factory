@@ -1,7 +1,6 @@
 import contextlib
 import io
 import json
-import os
 import subprocess
 import tempfile
 import unittest
@@ -20,7 +19,6 @@ LOW = {
 class RoutingTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        os.environ["CLAUDE_CONFIG_DIR"] = self.tmp.name
         self.project = FactoryProject(self.tmp.name)
         self.project.set_issue("Build the widget.", labels=("factory",))
         self.job = self.project.load_job()
@@ -28,7 +26,6 @@ class RoutingTestCase(unittest.TestCase):
         self.d = self.job.job_dir(self.job_id)
 
     def tearDown(self):
-        os.environ.pop("CLAUDE_CONFIG_DIR", None)
         self.tmp.cleanup()
 
     def accept(self, risk="low", surfaces="none", decision="ACCEPT"):

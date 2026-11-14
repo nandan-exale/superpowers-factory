@@ -1,6 +1,5 @@
 import contextlib
 import io
-import os
 import subprocess
 import tempfile
 import types
@@ -26,7 +25,6 @@ def gh_comment(cid, body, login="operator", kind="User", **extra):
 class PrFeedbackTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        os.environ["CLAUDE_CONFIG_DIR"] = self.tmp.name
         self.project = FactoryProject(self.tmp.name)
         self.project.set_issue("Build the widget.", labels=("factory",))
         self.job = self.project.load_job()
@@ -36,7 +34,6 @@ class PrFeedbackTestCase(unittest.TestCase):
         self.fake_github()
 
     def tearDown(self):
-        os.environ.pop("CLAUDE_CONFIG_DIR", None)
         self.tmp.cleanup()
 
     def fake_github(self, comments=(), inline=(), reviews=(), issues=(), editors=None):
