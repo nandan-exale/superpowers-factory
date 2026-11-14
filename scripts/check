@@ -3,14 +3,17 @@
 
 import argparse
 import ast
+import concurrent.futures
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+TEST_WORKERS = 8  # more gains little: the tests contend for process spawning, not CPU
 FACTORY = Path("vendor/factory/factory")
 JSON_FILES = (
     ".claude/settings.json",
@@ -263,12 +266,22 @@ def check_external_binaries(root, opts):
     return problems
 
 
+def run_test_module(root, module):
+    return subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", f"{module}.py", "-q"],
+                          cwd=root, capture_output=True, text=True)
+
+
 def check_tests(root, opts):
-    res = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"],
-                         cwd=root, capture_output=True, text=True)
-    if res.returncode == 0:
-        return []
-    return ["unit tests failed; last lines of output:"] + res.stderr.strip().splitlines()[-15:]
+    """Each top-level tests/test*.py module (what `discover` finds here) in its own process, several
+    at once: the tests mostly wait on git and other subprocesses, so one at a time leaves cores idle."""
+    modules = sorted(p.stem for p in (root / "tests").glob("test*.py"))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(TEST_WORKERS, os.cpu_count() or 1)) as pool:
+        results = list(pool.map(lambda m: (m, run_test_module(root, m)), modules))
+    problems = []
+    for module, res in results:
+        if res.returncode != 0:
+            problems += [f"{module} failed; last lines of output:"] + res.stderr.strip().splitlines()[-15:]
+    return problems
 
 
 CHECKS = [
