@@ -11,10 +11,10 @@ from pathlib import Path
 from factory_project import FactoryProject
 
 AGENTS = {
-    "spec-writer": {"model": "opus", "effort": "high"},
-    "builder": {"model": "opus", "effort": "high"},
-    "approver": {"model": "opus", "effort": "high"},
-    "reviewers": {"code": {"model": "haiku", "effort": "medium"}},
+    "spec-writer": {"tier": "strong", "effort": "high"},
+    "builder": {"tier": "strong", "effort": "high"},
+    "approver": {"tier": "strong", "effort": "high"},
+    "reviewers": {"code": {"tier": "fast", "effort": "medium"}},
 }
 
 
