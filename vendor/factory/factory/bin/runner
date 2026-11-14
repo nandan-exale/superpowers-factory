@@ -54,7 +54,6 @@ KEEP_RUNS = 50
 ORCHESTRATE = FACTORY / "bin" / "orchestrate"
 CHILD = None  # the running orchestrate process, for the SIGTERM handler
 STOP_SECONDS = 30  # how long orchestrate gets to stop its agents after SIGTERM
-STRIPPED_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN")  # a subset of CREDENTIAL_VARS
 
 
 def die(message):
@@ -201,7 +200,6 @@ def has_work():
     return any(line.split("\t", 1)[0] in {"resume", "new"} for line in res.stdout.splitlines())
 
 
-TOKEN_FILE = token_file("claude")
 SANDBOX_TOOLS = ("bwrap", "socat")
 _token_problem = None
 
