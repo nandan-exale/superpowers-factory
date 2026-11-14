@@ -85,6 +85,10 @@ the build order, not a suggestion.
   opens a PR, pushes anything other than your job branch, or changes files
   outside your worktree. List each skipped step under `## Deviations` as
   `For the human: <step>`.
+- When the header has `Tasks: N-M of T.`, this job is one part of the plan:
+  carry out only the tasks in `Tasks:`. Earlier tasks are already merged on
+  the base branch; don't start later ones. `## Plan tasks` in build.md lists
+  only your range.
 - Never edit the spec or plan files the job was planned from (`intake.md`
   names them); the gate fails the round if you do. If a task asks you to,
   skip that step and record it under `## Deviations`.
@@ -123,8 +127,11 @@ command you ran and its result, or what the page showed.
   `git log --oneline`. One commit per distinct piece of work.
 - Stage explicit paths, never `git add -A`. Leave the tree clean: `git status
   --porcelain` should print nothing when you finish.
-- Push with `git push -u origin <branch>`. Push only the job branch, never
-  anything else.
+- Push with `cd <main checkout> && factory/bin/job push <job-id>`. It scans
+  your branch for secrets first. If it prints `SECRET:` lines, nothing was
+  pushed: remove the secret from your commits (amend or rebase locally; the
+  branch isn't pushed yet) and run it again. Never push any other way, and
+  never push anything but the job branch.
 - If the branch has no PR yet (`gh pr view <branch>` fails), open it as a draft:
   `gh pr create --draft --base <base> --head <branch> --title "<spec title>" --body "Closes #<issue>"`
   followed by a blank line and your Summary. Once it exists, just push; the PR

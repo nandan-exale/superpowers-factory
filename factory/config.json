@@ -1,14 +1,33 @@
 {
   "concurrency": 3,
   "max_rounds": 3,
-  "budgets": { "job_usd": 25, "job_hours": 6, "daily_usd": 100 },
+  "budgets": {
+    "job_usd": 15,
+    "job_hours": 6,
+    "daily_usd": 50
+  },
   "learning": {
     "threshold": 3,
     "window_days": 30,
-    "tags": ["missing-test", "weakened-test", "error-handling", "convention", "docs-not-updated",
-             "dead-code", "spec-gap", "input-validation", "secrets", "a11y", "ui-consistency"]
+    "tags": [
+      "missing-test",
+      "weakened-test",
+      "error-handling",
+      "convention",
+      "docs-not-updated",
+      "dead-code",
+      "spec-gap",
+      "input-validation",
+      "secrets",
+      "a11y",
+      "ui-consistency"
+    ]
   },
-  "runner": { "interval_minutes": 15, "max_minutes": 120, "keychain_service": "factory-claude-token" },
+  "runner": {
+    "interval_minutes": 15,
+    "max_minutes": 120,
+    "keychain_service": "factory-claude-token"
+  },
   "base_branch": "main",
   "merge_method": "merge",
   "labels": {
@@ -16,44 +35,109 @@
     "needs_info": "factory:needs-info",
     "needs_human": "factory:needs-human",
     "planned": "factory:planned",
-    "learning": "factory:learning"
+    "learning": "factory:learning",
+    "digest": "factory:digest",
+    "revert": "factory:revert",
+    "risk_ok": "factory:risk-ok"
   },
   "pr_feedback": {
     "allowed": []
   },
-  "model_aliases": ["fable", "opus", "sonnet", "haiku"],
-  "effort_levels": ["low", "medium", "high", "xhigh", "max"],
+  "model_aliases": [
+    "fable",
+    "opus",
+    "sonnet",
+    "haiku"
+  ],
+  "effort_levels": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
   "agents": {
-    "intake": { "model": "fable", "effort": "high" },
-    "learner": { "model": "opus", "effort": "high" }
+    "intake": {
+      "model": "sonnet",
+      "effort": "high"
+    },
+    "learner": {
+      "model": "sonnet",
+      "effort": "high"
+    }
   },
   "routing": {
     "low": {
-      "spec-writer": { "model": "opus",   "effort": "medium" },
-      "builder":     { "model": "opus",   "effort": "medium" },
-      "approver":    { "model": "opus",   "effort": "medium" },
-      "code":        { "model": "haiku",  "effort": "medium" }
+      "spec-writer": {
+        "model": "sonnet",
+        "effort": "medium"
+      },
+      "builder": {
+        "model": "sonnet",
+        "effort": "medium"
+      },
+      "approver": {
+        "model": "sonnet",
+        "effort": "medium"
+      },
+      "code": {
+        "model": "haiku",
+        "effort": "medium"
+      }
     },
     "medium": {
-      "spec-writer": { "model": "opus",   "effort": "high" },
-      "builder":     { "model": "opus",   "effort": "high" },
-      "approver":    { "model": "opus",   "effort": "high" },
-      "code":        { "model": "sonnet", "effort": "high" }
+      "spec-writer": {
+        "model": "sonnet",
+        "effort": "high"
+      },
+      "builder": {
+        "model": "sonnet",
+        "effort": "high"
+      },
+      "approver": {
+        "model": "sonnet",
+        "effort": "high"
+      },
+      "code": {
+        "model": "sonnet",
+        "effort": "high"
+      }
     },
     "high": {
-      "spec-writer": { "model": "opus",   "effort": "high" },
-      "builder":     { "model": "opus",   "effort": "high" },
-      "approver":    { "model": "opus",   "effort": "high" },
-      "code":        { "model": "sonnet", "effort": "high" }
+      "spec-writer": {
+        "model": "opus",
+        "effort": "high"
+      },
+      "builder": {
+        "model": "opus",
+        "effort": "high"
+      },
+      "approver": {
+        "model": "sonnet",
+        "effort": "high"
+      },
+      "code": {
+        "model": "sonnet",
+        "effort": "high"
+      }
     }
   },
   "surface_reviewers": {
     "ui": {
-      "ux": { "model": "sonnet", "effort": "medium" },
-      "ui": { "model": "haiku",  "effort": "medium" }
+      "ux": {
+        "model": "sonnet",
+        "effort": "medium"
+      },
+      "ui": {
+        "model": "haiku",
+        "effort": "medium"
+      }
     },
     "security": {
-      "security": { "model": "opus", "effort": "high" }
+      "security": {
+        "model": "opus",
+        "effort": "high"
+      }
     }
   },
   "protected_paths": [
@@ -63,12 +147,83 @@
     ".claude/agents/*",
     ".claude/skills/factory/*"
   ],
-  "ports": { "base": 5100, "step": 10 },
+  "ports": {
+    "base": 5100,
+    "step": 10
+  },
   "prices_usd_per_mtok": {
-    "claude-fable-5-2":  { "input": 8.0,  "output": 40.0, "cache_write_5m": 10.0, "cache_write_1h": 16.0, "cache_read": 0.20 },
-    "claude-fable-5-1":  { "input": 10.0, "output": 50.0, "cache_write_5m": 12.5, "cache_write_1h": 20.0, "cache_read": 0.25 },
-    "claude-opus-5-5":   { "input": 4.0,  "output": 20.0, "cache_write_5m": 5.0,  "cache_write_1h": 8.0,  "cache_read": 0.20 },
-    "claude-sonnet-5-5": { "input": 2.0,  "output": 10.0, "cache_write_5m": 2.5,  "cache_write_1h": 4.0,  "cache_read": 0.20 },
-    "claude-haiku-5-5":  { "input": 0.10, "output": 0.50, "cache_write_5m": 0.125, "cache_write_1h": 0.20, "cache_read": 0.01 }
+    "claude-fable-5-2": {
+      "input": 8.0,
+      "output": 40.0,
+      "cache_write_5m": 10.0,
+      "cache_write_1h": 16.0,
+      "cache_read": 0.2
+    },
+    "claude-fable-5-1": {
+      "input": 10.0,
+      "output": 50.0,
+      "cache_write_5m": 12.5,
+      "cache_write_1h": 20.0,
+      "cache_read": 0.25
+    },
+    "claude-opus-5-5": {
+      "input": 4.0,
+      "output": 20.0,
+      "cache_write_5m": 5.0,
+      "cache_write_1h": 8.0,
+      "cache_read": 0.2
+    },
+    "claude-sonnet-5-5": {
+      "input": 2.0,
+      "output": 10.0,
+      "cache_write_5m": 2.5,
+      "cache_write_1h": 4.0,
+      "cache_read": 0.2
+    },
+    "claude-haiku-5-5": {
+      "input": 0.1,
+      "output": 0.5,
+      "cache_write_5m": 0.125,
+      "cache_write_1h": 0.2,
+      "cache_read": 0.01
+    }
+  },
+  "digest": {
+    "enabled": true,
+    "hour": 9,
+    "days": 1
+  },
+  "handoff": {
+    "max_tasks_per_part": 8
+  },
+  "risky_paths": [
+    ".github/workflows/**",
+    "**/package.json",
+    "**/package-lock.json",
+    "**/pnpm-lock.yaml",
+    "**/yarn.lock",
+    "**/pyproject.toml",
+    "**/requirements*.txt",
+    "**/poetry.lock",
+    "**/uv.lock",
+    "**/Cargo.toml",
+    "**/Cargo.lock",
+    "**/go.mod",
+    "**/go.sum",
+    "**/Gemfile",
+    "**/Gemfile.lock",
+    "Dockerfile",
+    "**/*.tf"
+  ],
+  "secret_scan": {
+    "allow": [
+      "**/*.test.*",
+      "**/fixtures/**"
+    ]
+  },
+  "watch": {
+    "enabled": true,
+    "max_minutes": 60,
+    "ignore_workflows": []
   }
 }

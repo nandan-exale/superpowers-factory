@@ -25,11 +25,20 @@ Usage:
   job learn-file <tag>           learner's proposal.md → a factory:learning issue (add `factory` to build it)
   job summary [<job>...]         table of jobs: issue, stage, PR, cost, time
   job costs <job>                cost of the job's agents by model
+  job report [--days N] [--json] [--write]   spend, throughput, what needs you, findings; --write → jobs/report.json
+  job digest                     post the report on the factory:digest issue, once a day after digest.hour
+  job pause <reason>             stop the queue: nothing starts and nothing merges until `job resume`
+  job resume                     clear the pause (a human runs this once the base branch is fixed)
+  job scan <job-id>              secret patterns in the branch's added lines; exit 1 on a hit
+  job push <job>                 the builder's push: scan, then push the job branch (nothing is pushed on a hit)
+  job watch                      check base-branch CI for merged jobs; red → revert PR and pause
+  job ensure-worktree <job>      recreate a missing worktree (fresh CI machines) from the job branch or the base
 
 <job> is a job id (004-dark-mode) or an issue number (12).
 """
 
 import fcntl
+import fnmatch
 import json
 import os
 import re
@@ -57,7 +66,7 @@ TRANSITIONS = {
     "review": {"approve", "build", "needs-human"},
     "approve": {"merging", "needs-human"},
     "merging": {"needs-human"},
-    "needs-human": {"build", "rejected"},
+    "needs-human": {"build", "rejected", "merging"},
 }
 TERMINAL = {"merged", "rejected"}
 # Any unfinished job can move to merged once its PR is merged on GitHub,
@@ -339,6 +348,294 @@ def reviewers(job):
     return list(job["agents"]["reviewers"])
 
 
+# ---- Pause -----------------------------------------------------------------
+
+PAUSE_FILE = JOBS / "paused.json"
+
+
+def paused():
+    """The pause record, or None. An unreadable file still pauses: only `job resume` clears it."""
+    try:
+        return json.loads(PAUSE_FILE.read_text())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return {"reason": "paused.json is unreadable; run factory/bin/job resume", "job": None, "sha": None,
+                "time": "?"}
+
+
+def pause(reason, job_id=None, sha=None):
+    JOBS.mkdir(parents=True, exist_ok=True)
+    tmp = JOBS / "paused.json.tmp"
+    tmp.write_text(json.dumps({"reason": reason, "job": job_id, "sha": sha, "time": now()}) + "\n")
+    tmp.replace(PAUSE_FILE)
+
+
+def paused_line(p):
+    return f"PAUSED: {p['reason']} (since {p['time']}; run factory/bin/job resume after fixing)"
+
+
+def cmd_pause(reason):
+    require(reason.strip(), "give a reason: factory/bin/job pause <reason>")
+    pause(reason.strip())
+    print(paused_line(paused()))
+
+
+def cmd_resume():
+    p = paused()
+    if not p:
+        print("RESUME: not paused")
+        return
+    PAUSE_FILE.unlink(missing_ok=True)
+    print(f"RESUME: cleared {p['reason']} (since {p['time']})")
+
+
+def risk_ok_label():
+    return LABELS.get("risk_ok", "factory:risk-ok")
+
+
+def risky_listed(job):
+    """`- <status> <path>` lines under `## Risky changes` in the current round's checks.md."""
+    path = round_dir(job) / "checks.md"
+    body = section(path, "Risky changes") if path.exists() else None
+    return [line[2:].strip() for line in (body or "").splitlines() if line.startswith("- ")]
+
+
+def has_risk_ok(job):
+    return risk_ok_label() in {l["name"] for l in fetch_issue(job["issue"])["labels"]}
+
+
+def risk_approved(job):
+    """The label covers only the commit a human saw stopped: the one recorded on needs-human → merging."""
+    sha = job.get("risk_ok_sha")
+    return bool(sha) and has_risk_ok(job) and git(job, "rev-parse", "HEAD").stdout.strip() == sha
+
+
+# ---- Secret scan -------------------------------------------------------------
+
+SECRET_RULES = (
+    ("private key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("aws access key", re.compile(r"AKIA[0-9A-Z]{16}")),
+    ("github token", re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,}")),
+    ("anthropic key", re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}")),
+    ("slack token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}")),
+    ("assigned secret", re.compile(r"(api[_-]?key|secret|token|password)\s*[:=]\s*[\"'][^\"']{16,}[\"']", re.I)),
+)
+HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+SECRET_WHY = ("A possible secret reached the remote branch (see `## Secrets` in this round's checks.md). "
+              "Rotate it, then remove it from the branch history before giving feedback.")
+
+
+def path_matches(path, pattern):
+    """fnmatch (whose * also crosses /), plus `**/x` matching `x` at the root. Same as the gate's."""
+    return fnmatch.fnmatch(path, pattern) or (pattern.startswith("**/") and fnmatch.fnmatch(path, pattern[3:]))
+
+
+def added_lines(diff):
+    """(path, new line number, text) for every added line of a unified diff.
+    Hunk bodies are read by their line counts, so an added line that looks like a header is still scanned,
+    and a path git couldn't print plainly is kept as printed rather than skipped."""
+    path, line, old_left, new_left = "?", 0, 0, 0
+    for text in diff.split("\n"):
+        if old_left > 0 or new_left > 0:
+            if text.startswith("+"):
+                yield path, line, text[1:]
+                line, new_left = line + 1, new_left - 1
+            elif text.startswith("-"):
+                old_left -= 1
+            elif text.startswith(" "):
+                line, old_left, new_left = line + 1, old_left - 1, new_left - 1
+            continue
+        if text.startswith("+++ "):
+            path = text[6:] if text.startswith("+++ b/") else text[4:]
+            continue
+        m = HUNK.match(text)
+        if m:
+            old_left, line, new_left = int(m.group(1) or 1), int(m.group(2)), int(m.group(3) or 1)
+
+
+def mask(value):
+    return f"{value[:4]}… ({len(value)} chars)"
+
+
+def secret_hits(worktree):
+    """`path:line rule: masked` for each line any branch commit adds that matches a secret rule.
+    Every commit is scanned, because a secret deleted in a later commit is still pushed in history."""
+    allow = (CONFIG.get("secret_scan") or {}).get("allow", ["**/*.test.*", "**/fixtures/**"])
+    diff = run(["git", "-c", "core.quotePath=false", "log", "-p", "--no-merges", "--no-color", "--no-ext-diff",
+                "--format=", "--unified=0", f"origin/{BASE}..HEAD"], cwd=worktree).stdout
+    hits = {}
+    for path, n, text in added_lines(diff):
+        if any(path_matches(path, pattern) for pattern in allow):
+            continue
+        for name, rule in SECRET_RULES:
+            m = rule.search(text)
+            if m:
+                hits.setdefault((path, name, m.group(0)), f"{path}:{n} {name}: {mask(m.group(0))}")
+                break
+    return list(hits.values())
+
+
+def cmd_scan(job):
+    hits = secret_hits(job["worktree"])
+    for hit in hits:
+        print(f"SECRET: {hit}")
+    if hits:
+        sys.exit(1)
+    print("SCAN: clean")
+
+
+def cmd_push(job):
+    require(job["stage"] == "build", f"{job['id']} is in {job['stage']}; only the builder pushes, in build")
+    git(job, "fetch", "origin", BASE)
+    hits = secret_hits(job["worktree"])
+    if hits:
+        for hit in hits:
+            print(f"SECRET: {hit}")
+        print("Nothing was pushed. Remove the secret from your commits (amend or rebase; the branch "
+              "isn't pushed yet), then run factory/bin/job push again.")
+        sys.exit(1)
+    git(job, "push", "-u", "origin", job["branch"])
+    print(f"PUSHED: {job['branch']}")
+
+
+def gate_found_secrets(job):
+    body = section(round_dir(job) / "checks.md", "Secrets") if (round_dir(job) / "checks.md").exists() else None
+    return bool(body) and body != "None found."
+
+
+# ---- Watching the base branch -------------------------------------------------
+
+WATCH_DEFAULTS = {"enabled": True, "max_minutes": 60, "ignore_workflows": []}
+RED_CONCLUSIONS = {"failure", "timed_out", "cancelled"}
+
+
+def watch_config():
+    return {**WATCH_DEFAULTS, **(CONFIG.get("watch") or {})}
+
+
+def record_watch(job):
+    """After a merge: remember the commit that landed on the base branch, to watch its CI."""
+    if not watch_config()["enabled"]:
+        return
+    try:
+        sha = gh_json("pr", "view", str(job["pr"]), "--json", "mergeCommit")["mergeCommit"]["oid"]
+    except (Refused, KeyError, TypeError) as e:
+        print(f"NOTE: not watching {BASE} after #{job['pr']}: {str(e).splitlines()[0] if str(e) else e!r}")
+        return
+    job["watch"] = {"sha": sha, "since": now(), "state": "watching"}
+
+
+def watch_verdict(runs, cfg, since):
+    """(state, failed runs) for a merge commit's workflow runs on the base branch."""
+    runs = [r for r in runs if r.get("workflowName") not in cfg["ignore_workflows"]]
+    failed = [r for r in runs if r.get("conclusion") in RED_CONCLUSIONS]
+    if failed:
+        return "red", failed
+    if runs and all(r.get("status") == "completed" for r in runs):
+        return "green", []
+    minutes = (datetime.now(timezone.utc) - parse_time(since)).total_seconds() / 60
+    if not runs and minutes > cfg["max_minutes"]:
+        return "no-ci", []
+    return "watching", []
+
+
+def cmd_watch():
+    cfg = watch_config()
+    if not cfg["enabled"]:
+        print("WATCH: off")
+        return
+    for job in all_jobs():
+        w = job.get("watch") or {}
+        if w.get("state") != "watching":
+            continue
+        try:
+            runs = gh_json("run", "list", "--branch", BASE, "--commit", w["sha"], "--limit", "50",
+                           "--json", "status,conclusion,workflowName,url")
+        except Refused as e:
+            print(f"NOTE: {job['id']}: {BASE} checks unknown, still watching: {str(e).splitlines()[0]}")
+            continue
+        state, failed = watch_verdict(runs, cfg, w["since"])
+        if state == "watching":
+            continue
+        if state == "red":
+            revert_for(job, failed)
+            continue
+        job["watch"] = {**w, "state": state}
+        save(job)
+        print(f"WATCH: {job['id']} {state}" + (f"; no CI runs on {BASE} within {cfg['max_minutes']} min" if state == "no-ci" else ""))
+
+
+def revert_label():
+    return LABELS.get("revert", "factory:revert")
+
+
+def revert_command(method, sha, count):
+    """git args that undo a PR as it landed: a merge commit, a squash commit, or `count` rebased commits."""
+    if method == "merge":
+        return ["revert", "--no-edit", "-m", "1", sha]
+    if method == "rebase" and count > 1:
+        return ["revert", "--no-edit", f"{sha}~{count}..{sha}"]
+    return ["revert", "--no-edit", sha]
+
+
+def open_revert_pr(job, failed):
+    """Revert the merge on factory/revert-<id> in a throwaway worktree, push it, open a PR. Never merges."""
+    sha, method = job["watch"]["sha"], CONFIG["merge_method"]
+    branch = f"factory/revert-{job['id']}"
+    path = REPO / ".worktrees" / f"revert-{job['id']}"
+    run_net(["git", "fetch", "origin", BASE])
+    run(["git", "worktree", "add", "-q", "-b", branch, str(path), f"origin/{BASE}"])
+    try:
+        count = len(gh_json("pr", "view", str(job["pr"]), "--json", "commits")["commits"]) if method == "rebase" else 1
+        res = run(["git", *revert_command(method, sha, count)], cwd=path, check=False)
+        if res.returncode != 0:
+            run(["git", "revert", "--abort"], cwd=path, check=False)
+            raise Refused("the revert didn't apply cleanly")
+        run_net(["git", "push", "-u", "origin", branch], cwd=path)
+    finally:
+        run(["git", "worktree", "remove", "--force", str(path)], check=False)
+    gh("label", "create", revert_label(), "--color", "B60205",
+       "--description", "Reverts a factory merge that broke the base branch", "--force")
+    runs = "\n".join(f"- {r['workflowName']}: {r['url']}" for r in failed)
+    url = gh("pr", "create", "--base", BASE, "--head", branch, "--label", revert_label(),
+             "--title", f'Revert "{job["title"]}"',
+             "--body", f"{MARKER}\nReverts #{job['pr']} ({sha[:7]}): {BASE} failed after it merged.\n\n{runs}\n\n"
+                       f"The factory never merges this PR. Merge it, or fix {BASE} forward, "
+                       "then run `factory/bin/job resume`.").strip()
+    m = re.search(r"/pull/(\d+)$", url)
+    require(m, f"gh pr create printed {url!r}, not a PR URL")
+    return int(m.group(1))
+
+
+def revert_for(job, failed):
+    """The base branch went red after this job merged: pause, try a revert PR, tell the human."""
+    w = job["watch"]
+    names = ", ".join(sorted({r["workflowName"] for r in failed}))
+    pause(f"{BASE} failed after #{job['pr']} ({names})", job["id"], w["sha"])
+    try:
+        revert_pr, why = open_revert_pr(job, failed), None
+    except Refused as e:
+        revert_pr, why = None, str(e).splitlines()[0]
+    job["watch"] = {**w, "state": "red", "revert_pr": revert_pr}
+    save(job)
+    runs = "\n".join(f"- {r['workflowName']}: {r['url']}" for r in failed)
+    body = (f"### Factory: {BASE} failed after this merged\n\n{runs}\n\n"
+            + (f"Revert PR: #{revert_pr} (not merged automatically).\n\n" if revert_pr
+               else f"No revert PR: {why}.\n\n")
+            + "The queue is paused; run `factory/bin/job resume` when the base branch is green.")
+    for kind, number in (("pr", job["pr"]), ("issue", job["issue"])):
+        try:
+            comment(kind, number, body)
+        except Refused as e:
+            print(f"NOTE: couldn't comment on {kind} #{number}: {str(e).splitlines()[0]}")
+    try:
+        label("issue", job["issue"], add=LABELS["needs_human"])
+    except Refused as e:
+        print(f"NOTE: couldn't label issue #{job['issue']}: {str(e).splitlines()[0]}")
+    print(f"WATCH: {job['id']} red; queue paused; " + (f"revert PR #{revert_pr}" if revert_pr else f"no revert PR: {why}"))
+
+
 # ---- Learning ---------------------------------------------------------------
 
 LEARNING = JOBS / "learning"
@@ -551,6 +848,7 @@ def cmd_agent_learner(tag):
 PLAN_BLOCK = re.compile(r"^```factory-plan[ \t]*\n(.*?)^```[ \t]*$", re.M | re.S)
 PLAN_PATH = re.compile(r"docs/superpowers/[A-Za-z0-9._/-]+\.md")
 PLAN_KEYS = {"spec", "plan", "commit", "risk", "surfaces"}
+PLAN_PART_KEYS = {"part", "tasks", "depends"}
 RISKS = tuple(CONFIG["routing"])
 SURFACES = tuple(CONFIG["surface_reviewers"])
 
@@ -568,8 +866,10 @@ def parse_plan_block(body):
         require(sep, f"factory-plan line isn't `key: value`: {line.strip()!r}")
         require(key.strip() not in fields, f"duplicate factory-plan key {key.strip()!r}")
         fields[key.strip()] = value.strip()
-    require(set(fields) == PLAN_KEYS,
-            f"factory-plan needs exactly {', '.join(sorted(PLAN_KEYS))}; got {', '.join(sorted(fields))}")
+    required, optional = set(fields) & PLAN_KEYS, set(fields) - PLAN_KEYS
+    require(required == PLAN_KEYS and optional <= PLAN_PART_KEYS,
+            f"factory-plan needs {', '.join(sorted(PLAN_KEYS))} (and optionally part, tasks, depends); "
+            f"got {', '.join(sorted(fields))}")
     for key in ("spec", "plan"):
         path = fields[key]
         require(PLAN_PATH.fullmatch(path) and ".." not in path.split("/"),
@@ -582,7 +882,29 @@ def parse_plan_block(body):
     surfaces = [s.strip() for s in listed.group(1).split(",") if s.strip()]
     unknown = [s for s in surfaces if s not in SURFACES]
     require(not unknown, f"unknown surfaces: {', '.join(unknown)} (allowed: {', '.join(SURFACES)})")
-    return {**fields, "surfaces": surfaces}
+    plan = {**{k: fields[k] for k in PLAN_KEYS}, "surfaces": surfaces}
+    plan.update(parse_part(fields))
+    return plan
+
+
+def parse_part(fields):
+    """{} for a whole plan; else {part: (k, n), tasks: (first, last), depends: issue or None}."""
+    if not set(fields) & PLAN_PART_KEYS:
+        return {}
+    require("part" in fields and "tasks" in fields, "part and tasks go together in a factory-plan block")
+    m = re.fullmatch(r"(\d+)/(\d+)", fields["part"])
+    require(m and 1 <= int(m.group(1)) <= int(m.group(2)), f"part must be k/n with 1 ≤ k ≤ n: {fields['part']!r}")
+    k, n = int(m.group(1)), int(m.group(2))
+    t = re.fullmatch(r"(\d+)-(\d+)", fields["tasks"])
+    require(t and 1 <= int(t.group(1)) <= int(t.group(2)), f"tasks must be N-M with 1 ≤ N ≤ M: {fields['tasks']!r}")
+    depends = fields.get("depends")
+    if k == 1:
+        require(depends is None, "part 1 has no depends")
+    else:
+        d = re.fullmatch(r"#(\d+)", depends or "")
+        require(d, f"part {k} needs depends: #<issue of part {k - 1}>, got {depends!r}")
+        depends = int(d.group(1))
+    return {"part": (k, n), "tasks": (int(t.group(1)), int(t.group(2))), "depends": depends}
 
 
 def check_plan_commit(plan):
@@ -629,6 +951,11 @@ def route_agents(risk, surfaces):
 
 def planned_intake_md(issue_number, plan):
     short = plan["commit"][:7]
+    part = ""
+    if "part" in plan:
+        (k, n), (first, last) = plan["part"], plan["tasks"]
+        part = (f"\nThis is part {k} of {n}: build only tasks {first}-{last} of {plan['plan_tasks']}. "
+                "Earlier tasks are already merged on the base branch; later parts build the rest.\n")
     return (
         "DECISION: ACCEPT\n"
         f"RISK: {plan['risk']}\n"
@@ -644,6 +971,7 @@ def planned_intake_md(issue_number, plan):
         "## Scope\n"
         "Build exactly what the plan says, task by task. `spec.md` and `plan.md` in the job\n"
         f"folder are copies of those files at commit `{plan['commit']}`.\n"
+        f"{part}"
         "\n"
         "## Why\n"
         f"Issue #{issue_number} carries the `{LABELS['planned']}` label: its design was\n"
@@ -1118,6 +1446,12 @@ def advance(job, stage):
     old = job["stage"]
     require(stage in TRANSITIONS.get(old, set()) or (stage == "merged" and old not in TERMINAL),
             f"{job['id']}: {old} → {stage} is not a legal transition")
+    if stage == "merging":
+        p = paused()
+        require(not p, f"the queue is paused: {p['reason'] if p else ''}; run factory/bin/job resume first")
+    if old == "gate" and stage in {"build", "needs-human"} and gate_found_secrets(job):
+        stop_for_human(job, SECRET_WHY)
+        return job
     if budgeted_move(old, stage):
         daily = daily_problem()
         require(daily is None, f"{daily}; the job resumes when it drops")
@@ -1248,6 +1582,13 @@ def advance(job, stage):
         line = first_line(d / "decision.md")
         require(line == want, f"decision.md starts with {line!r}, not {want}")
 
+    elif old == "needs-human" and stage == "merging":
+        require(job.get("risk_stopped"), "only a job stopped for risky changes can go back to merging")
+        require(has_risk_ok(job), f"add the {risk_ok_label()} label to issue #{job['issue']} first")
+        job.pop("risk_stopped")
+        job["risk_ok_sha"] = git(job, "rev-parse", "HEAD").stdout.strip()
+        label("issue", job["issue"], remove=LABELS["needs_human"])
+
     elif old == "needs-human":
         require(Path(job["worktree"]).exists(),
                 f"{job['id']} never reached build; reject it and hand off a fixed plan instead")
@@ -1259,6 +1600,8 @@ def advance(job, stage):
         job["budget_base_usd"] = job["cost_usd"]
         job["budget_base_time"] = now()
         job.pop("budget_stopped", None)
+        job.pop("risk_stopped", None)
+        job.pop("risk_ok_sha", None)
         next_round(job)
         label("issue", job["issue"], remove=LABELS["needs_human"])
 
@@ -1274,6 +1617,287 @@ def advance(job, stage):
     if stage in {"approve", "needs-human"} and job["pr"]:
         publish_evidence(job)
     return job
+
+
+WORKTREE_STAGES = {"spec", "build", "gate", "review", "approve", "merging"}
+
+
+def ensure_worktree(job):
+    """'present', 'not needed', 'recreated from origin/<branch>' or 'created from origin/<base>'.
+    Raises Refused when git fails."""
+    if Path(job["worktree"]).exists():
+        return "present"
+    if job["stage"] not in WORKTREE_STAGES | {"needs-human"}:
+        return "not needed"
+    run(["git", "worktree", "prune"])
+    pushed = run_net(["git", "ls-remote", "--heads", "origin", job["branch"]]).stdout.strip()
+    if not pushed and job["stage"] == "needs-human":
+        return "not needed"
+    if pushed:
+        run_net(["git", "fetch", "origin", f"+refs/heads/{job['branch']}:refs/remotes/origin/{job['branch']}"])
+        run(["git", "worktree", "add", "-q", "-B", job["branch"], job["worktree"], f"origin/{job['branch']}"])
+        return f"recreated from origin/{job['branch']}"
+    run_net(["git", "fetch", "origin", BASE])
+    run(["git", "worktree", "add", "-q", "-B", job["branch"], job["worktree"], f"origin/{BASE}"])
+    return f"created from origin/{BASE}"
+
+
+def cmd_ensure_worktree(job):
+    try:
+        print(f"WORKTREE: {job['id']} {ensure_worktree(job)}")
+    except Refused as e:
+        stop_for_human(job, f"The job's worktree couldn't be recreated on this machine:\n\n```\n{e}\n```")
+
+
+# ---- Report and digest -----------------------------------------------------
+
+WAITING_REASON = {"needs-human": ("decision.md", "Why"), "needs-info": ("intake.md", "Questions")}
+
+
+def report_jobs():
+    """(jobs, unreadable count), read without locks."""
+    jobs, unreadable = [], 0
+    for p in sorted(JOBS.iterdir()) if JOBS.exists() else []:
+        if not (p / "job.json").exists():
+            continue
+        try:
+            jobs.append(json.loads((p / "job.json").read_text()))
+        except (OSError, ValueError):
+            unreadable += 1
+    return jobs, unreadable
+
+
+def in_window(job, cutoff):
+    ended = job.get("ended")
+    return parse_time(job["started"]) >= cutoff or not ended or parse_time(ended) >= cutoff
+
+
+def first_text_line(text):
+    return next((line.strip() for line in (text or "").splitlines() if line.strip()), "-")
+
+
+def median(values):
+    values = sorted(values)
+    if not values:
+        return None
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
+
+
+def top(counts, n):
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:n]
+
+
+def report_spend(window, days, cutoff, today):
+    by_day = {(today - timedelta(days=k)).isoformat(): 0.0 for k in range(days - 1, -1, -1)}
+    per_job = {}
+    for j in window:
+        for e in read_log(job_dir(j["id"]) / "log.jsonl"):
+            t = parse_time(e["t"])
+            if t >= cutoff:
+                per_job[j["id"]] = per_job.get(j["id"], 0.0) + e["delta_usd"]
+                day = t.date().isoformat()
+                if day in by_day:
+                    by_day[day] += e["delta_usd"]
+    learner = sum(e["delta_usd"] for e in read_log(LEARNING / "log.jsonl") if parse_time(e["t"]) >= cutoff)
+    return {"total": round(sum(per_job.values()), 2), "by_day": {d: round(u, 2) for d, u in by_day.items()},
+            "top_jobs": [{"id": i, "usd": round(u, 2)} for i, u in top(per_job, 5)],
+            "learner": round(learner, 2), "daily_cap": budgets()["daily_usd"], "today": round(daily_spend(), 2)}
+
+
+def report_throughput(window):
+    by_stage = {"merged": 0, "rejected": 0, "needs-human": 0, "needs-info": 0, "in progress": 0}
+    for j in window:
+        by_stage[j["stage"] if j["stage"] in by_stage else "in progress"] += 1
+    merged = [j for j in window if j["stage"] == "merged" and j.get("ended")]
+    rounds = [j["round"] for j in merged]
+    hours = [(parse_time(j["ended"]) - parse_time(j["started"])).total_seconds() / 3600 for j in merged]
+    return {"by_stage": by_stage, "rounds_median": median(rounds), "rounds_max": max(rounds) if rounds else None,
+            "hours_to_merge_median": round(median(hours), 1) if hours else None}
+
+
+def report_attention(jobs, now_dt):
+    rows = []
+    for j in jobs:
+        if j["stage"] not in WAITING_REASON:
+            continue
+        name, heading = WAITING_REASON[j["stage"]]
+        path = job_dir(j["id"]) / name
+        reason = first_text_line(section(path, heading)) if path.exists() else "-"
+        since = parse_time(j.get("ended") or j["started"])
+        rows.append({"id": j["id"], "issue": j["issue"], "pr": j.get("pr"), "stage": j["stage"],
+                     "waiting_hours": round((now_dt - since).total_seconds() / 3600, 1), "reason": reason})
+    return sorted(rows, key=lambda r: -r["waiting_hours"])
+
+
+def report_escalations(window):
+    counts = {}
+    for j in window:
+        path = job_dir(j["id"]) / "decision.md"
+        if first_line(path) != "ESCALATE":
+            continue
+        why = re.sub(r"\s+", " ", re.sub(r"\d+", "", first_text_line(section(path, "Why")).lower())).strip()
+        counts[why] = counts.get(why, 0) + 1
+    return [{"why": w, "count": c} for w, c in top(counts, 5)]
+
+
+def report_findings(window):
+    counts = {}
+    for j in window:
+        for path in sorted(round_dir(j).glob("review-*.md")) if j["round"] else []:
+            for text in findings(path):
+                tag = parse_finding(text)[0] or "untagged"
+                counts[tag] = counts.get(tag, 0) + 1
+    return [{"tag": t, "count": c} for t, c in top(counts, 10)]
+
+
+def report_gate(window):
+    firsts = [first_line(round_dir(j, 1) / "checks.md") for j in window
+              if (round_dir(j, 1) / "checks.md").exists()]
+    passed = sum(1 for line in firsts if line == "GATE: PASS")
+    return {"first_try_pass": passed, "total": len(firsts),
+            "rate": round(passed / len(firsts), 2) if firsts else None}
+
+
+def report_data(days):
+    now_dt = datetime.now(timezone.utc)
+    cutoff = now_dt - timedelta(days=days)
+    jobs, unreadable = report_jobs()
+    window = [j for j in jobs if in_window(j, cutoff)]
+    return {"days": days, "generated": now(), "unreadable": unreadable,
+            "spend": report_spend(window, days, cutoff, now_dt.date()),
+            "throughput": report_throughput(window), "attention": report_attention(jobs, now_dt),
+            "escalations": report_escalations(window), "findings": report_findings(window),
+            "gate": report_gate(window)}
+
+
+def waited(hours):
+    return f"{hours:.0f}h" if hours < 24 else f"{hours / 24:.0f}d"
+
+
+def needs_you_line(data):
+    items = [f"#{a['issue']} ({a['stage']}, {waited(a['waiting_hours'])})" for a in data["attention"]]
+    return "Needs you: " + (", ".join(items) or "nothing")
+
+
+def money(usd):
+    return "-" if usd is None else f"${usd:.2f}"
+
+
+def report_md(data):
+    s, t, g = data["spend"], data["throughput"], data["gate"]
+    lines = [needs_you_line(data), "", f"Factory report, last {data['days']} days ({data['generated']})", "",
+             "## Spend", "",
+             f"- Total {money(s['total'])}, learner {money(s['learner'])}; "
+             f"last 24 h {money(s['today'])} of {money(s['daily_cap'])}",
+             "- By day: " + ", ".join(f"{d[5:]} {money(u)}" for d, u in s["by_day"].items()),
+             "- Top jobs: " + (", ".join(f"{j['id']} {money(j['usd'])}" for j in s["top_jobs"]) or "none"),
+             "", "## Throughput", "",
+             "- " + ", ".join(f"{k} {v}" for k, v in t["by_stage"].items()),
+             f"- Rounds per merged job: median {t['rounds_median'] or '-'}, max {t['rounds_max'] or '-'}",
+             f"- Hours from intake to merge (median): {t['hours_to_merge_median'] or '-'}",
+             "", "## Needs you", ""]
+    lines += [f"- #{a['issue']} ({a['stage']}, {waited(a['waiting_hours'])})"
+              + (f" PR #{a['pr']}" if a["pr"] else "") + f": {a['reason']}" for a in data["attention"]] or ["- nothing"]
+    lines += ["", "## Escalations", ""]
+    lines += [f"- {e['count']} × {e['why']}" for e in data["escalations"]] or ["- none"]
+    lines += ["", "## Findings", ""]
+    lines += [f"- {f['tag']}: {f['count']}" for f in data["findings"]] or ["- none"]
+    lines += ["", "## Gate", "",
+              f"- First-try pass: {g['first_try_pass']} of {g['total']}"
+              + (f" ({g['rate']:.0%})" if g["rate"] is not None else "")]
+    if data["unreadable"]:
+        lines += ["", f"{data['unreadable']} job folder(s) couldn't be read."]
+    return "\n".join(lines) + "\n"
+
+
+def write_report(data):
+    JOBS.mkdir(parents=True, exist_ok=True)
+    tmp = JOBS / "report.json.tmp"
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    tmp.replace(JOBS / "report.json")
+
+
+def cmd_report(args):
+    days, as_json, write = 7, False, False
+    rest = list(args)
+    while rest:
+        arg = rest.pop(0)
+        if arg == "--days" and rest and rest[0].isdigit() and int(rest[0]) > 0:
+            days = int(rest.pop(0))
+        elif arg == "--json":
+            as_json = True
+        elif arg == "--write":
+            write = True
+        else:
+            die(f"bad report arguments: {' '.join(args)} (use --days N with N ≥ 1, --json, --write)")
+    data = report_data(days)
+    if write:
+        write_report(data)
+    print(json.dumps(data, indent=2) if as_json else report_md(data), end="" if not as_json else "\n")
+
+
+DIGEST_DEFAULTS = {"enabled": True, "hour": 9, "days": 1}
+DIGEST_EVERY_HOURS = 20
+
+
+def digest_config():
+    return {**DIGEST_DEFAULTS, **(CONFIG.get("digest") or {})}
+
+
+def digest_label():
+    return LABELS.get("digest", "factory:digest")
+
+
+def digest_issue():
+    """The digest issue's number: an open one, else a reopened closed one, else a new pinned one."""
+    label_name = digest_label()
+    issues = sorted(gh_json("issue", "list", "--label", label_name, "--state", "all", "--limit", "20",
+                            "--json", "number,state"), key=lambda i: i["number"])
+    open_ones = [i for i in issues if i["state"] == "OPEN"]
+    if open_ones:
+        return open_ones[0]["number"]
+    if issues:
+        gh("issue", "reopen", str(issues[0]["number"]))
+        return issues[0]["number"]
+    gh("label", "create", label_name, "--color", "0E8A16", "--description", "Daily factory digest", "--force")
+    url = gh("issue", "create", "--title", "Factory digest", "--label", label_name,
+             "--body", "The factory posts a daily summary here.").strip()
+    m = re.search(r"/issues/(\d+)$", url)
+    if not m:
+        raise Refused(f"gh issue create printed {url!r}, not an issue URL")
+    number = int(m.group(1))
+    try:
+        gh("issue", "pin", str(number))
+    except Refused:
+        pass  # pinning is a convenience; the label finds the issue
+    return number
+
+
+def cmd_digest():
+    cfg = digest_config()
+    if not cfg["enabled"]:
+        print("DIGEST: off")
+        return
+    if datetime.now().hour < cfg["hour"]:
+        print(f"DIGEST: not yet (after {cfg['hour']}:00)")
+        return
+    path = JOBS / "digest.json"
+    last = json.loads(path.read_text()) if path.exists() else {}
+    if last.get("posted") and datetime.now(timezone.utc) - parse_time(last["posted"]) < timedelta(hours=DIGEST_EVERY_HOURS):
+        print(f"DIGEST: already posted at {last['posted']}")
+        return
+    try:
+        number = digest_issue()
+        gh("issue", "comment", str(number), "--body", f"{MARKER}\n{report_md(report_data(cfg['days']))}")
+    except Refused as e:
+        print(f"NOTE: digest not posted: {str(e).splitlines()[0]}")
+        return
+    JOBS.mkdir(parents=True, exist_ok=True)
+    tmp = JOBS / "digest.json.tmp"
+    tmp.write_text(json.dumps({"posted": now(), "issue": number}) + "\n")
+    tmp.replace(path)
+    print(f"DIGEST: posted on #{number}")
 
 
 # ---- Commands --------------------------------------------------------------
@@ -1315,6 +1939,34 @@ def cmd_create(number):
     print(job_id)
 
 
+def dependency_state(issue, jobs):
+    """merged | failed | pending for the part a planned issue depends on. `jobs` maps issue → job."""
+    job = jobs.get(issue)
+    if job and job["stage"] == "merged":
+        return "merged"
+    if job and job["stage"] == "rejected":
+        return "failed"
+    try:
+        state = gh_json("issue", "view", str(issue), "--json", "state")["state"]
+    except Refused as e:
+        # A mistyped `depends` must not break the queue for every other issue.
+        if "Could not resolve to an issue" not in str(e):
+            raise
+        return "failed"
+    # MERGED means the number is a pull request, not a part's issue.
+    return "pending" if state == "OPEN" else "failed"
+
+
+def planned_depends(issue):
+    """The issue a planned part waits for, or None (also when the block is malformed: `job planned` reports that)."""
+    if LABELS["planned"] not in {l["name"] for l in issue.get("labels", [])}:
+        return None
+    try:
+        return parse_plan_block(issue.get("body", "")).get("depends")
+    except Refused:
+        return None
+
+
 def cmd_queue():
     """Rows in the order to start them. `resume` and `new` rows fit in the
     concurrency slots; the rest show as `hold` until a running job finishes."""
@@ -1325,14 +1977,18 @@ def cmd_queue():
         if j["stage"] not in TERMINAL and j["pr"] and pr_state(j) == "MERGED":
             save(advance(sync(j), "merged"))
     issues = gh_json("issue", "list", "--label", LABELS["queue"], "--state", "open",
-                     "--limit", "200", "--json", "number,title")
+                     "--limit", "200", "--json", "number,title,body,labels")
     open_numbers = {i["number"] for i in issues}
     running_rows, replied_rows, new_rows, other_rows = [], [], [], []
     for issue in sorted(issues, key=lambda i: i["number"]):
         n = issue["number"]
         j = jobs.get(n)
         if not j:
-            new_rows.append(("new", n, "-", "-", issue["title"]))
+            dep = planned_depends(issue)
+            if dep and dependency_state(dep, jobs) == "pending":
+                other_rows.append(("wait", n, "-", "-", f"depends #{dep}"))
+            else:
+                new_rows.append(("new", n, "-", "-", issue["title"]))
         elif j["stage"] == "needs-info":
             if replied_since_question(fetch_issue(n)):
                 replied_rows.append(("resume", n, j["id"], j["stage"], "author replied"))
@@ -1340,6 +1996,8 @@ def cmd_queue():
                 other_rows.append(("wait", n, j["id"], j["stage"], "waiting for the author"))
         elif j["stage"] == "needs-human" and j["pr"] and (j.get("feedback_pending") or pr_comments(j)):
             replied_rows.append(("resume", n, j["id"], j["stage"], "PR feedback"))
+        elif j["stage"] == "needs-human" and j.get("risk_stopped") and has_risk_ok(j):
+            replied_rows.append(("resume", n, j["id"], j["stage"], f"{risk_ok_label()} added"))
         elif j["stage"] == "needs-human":
             other_rows.append(("wait", n, j["id"], j["stage"], f"merge PR #{j['pr']}, or give feedback"
                                if j["pr"] else "give feedback" if Path(j["worktree"]).exists()
@@ -1362,8 +2020,12 @@ def cmd_queue():
             slots -= 1
         else:
             rows.append(("hold",) + row[1:4] + (f"concurrency {CONCURRENCY} reached",))
-    if daily:
-        rows = [("wait",) + row[1:4] + (daily,) if row[0] in {"resume", "new"} else row for row in rows]
+    hold = paused()
+    if hold:
+        print(paused_line(hold))
+    why = "paused" if hold else daily
+    if why:
+        rows = [("wait",) + row[1:4] + (why,) if row[0] in {"resume", "new"} else row for row in rows]
     for row in rows + other_rows:
         print("\t".join(str(c) for c in row))
 
@@ -1385,6 +2047,8 @@ def sync_main():
 
 
 def cmd_merge(job):
+    p = paused()
+    require(not p, f"the queue is paused: {p['reason'] if p else ''}; run factory/bin/job resume first")
     sync(job)
     if job["stage"] == "approve":
         save(advance(job, "merging"))
@@ -1404,6 +2068,17 @@ def cmd_merge(job):
                  "The next `/factory run` sends them to the builder.")
     if job.get("feedback_pending") or pr_comments(job):
         return fail(unhandled)
+    risky = risky_listed(job)
+    if risky and not risk_approved(job):
+        job["risk_stopped"] = True
+        job.pop("risk_ok_sha", None)
+        stale = ""
+        if has_risk_ok(job):
+            label("issue", job["issue"], remove=risk_ok_label())
+            stale = (f"\n\nThe `{risk_ok_label()}` label was removed: it was added before this commit stopped, "
+                     "so it didn't cover these changes.")
+        return fail(f"This PR changes dependencies or CI: {', '.join(risky)}. Review it, then add "
+                    f"`{risk_ok_label()}` to the issue and run the factory again, or merge it yourself.{stale}")
     git(job, "fetch", "origin", BASE)
     merged = git(job, "merge", "--no-edit", f"origin/{BASE}", check=False)
     if merged.returncode != 0:
@@ -1428,6 +2103,7 @@ def cmd_merge(job):
         return fail(unhandled)
     # GitHub may already have deleted the branch on merge.
     run(["git", "push", "origin", "--delete", job["branch"]], check=False)
+    record_watch(job)
     save(advance(sync(job), "merged"))
     print(f"{job['id']}: merged PR #{job['pr']}")
     sync_main()
@@ -1513,6 +2189,25 @@ def cmd_agent(job, role):
     print(f"model={setting['model']} effort={setting['effort']}")
 
 
+TASK_HEADING = re.compile(r"^### Task \d+", re.M)
+
+
+def check_part(plan, plan_text, jobs):
+    """Refuse a part whose range is past the plan or whose dependency hasn't merged."""
+    if "part" not in plan:
+        return
+    total = len(TASK_HEADING.findall(plan_text))
+    first, last = plan["tasks"]
+    require(last <= total, f"tasks {first}-{last} is past the plan's {total} tasks")
+    plan["plan_tasks"] = total
+    dep = plan["depends"]
+    if dep:
+        state = dependency_state(dep, jobs)
+        k = plan["part"][0]
+        require(state != "failed", f"part {k - 1} (#{dep}) didn't merge; re-plan or remove the dependency")
+        require(state == "merged", f"part {k - 1} (#{dep}) hasn't merged yet")
+
+
 def cmd_planned(job):
     if job["stage"] != "intake":
         die(f"{job['id']} is in {job['stage']}, not intake")
@@ -1529,6 +2224,8 @@ def cmd_planned(job):
         require(author == me, f"planned issues must be filed by @{me} with /factory-handoff, not @{author}")
         plan = parse_plan_block(issue["body"])
         check_plan_commit(plan)
+        plan_text = run(["git", "show", f"{plan['commit']}:{plan['plan']}"]).stdout
+        check_part(plan, plan_text, {j["issue"]: j for j in read_jobs()})
     except Refused as e:
         escalate(job, f"The handoff block was refused: {e}\n\n"
                       "Fix the spec or plan in an interactive session, reject this job, "
@@ -1536,11 +2233,15 @@ def cmd_planned(job):
         save(advance(sync(job), "needs-human"))
         print(f"PLANNED: REFUSED {e}")
         return
-    for key in ("spec", "plan"):
-        (d / f"{key}.md").write_text(run(["git", "show", f"{plan['commit']}:{plan[key]}"]).stdout)
+    (d / "spec.md").write_text(run(["git", "show", f"{plan['commit']}:{plan['spec']}"]).stdout)
+    (d / "plan.md").write_text(plan_text)
     (d / "intake.md").write_text(planned_intake_md(job["issue"], plan))
     job = {**sync(job), "planned": True, "plan_paths": [plan["spec"], plan["plan"]],
            "agents": route_agents(plan["risk"], plan["surfaces"])}
+    if "part" in plan:
+        k, n = plan["part"]
+        first, last = plan["tasks"]
+        job.update(part=f"{k}/{n}", tasks=f"{first}-{last}", plan_tasks=plan["plan_tasks"])
     job = advance(job, "spec")
     job = advance(job, "build")
     save(sync(job))
@@ -1560,6 +2261,9 @@ def cost_cell(job):
 
 
 def cmd_summary(args):
+    p = paused()
+    if p:
+        print(paused_line(p))
     jobs = [resolve(a) for a in args] if args else all_jobs()
     rows = [("job", "issue", "stage", "round", "pr", "cost", "time")]
     for j in jobs:
@@ -1628,6 +2332,26 @@ def main(argv):
             cmd_summary(args)
         elif cmd == "costs" and len(args) == 1:
             cmd_costs(resolve(args[0]))
+        elif cmd == "report":
+            cmd_report(args)
+        elif cmd == "digest" and not args:
+            cmd_digest()
+        elif cmd == "pause" and args:
+            cmd_pause(" ".join(args))
+        elif cmd == "resume" and not args:
+            cmd_resume()
+        elif cmd == "scan" and len(args) == 1:
+            # The gate runs this while `job merge` holds the job's lock; a scan only reads.
+            path = job_dir(args[0]) / "job.json"
+            if not path.exists():
+                die(f"no job {args[0]}")
+            cmd_scan(json.loads(path.read_text()))
+        elif cmd == "push" and len(args) == 1:
+            cmd_push(resolve(args[0]))
+        elif cmd == "watch" and not args:
+            cmd_watch()
+        elif cmd == "ensure-worktree" and len(args) == 1:
+            cmd_ensure_worktree(resolve(args[0]))
         else:
             die(f"bad arguments: {' '.join(argv)}\n\n{__doc__.strip()}")
     except Refused as e:

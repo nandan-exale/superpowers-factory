@@ -15,6 +15,7 @@ tell the user; never work around it.
 ```
 /factory run          drain the queue: every open `factory` issue, `concurrency` at a time; also resumes
 /factory run <n>      run one issue now
+/factory report       print factory/bin/job report; posts nothing
 /factory <anything>   talk to the factory: ask about jobs, give feedback, file a feature
 ```
 
@@ -82,11 +83,21 @@ is wrong: stop that job and show the user the error. Each agent replies with one
 you are notified when it finishes, and you advance that job then. While agents
 run, don't poll and don't wait: end your turn with a one-line status.
 
+Before the first spawn for a job in this session (any stage from `spec` on),
+run `factory/bin/job ensure-worktree <id>`. It prints `WORKTREE: <id> …`, or
+moves the job to `needs-human` (its line says so) when the worktree can't be
+recreated: then stop that job. Runs on a fresh machine (GitHub Actions) have
+no `.worktrees/` until this recreates them.
+
 Every prompt starts with the job's header, built from `job.json` and `base_branch` in `factory/config.json`:
 
 ```
 Job: <id>. Job folder: <repo>/factory/jobs/<id>/. Main checkout: <repo>. Worktree: <worktree>. Branch: <branch>. Base: origin/<base>. Issue: #<issue>.
 ```
+
+When `job.json` has `tasks` (a part of a larger plan), append
+` Tasks: <tasks> of <plan_tasks>.` to the header, for example
+`Tasks: 4-7 of 12.`
 
 `<header>` below means that line. Keep `Job folder: <path>/` exactly as shown:
 the job's cost is found by that string.
@@ -193,7 +204,11 @@ then moves the job to `merged`; stop any agents still running for it.
 
 ## /factory run
 
-1. Run `factory/bin/job queue`. Each line is `action  issue  job  stage  note`:
+1. Run `factory/bin/job watch`. Report every line except `WATCH: off`. A
+   `WATCH: <id> red` line means the base branch failed after that job merged:
+   the script has paused the queue and opened a revert PR (or said why not).
+   Tell the user; never merge the revert PR yourself.
+2. Run `factory/bin/job queue`. Each line is `action  issue  job  stage  note`:
    `resume` (pick it up from its stage), `new` (no job yet), `hold` (no free
    slot), `wait` (needs the author or you) or `skip`. The script enforces
    `concurrency`: every job in a running stage holds a slot, and only as many
@@ -201,13 +216,17 @@ then moves the job to `merged`; stop any agents still running for it.
    `new` or `resume`; the rest are `hold`. `job create` and the
    `needs-info → intake` move refuse when no slot is free. A failing `gh`
    call stops `job queue`; fix it and run again. `wait` lines whose note starts with `daily budget` mean the daily cap is reached: start nothing.
-2. Start every `resume` and `new` line, nothing else. Don't judge issues
+   If its first line starts with `PAUSED:`, start nothing: tell the user the
+   reason and that `factory/bin/job resume` clears it once the base branch is
+   fixed. Finish any agents already running, but `job merge` refuses while
+   paused.
+3. Start every `resume` and `new` line, nothing else. Don't judge issues
    yourself: every new issue goes to intake, which decides whether it gets
    built. For a new issue, `factory/bin/job create <n>` prints the job id;
    start it at **intake**.
-3. Each time a job finishes, run `factory/bin/job queue` again and start its
+4. Each time a job finishes, run `factory/bin/job queue` again and start its
    `resume` lines you aren't already running and its `new` lines.
-4. **Learning.** When nothing is queued or running, and the run didn't end on
+5. **Learning.** When nothing is queued or running, and the run didn't end on
    a daily-budget wait, run `factory/bin/job learn`. For each
    `LEARN: <tag> (<n> jobs) <path>` line, spawn `learner` with the model and
    effort from `factory/bin/job agent <tag> learner`, and a prompt that starts
@@ -216,10 +235,13 @@ then moves the job to `merged`; stop any agents still running for it.
    learner's cost is found), then the tag. When it replies, run
    `factory/bin/job learn-file <tag>`. `factory:learning` issues wait for a
    human to add the `factory` label; never add it yourself.
-5. Print `factory/bin/job summary <ids>` for the jobs this run touched, with
+6. Print `factory/bin/job summary <ids>` for the jobs this run touched, with
    each `LEARN-FILE:` line, then list what waits on a human: PRs to
    review (merge one to approve it, or give feedback with `/factory`) and
    questions waiting on authors.
+   Then run `factory/bin/job report --write` (it refreshes the dashboard's
+   strip) and `factory/bin/job digest`, and report its `DIGEST:` or `NOTE:`
+   line.
 
 **Resuming.** State lives in files, so a new session picks up where a dead one
 stopped. For a `resume` job, run its stage's step again: `intake` runs the
@@ -236,12 +258,20 @@ A `needs-human` job with `PR feedback` shows as `resume`: run
 **build** with `PR comments arrived: read <every file pr-feedback printed> and address them, push, and update build.md for round <N>.`
 `job merge` refuses to merge past unhandled PR comments: it moves the job to
 `needs-human`, and the next `job queue` shows it as `resume`.
+A `needs-human` job with the note `factory:risk-ok added` was stopped at merge
+for risky changes, and a human has since approved them: run
+`factory/bin/job advance <id> merging`, then `factory/bin/job merge <id>`.
 
 ## /factory run <n>
 
 Run one issue with the same steps. If `factory/bin/job queue` shows a job for
 it, resume that job; otherwise `factory/bin/job create <n>`. Finish with the
 summary line for that job.
+
+## /factory report
+
+Run `factory/bin/job report` (add `--days <n>` when the user names a
+period) and show its output as it is. It posts nothing and changes nothing.
 
 ## /factory <anything>
 
@@ -255,7 +285,8 @@ new feature, ask.
   you may read a file in full when the answer is in it.
 - **What needs them**: run `factory/bin/job queue`. For each `wait` line, say
   what the job is waiting for: the question in `decision.md` for `needs-human`,
-  the question in `intake.md` for `needs-info`.
+  the question in `intake.md` for `needs-info`. The digest issue (label
+  `factory:digest`) has the same list each day.
 - **Feedback on a `needs-human` job**: pass their words verbatim on stdin:
 
   ```bash
@@ -285,6 +316,8 @@ new feature, ask.
 - **An answer to a `needs-info` question**: post their words on the issue with
   `gh issue comment <n> --body "<their answer>"`, then
   `factory/bin/job advance <id> intake` and go to **intake**.
+- **Resuming the queue** after a pause: only when the user asks, run
+  `factory/bin/job resume` and show its `RESUME:` line.
 - **A new feature**: create the issue, then do **/factory run <n>** with the
   new number:
 

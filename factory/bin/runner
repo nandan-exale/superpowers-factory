@@ -2,27 +2,38 @@
 """Run the software factory unattended.
 
 Usage:
-  runner tick                  one scheduled run: lock, preflight, pull, check the queue, run /factory run headless
-  runner install [--dry-run]   install the launchd LaunchAgent that runs `tick` every runner.interval_minutes
-  runner uninstall             unload and delete the LaunchAgent
-  runner status                LaunchAgent state and the last lines of factory/jobs/runner.log
+  runner tick                  one scheduled run: lock, preflight, pull, report and digest, check the queue, run /factory run headless
+  runner tick --ci             the same from GitHub Actions: no lock, token from the environment, state on factory-state
+  runner install [--dry-run]   install the scheduler: a launchd LaunchAgent on macOS, a systemd user timer on Linux
+  runner uninstall             remove it
+  runner status                scheduler state and the last lines of factory/jobs/runner.log
+  runner workflow --claude-version X.Y.Z   print .github/workflows/factory-runner.yml for the Actions runner
 
 The Claude token comes from the macOS Keychain item named by
 runner.keychain_service (store it with
-`security add-generic-password -s <service> -a "$USER" -w`). It is passed to
-claude only through its environment, never in arguments, files or logs.
+`security add-generic-password -s <service> -a "$USER" -w`). On Linux the token
+comes from `secret-tool lookup service <service>`, or from
+`~/.config/factory/claude-token` with mode 600. It is passed to claude only
+through its environment, never in arguments, files or logs.
 """
 
+import base64
+import contextlib
 import fcntl
 import hashlib
+import io
 import json
 import os
 import platform
 import plistlib
 import re
+import shutil
 import signal
 import subprocess
+import stat
 import sys
+import tarfile
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -69,12 +80,16 @@ def main(argv):
     try:
         if argv == ["tick"]:
             return cmd_tick()
+        if argv == ["tick", "--ci"]:
+            return cmd_tick(ci=True)
         if argv in (["install"], ["install", "--dry-run"]):
             return cmd_install(dry_run=len(argv) == 2)
         if argv == ["uninstall"]:
             return cmd_uninstall()
         if argv == ["status"]:
             return cmd_status()
+        if len(argv) == 3 and argv[:2] == ["workflow", "--claude-version"]:
+            return cmd_workflow(argv[2])
     except ValueError as exc:
         die(str(exc))
     print(__doc__.strip(), file=sys.stderr)
@@ -92,8 +107,9 @@ def log(line):
 
 
 # Sandboxed Bash in the clone can write .git, so no git command run here may execute
-# a hook or fsmonitor program, and none may prompt or wait on ssh.
-GIT_SAFE = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
+# a hook, fsmonitor or ext:: transport program, and none may prompt or wait on ssh.
+# The command line beats .git/config, and protocol.ext.allow beats protocol.allow.
+GIT_SAFE = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.ext.allow=never")
 GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
 
 
@@ -102,19 +118,23 @@ def git(*args):
                           env={**os.environ, **GIT_ENV})
 
 
-RISKY_KEYS = ("credential.helper", "core.askpass", "core.sshcommand")
+RISKY_KEYS = ("credential.helper", "core.askpass", "core.sshcommand", "core.gitproxy",
+              "core.alternaterefscommand")
 
 
 def risky_local_key():
     """The first key in .git/config (read without the -c overrides) that lets the clone run a
-    program or pull in more config, or None. Global config, such as the user's gh credential
-    helper, is deliberately left alone."""
-    res = subprocess.run(["git", "config", "--local", "--name-only", "--list"], cwd=REPO,
+    program, pull in more config or reroute a remote to a transport that runs one, or None.
+    Global config, such as the user's gh credential helper, is deliberately left alone."""
+    res = subprocess.run(["git", "config", "--local", "--list", "-z"], cwd=REPO,
                          capture_output=True, text=True)
-    for key in res.stdout.splitlines():
-        if (key in RISKY_KEYS or key == "include.path"
+    for entry in res.stdout.split("\0"):
+        key, _, value = entry.partition("\n")
+        if (key in RISKY_KEYS or key == "include.path" or key.startswith(("filter.", "protocol."))
                 or (key.startswith("includeif.") and key.endswith(".path"))
-                or (key.startswith("remote.") and key.endswith((".uploadpack", ".receivepack")))
+                or (key.startswith("url.") and key.endswith((".insteadof", ".pushinsteadof")))
+                or (key.startswith("remote.") and key.endswith((".uploadpack", ".receivepack", ".vcs")))
+                or (key.startswith("remote.") and key.endswith((".url", ".pushurl")) and "::" in value)
                 or (key.startswith("credential.") and key.endswith(".helper"))):
             return key
     return None
@@ -151,11 +171,51 @@ def has_work():
     return any(line.split("\t", 1)[0] in {"resume", "new"} for line in res.stdout.splitlines())
 
 
-def read_token(service):
+TOKEN_FILE = Path("~/.config/factory/claude-token")
+SANDBOX_TOOLS = ("bwrap", "socat")
+_token_problem = None
+
+
+def token_problem():
+    """Why the last read_token found no usable token file, or None."""
+    return _token_problem
+
+
+def read_keychain(service):
     res = subprocess.run(["security", "find-generic-password", "-s", service, "-w"],
                          capture_output=True, text=True)
     token = res.stdout.strip()
     return token if res.returncode == 0 and token else None
+
+
+def read_linux_token(service):
+    global _token_problem
+    _token_problem = None
+    if shutil.which("secret-tool"):
+        res = subprocess.run(["secret-tool", "lookup", "service", service], capture_output=True, text=True)
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    path = TOKEN_FILE.expanduser()
+    if not path.exists():
+        return None
+    st = path.stat()
+    if (st.st_mode & 0o777) != 0o600 or st.st_uid != os.getuid():
+        _token_problem = f"{TOKEN_FILE} must be mode 600 and yours; run chmod 600 {path}"
+        return None
+    return path.read_text().strip() or None
+
+
+def read_token(service):
+    return read_linux_token(service) if platform_name() == "Linux" else read_keychain(service)
+
+
+def ci_token():
+    """The token from the workflow's environment, removed from it so only claude's explicit env carries it."""
+    return os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None) or None
+
+
+def missing_sandbox_tools():
+    return [tool for tool in SANDBOX_TOOLS if not shutil.which(tool)]
 
 
 def kill_group(proc):
@@ -217,20 +277,216 @@ def cost_of(path):
         return "?"
 
 
-def cmd_tick():
+CHORE_SECONDS = 120
+
+
+def chores():
+    """Watch, report and digest: no Claude session, so they run every tick. Their failures never fail the tick."""
+    for args in (["watch"], ["report", "--write"], ["digest"]):
+        try:
+            subprocess.run([sys.executable, str(FACTORY / "bin" / "job"), *args], cwd=REPO,
+                           capture_output=True, text=True, timeout=CHORE_SECONDS)
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # the next tick tries again
+
+
+STATE_BRANCH = "factory-state"
+STATE_MAX_BYTES = 1_000_000
+STATE_IDENTITY = "factory-runner <factory-runner@users.noreply.github.com>"
+# factory-state is fetched, built and pushed in a fresh bare repository outside the checkout, with no
+# system or global config and only these settings. A session can write the checkout's .git (config,
+# hooks, alternates, attributes), so nothing there may steer git run after it, outside the sandbox.
+STATE_CONFIG = {"core.hooksPath": "/dev/null", "core.fsmonitor": "false", "gc.auto": "0",
+                "maintenance.auto": "false", "protocol.allow": "never", "protocol.https.allow": "always",
+                "protocol.ssh.allow": "always", "protocol.file.allow": "always"}
+
+
+def origin_url():
+    """origin's URL. Read before the session runs: in CI the checkout is still fresh then."""
+    return git("config", "--get", "remote.origin.url").stdout.strip()
+
+
+def state_auth(url):
+    """GH_TOKEN as the header actions/checkout sends, scoped to an https origin; nothing otherwise."""
+    token = os.environ.get("GH_TOKEN")
+    if not token or not url.startswith("https://"):
+        return {}
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return {f"http.{url}.extraheader": f"AUTHORIZATION: basic {basic}"}
+
+
+@contextlib.contextmanager
+def state_repo(url):
+    """A throwaway bare repository; yields g(*args, stdin=b"", check=True) that runs git in it."""
+    path = Path(tempfile.mkdtemp(prefix="factory-state-"))
+    config = {**STATE_CONFIG, **state_auth(url)}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_ENV, GIT_DIR=str(path), GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+               GIT_CONFIG_COUNT=str(len(config)))
+    for i, (key, value) in enumerate(config.items()):
+        env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = key, value
+
+    def g(*args, stdin=b"", check=True):
+        res = subprocess.run(["git", *args], cwd=path, input=stdin, capture_output=True, env=env)
+        if check and res.returncode != 0:
+            raise RuntimeError(f"git {args[0]}: {first_line(res.stderr.decode(errors='replace'))}")
+        return res
+
+    try:
+        g("init", "-q", "--bare", "--template=")
+        yield g
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def fetch_state(g, url):
+    """origin's factory-state commit, fetched into the state repository, or "" when there is none."""
+    if not g("ls-remote", "--heads", url, STATE_BRANCH).stdout.strip():
+        return ""
+    g("fetch", "-q", url, f"+refs/heads/{STATE_BRANCH}:refs/heads/{STATE_BRANCH}")
+    return g("rev-parse", f"refs/heads/{STATE_BRANCH}").stdout.decode().strip()
+
+
+def extract_state(tar_bytes, target):
+    """Unpack a `git archive` tar into target; refuse absolute paths, `..` and anything but files and dirs."""
+    with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tar:
+        members = tar.getmembers()
+        for m in members:
+            parts = Path(m.name).parts
+            if Path(m.name).is_absolute() or ".." in parts or not (m.isfile() or m.isdir()):
+                raise ValueError(f"unsafe path in {STATE_BRANCH}: {m.name}")
+        target.mkdir(parents=True, exist_ok=True)
+        tar.extractall(target, members=members)
+
+
+def restore_state(url):
+    """Copy origin's factory-state into factory/jobs. True when restored or when there's nothing to restore."""
+    try:
+        with state_repo(url) as g:
+            if not fetch_state(g, url):
+                return True
+            archive = g("archive", "--format=tar", f"refs/heads/{STATE_BRANCH}").stdout
+    except RuntimeError as exc:
+        log(f"error: restoring {STATE_BRANCH}: {exc}")
+        return False
+    extract_state(archive, JOBS)
+    return True
+
+
+def state_files():
+    """factory/jobs paths to persist: no lock files, nothing over STATE_MAX_BYTES (big transcripts)."""
+    if not JOBS.exists():
+        return []
+    return [p.relative_to(JOBS).as_posix() for p in sorted(JOBS.rglob("*"))
+            if p.is_file() and not p.is_symlink() and not p.name.endswith(".lock")
+            and p.stat().st_size <= STATE_MAX_BYTES]
+
+
+def read_state_file(rel):
+    """The bytes of factory/jobs/<rel>, opened without following a symlink at any step, or None when it
+    isn't a regular file of at most STATE_MAX_BYTES."""
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    fds = []
+    try:
+        fds.append(os.open(JOBS, flags | os.O_DIRECTORY))
+        *dirs, name = rel.split("/")
+        for d in dirs:
+            fds.append(os.open(d, flags | os.O_DIRECTORY, dir_fd=fds[-1]))
+        fds.append(os.open(name, flags | os.O_NONBLOCK, dir_fd=fds[-1]))  # a FIFO must not block the open
+        st = os.fstat(fds[-1])
+        if not stat.S_ISREG(st.st_mode) or st.st_size > STATE_MAX_BYTES:
+            return None
+        data = b""
+        while chunk := os.read(fds[-1], STATE_MAX_BYTES + 1 - len(data)):
+            data += chunk
+            if len(data) > STATE_MAX_BYTES:
+                return None
+        return data
+    except OSError:
+        return None
+    finally:
+        for fd in fds:
+            os.close(fd)
+
+
+def fast_import_path(rel):
+    """rel as a C-style quoted path for git fast-import."""
+    escaped = "".join("\\\\" if c == "\\" else '\\"' if c == '"' else "\\n" if c == "\n"
+                      else f"\\{ord(c):03o}" if ord(c) < 32 or ord(c) == 127 else c for c in rel)
+    return f'"{escaped}"'.encode("utf-8", "surrogateescape")
+
+
+def state_stream(ref, contents, parent):
+    """A git fast-import stream: one commit on `ref` (child of `parent`, if any) whose tree is exactly
+    `contents`. fast-import applies no attributes, filters or signing."""
+    message = f"factory state {stamp()}".encode()
+    out = [f"commit {ref}\ncommitter {STATE_IDENTITY} {int(time.time())} +0000\ndata {len(message)}\n".encode(),
+           message, b"\n"]
+    if parent:
+        out.append(f"from {parent}\n".encode())
+    out.append(b"deleteall\n")
+    for rel, data in contents.items():
+        out += [b"M 100644 inline ", fast_import_path(rel), f"\ndata {len(data)}\n".encode(), data, b"\n"]
+    return b"".join(out)
+
+
+def save_state(url):
+    """Commit factory/jobs on top of origin's factory-state and push it; one retry after a rejection."""
+    if JOBS.resolve() != REPO.resolve() / "factory" / "jobs":
+        log(f"error: factory/jobs is a symlink; not saving {STATE_BRANCH}")
+        return False
+    contents = {}
+    for rel in state_files():
+        data = read_state_file(rel)
+        if data is not None:
+            contents[rel] = data
+    try:
+        with state_repo(url) as g:
+            for attempt in range(2):
+                ref = f"refs/factory/save-{attempt}"
+                g("fast-import", "--quiet", stdin=state_stream(ref, contents, fetch_state(g, url)))
+                if g("push", "-q", url, f"{ref}:refs/heads/{STATE_BRANCH}", check=False).returncode == 0:
+                    return True
+    except RuntimeError as exc:
+        log(f"error: saving {STATE_BRANCH}: {exc}")
+    return False
+
+
+def cmd_tick(ci=False):
     try:
         base, runner = load_config()
     except ValueError as exc:
         print(f"runner: {exc}", file=sys.stderr)
         log(f"error: config: {exc}")
         return 1
-    lock = open(git_path("factory-runner.lock"), "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        log("busy")
-        return 0
+    if not ci:
+        lock = open(git_path("factory-runner.lock"), "w")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            log("busy")
+            return 0
+        signal.signal(signal.SIGTERM, on_sigterm)
+        return tick_body(base, runner, None)
     signal.signal(signal.SIGTERM, on_sigterm)
+    token = ci_token()
+    url = origin_url()
+    if not url:
+        log(f"error: no origin remote; {STATE_BRANCH} can't be restored or saved")
+        return 1
+    if not restore_state(url):
+        return 1
+    code = 1
+    try:
+        code = tick_body(base, runner, token or "")
+    finally:
+        if not save_state(url):
+            log(f"error: {STATE_BRANCH} not saved; this run's state is in the workflow artifact")
+            code = 1
+    return code
+
+
+def tick_body(base, runner, ci_token_value):
     if hooks_or_fsmonitor_configured():
         log("error: git hooks or fsmonitor configured in this clone; remove them")
         return 1
@@ -249,6 +505,7 @@ def cmd_tick():
     if pull.returncode != 0:
         log(f"skipped: pull failed: {first_line(pull.stderr)}")
         return 0
+    chores()
     try:
         work = has_work()
     except RuntimeError as exc:
@@ -257,10 +514,21 @@ def cmd_tick():
     if not work:
         log("idle")
         return 0
-    token = read_token(runner["keychain_service"])
-    if not token:
-        log(f"error: no token in Keychain item {runner['keychain_service']}; "
-            "run claude setup-token and store it")
+    if ci_token_value is not None:
+        token = ci_token_value
+        if not token:
+            log("error: CLAUDE_CODE_OAUTH_TOKEN isn't set; add the FACTORY_CLAUDE_TOKEN secret")
+            return 1
+    else:
+        token = read_token(runner["keychain_service"])
+        if not token:
+            where = (token_problem() or f"no token from secret-tool (service {runner['keychain_service']}) "
+                     f"or {TOKEN_FILE}") if platform_name() == "Linux" else \
+                f"no token in Keychain item {runner['keychain_service']}; run claude setup-token and store it"
+            log(f"error: {where}")
+            return 1
+    if platform_name() == "Linux" and missing_sandbox_tools():
+        log(f"error: {', '.join(missing_sandbox_tools())} missing; Claude Code's Linux sandbox needs bubblewrap and socat")
         return 1
     max_seconds = int(os.environ.get("FACTORY_RUNNER_MAX_SECONDS") or runner["max_minutes"] * 60)
     RUNS.mkdir(parents=True, exist_ok=True)
@@ -310,22 +578,70 @@ def plist_bytes(runner):
     })
 
 
-def require_launchd():
-    if platform.system() != "Darwin":
-        die("launchd only (macOS); elsewhere run `factory/bin/runner tick` from cron or systemd")
+def platform_name():
+    return platform.system()
+
+
+def unit_name():
+    return f"factory-{hashlib.sha256(str(REPO).encode()).hexdigest()[:12]}"
+
+
+def units_dir():
+    return Path.home() / ".config" / "systemd" / "user"
+
+
+def systemd_units(runner):
+    service = (f"[Unit]\nDescription=Software factory runner for {REPO}\n\n"
+               f"[Service]\nType=oneshot\nWorkingDirectory={REPO}\n"
+               f"ExecStart={sys.executable} {FACTORY / 'bin' / 'runner'} tick\n"
+               f"Environment=PATH={os.environ.get('PATH', '/usr/bin:/bin')}\n")
+    timer = (f"[Unit]\nDescription=Run the software factory for {REPO} every {runner['interval_minutes']} min\n\n"
+             f"[Timer]\nOnBootSec=5min\nOnUnitActiveSec={runner['interval_minutes']}min\nPersistent=true\n\n"
+             "[Install]\nWantedBy=timers.target\n")
+    return service, timer
+
+
+def systemctl(*args):
+    if not shutil.which("systemctl"):
+        die("systemctl not found; the Linux runner needs a systemd user session")
+    return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True)
+
+
+def require_scheduler():
+    name = platform_name()
+    if name not in ("Darwin", "Linux"):
+        die(f"no scheduler for {name}; run `factory/bin/runner tick` from your own scheduler")
+    return name
+
+
+def install_systemd(runner, dry_run):
+    service, timer = systemd_units(runner)
+    if dry_run:
+        sys.stdout.write(f"# {unit_name()}.service\n{service}\n# {unit_name()}.timer\n{timer}")
+        return 0
+    d = units_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    JOBS.mkdir(parents=True, exist_ok=True)
+    (d / f"{unit_name()}.service").write_text(service)
+    (d / f"{unit_name()}.timer").write_text(timer)
+    for args in (("daemon-reload",), ("enable", "--now", f"{unit_name()}.timer")):
+        res = systemctl(*args)
+        if res.returncode != 0:
+            die(f"systemctl --user {' '.join(args)} failed: {first_line(res.stderr)}")
+    print(f"installed {d / unit_name()}.timer; runs every {runner['interval_minutes']} min. "
+          "Run `loginctl enable-linger $USER` so it also runs while you're logged out.")
+    return 0
 
 
 def launchctl(*args):
     return subprocess.run(["launchctl", *args], capture_output=True, text=True)
 
 
-def cmd_install(dry_run):
-    _, runner = load_config()
+def install_launchd(runner, dry_run):
     data = plist_bytes(runner)
     if dry_run:
         sys.stdout.write(data.decode())
         return 0
-    require_launchd()
     path = plist_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     JOBS.mkdir(parents=True, exist_ok=True)
@@ -346,22 +662,119 @@ def cmd_install(dry_run):
     return 0
 
 
-def cmd_uninstall():
-    require_launchd()
+def uninstall_launchd():
     launchctl("bootout", f"{domain()}/{label()}")
     plist_path().unlink(missing_ok=True)
     print(f"uninstalled {label()}")
     return 0
 
 
-def cmd_status():
-    require_launchd()
+def status_launchd():
     loaded = launchctl("print", f"{domain()}/{label()}").returncode == 0
     path = plist_path()
     print(f"{label()}: {'loaded' if loaded else 'not loaded'}")
     print(f"plist: {path}{'' if path.exists() else ' (missing)'}")
     lines = LOG.read_text().splitlines()[-10:] if LOG.exists() else ["(no runner.log yet)"]
     print("\n".join(lines))
+    return 0
+
+
+def cmd_install(dry_run):
+    _, runner = load_config()
+    if dry_run and platform_name() != "Linux":
+        return install_launchd(runner, dry_run)
+    name = require_scheduler()
+    return install_systemd(runner, dry_run) if name == "Linux" else install_launchd(runner, dry_run)
+
+
+def cmd_uninstall():
+    if require_scheduler() == "Darwin":
+        return uninstall_launchd()
+    systemctl("disable", "--now", f"{unit_name()}.timer")
+    for suffix in ("service", "timer"):
+        (units_dir() / f"{unit_name()}.{suffix}").unlink(missing_ok=True)
+    systemctl("daemon-reload")
+    print(f"uninstalled {unit_name()}")
+    return 0
+
+
+def cmd_status():
+    if require_scheduler() == "Darwin":
+        return status_launchd()
+    print(systemctl("list-timers", "--all", f"{unit_name()}.timer").stdout.rstrip())
+    lines = LOG.read_text().splitlines()[-10:] if LOG.exists() else ["(no runner.log yet)"]
+    print("\n".join(lines))
+    return 0
+
+
+WORKFLOW = """\
+# Written by factory/bin/runner workflow. Runs the software factory on a schedule.
+name: factory-runner
+on:
+  schedule:
+    - cron: "{cron}"
+  workflow_dispatch:
+concurrency:
+  group: factory-runner
+  cancel-in-progress: false
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: read
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: {timeout}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{{{ secrets.FACTORY_GH_TOKEN }}}}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Sandbox tools
+        run: sudo apt-get update -q && sudo apt-get install -y -q bubblewrap socat
+      - name: Claude Code
+        run: npm install -g @anthropic-ai/claude-code@{claude_version}
+      - name: Git identity from the token's user
+        env:
+          GH_TOKEN: ${{{{ secrets.FACTORY_GH_TOKEN }}}}
+        run: |
+          login="$(gh api user --jq .login)"
+          id="$(gh api user --jq .id)"
+          git config user.name "$login"
+          git config user.email "$id+$login@users.noreply.github.com"
+      - name: Factory tick
+        run: python3 factory/bin/runner tick --ci
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{{{ secrets.FACTORY_CLAUDE_TOKEN }}}}
+          GH_TOKEN: ${{{{ secrets.FACTORY_GH_TOKEN }}}}
+      - name: Keep job state that couldn't be pushed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: factory-jobs-${{{{ github.run_id }}}}
+          path: factory/jobs
+"""
+
+
+def cron(interval_minutes):
+    """GitHub runs schedules at most every 5 min and often late; 15 min is the floor here."""
+    n = max(15, interval_minutes)
+    return f"*/{n} * * * *" if n < 60 else f"0 */{max(1, n // 60)} * * *"
+
+
+def cmd_workflow(claude_version):
+    if not re.fullmatch(r"\d+\.\d+\.\d+", claude_version or ""):
+        die(f"--claude-version must be X.Y.Z (claude --version prints it), not {claude_version!r}")
+    _, runner = load_config()
+    sys.stdout.write(WORKFLOW.format(cron=cron(runner["interval_minutes"]), timeout=runner["max_minutes"] + 10,
+                                     claude_version=claude_version))
     return 0
 
 

@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Check that the software factory is installed correctly in this project.
 
-Usage: doctor [--fast]
+Usage: doctor [--fast] [--ci]
 
 Prints PASS, WARN or FAIL per check and exits 1 on any FAIL. --fast skips
-running factory/checks.sh.
+running factory/checks.sh. --ci checks the GitHub Actions runner instead of a
+local one.
 """
 
 import argparse
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -24,11 +26,12 @@ AGENT_KEYS = {"name", "description", "tools"}
 EXECUTABLES = ("factory/checks.sh", "factory/bin/job", "factory/bin/gate", "factory/bin/route",
                "factory/bin/stop-hook", "factory/bin/doctor", "factory/bin/runner")
 LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned",
-          "factory:learning")
+          "factory:learning", "factory:digest", "factory:revert", "factory:risk-ok")
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):")
 CHECKS_TAIL = 20
 # Checks run project code, so they never see the runner's Claude credentials.
 SECRET_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
+CI = False
 
 
 def fail(message):
@@ -83,6 +86,43 @@ def check_config():
         if not isinstance(tags, list) or not tags or not all(
                 isinstance(t, str) and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", t) for t in tags):
             problems.append(fail("learning.tags must be a non-empty list of lowercase-hyphenated names"))
+    digest = cfg.get("digest")
+    if digest is not None:
+        if not isinstance(digest, dict):
+            problems.append(fail("digest must be an object with enabled, hour and days"))
+        else:
+            if not isinstance(digest.get("enabled", True), bool):
+                problems.append(fail("digest.enabled must be true or false"))
+            hour = digest.get("hour", 9)
+            if isinstance(hour, bool) or not isinstance(hour, int) or not 0 <= hour <= 23:
+                problems.append(fail("digest.hour must be an integer from 0 to 23"))
+            days = digest.get("days", 1)
+            if isinstance(days, bool) or not isinstance(days, int) or days <= 0:
+                problems.append(fail("digest.days must be a positive integer"))
+    watch = cfg.get("watch")
+    if watch is not None:
+        if not isinstance(watch, dict):
+            problems.append(fail("watch must be an object with enabled, max_minutes and ignore_workflows"))
+        else:
+            if not isinstance(watch.get("enabled", True), bool):
+                problems.append(fail("watch.enabled must be true or false"))
+            mins = watch.get("max_minutes", 60)
+            if isinstance(mins, bool) or not isinstance(mins, int) or mins <= 0:
+                problems.append(fail("watch.max_minutes must be a positive integer"))
+            names = watch.get("ignore_workflows", [])
+            if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+                problems.append(fail("watch.ignore_workflows must be a list of workflow names"))
+    risky = cfg.get("risky_paths", [])
+    if not isinstance(risky, list) or not all(isinstance(p, str) and p for p in risky):
+        problems.append(fail("risky_paths must be a list of glob strings"))
+    allow = (cfg.get("secret_scan") or {}).get("allow", []) if isinstance(cfg.get("secret_scan", {}), dict) else None
+    if not isinstance(allow, list) or not all(isinstance(p, str) and p for p in allow):
+        problems.append(fail("secret_scan.allow must be a list of glob strings"))
+    handoff = cfg.get("handoff")
+    if handoff is not None:
+        cap = handoff.get("max_tasks_per_part") if isinstance(handoff, dict) else None
+        if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
+            problems.append(fail("handoff.max_tasks_per_part must be a positive integer"))
     if not isinstance(cfg.get("agents", {}).get("learner"), dict):
         problems.append(fail("agents.learner missing; expected {model, effort}"))
     return problems
@@ -187,6 +227,17 @@ def check_labels():
     return [fail(f"label {name!r} missing on GitHub") for name in LABELS if name not in names]
 
 
+def check_paused():
+    path = REPO / "factory" / "jobs" / "paused.json"
+    if not path.exists():
+        return []
+    try:
+        reason = json.loads(path.read_text()).get("reason", "?")
+    except ValueError:
+        reason = "paused.json is unreadable"
+    return [warn(f"{reason}; factory/bin/job resume clears it once the base branch is fixed")]
+
+
 RUNNER_ALLOW = ("Bash(factory/bin/job *)", "Bash(factory/bin/gate *)", "Bash(factory/bin/route *)",
                 "Bash(git *)", "Bash(gh *)", "Bash(bash factory/checks.sh)")
 
@@ -227,6 +278,59 @@ def check_branch_protection(base):
                  "without force-push/deletion rules)")]
 
 
+def platform_name():
+    return platform.system()
+
+
+def unit_name():
+    """Must match unit_name() in factory/bin/runner (a test keeps them equal)."""
+    return f"factory-{hashlib.sha256(str(REPO).encode()).hexdigest()[:12]}"
+
+
+def linux_runner_checks(service):
+    problems = [fail(f"{tool} not found; Claude Code's Linux sandbox needs bubblewrap and socat "
+                     "(apt install bubblewrap socat)") for tool in ("bwrap", "socat") if not shutil.which(tool)]
+    token = False
+    if shutil.which("secret-tool"):
+        res = subprocess.run(["secret-tool", "lookup", "service", service], capture_output=True, text=True)
+        token = res.returncode == 0 and bool(res.stdout.strip())
+    path = Path("~/.config/factory/claude-token").expanduser()
+    if not token and path.exists():
+        token = (path.stat().st_mode & 0o777) == 0o600 and path.stat().st_uid == os.getuid()
+    if not token:
+        problems.append(warn(f"no runner token; store one with secret-tool store --label factory service {service}, "
+                             "or in ~/.config/factory/claude-token with chmod 600"))
+    user = os.environ.get("USER", "")
+    if not shutil.which("loginctl"):
+        problems.append(warn("loginctl not found; linger not checked"))
+    elif "Linger=yes" not in subprocess.run(["loginctl", "show-user", user, "-p", "Linger"],
+                                            capture_output=True, text=True).stdout:
+        problems.append(warn("run loginctl enable-linger $USER so the timer runs while you're logged out"))
+    if not shutil.which("systemctl"):
+        problems.append(warn("systemctl not found; the systemd timer can't run"))
+    elif subprocess.run(["systemctl", "--user", "is-active", f"{unit_name()}.timer"],
+                        capture_output=True, text=True).stdout.strip() != "active":
+        problems.append(warn("runner timer not active; run factory/bin/runner install"))
+    return problems
+
+
+STATE_BLOCKING = {"update", "non_fast_forward", "creation", "pull_request", "required_status_checks"}
+
+
+def ci_state_checks():
+    problems = []
+    gh = shutil.which("gh") or "gh"
+    if isinstance(gh_api(gh, "repos/{owner}/{repo}/branches/factory-state/protection"), dict):
+        problems.append(fail("factory-state is protected; the Actions runner must be able to push it"))
+    rules = gh_api(gh, "repos/{owner}/{repo}/rules/branches/factory-state")
+    blocking = sorted({r.get("type") for r in rules if isinstance(r, dict)} & STATE_BLOCKING) if isinstance(rules, list) else []
+    if blocking:
+        problems.append(fail(f"rules on factory-state block the runner ({', '.join(blocking)})"))
+    if not (REPO / ".github" / "workflows" / "factory-runner.yml").is_file():
+        problems.append(warn("no Actions workflow; /factory-install writes it"))
+    return problems
+
+
 def check_runner():
     problems = []
     rel = "factory/runner-settings.json"
@@ -242,9 +346,13 @@ def check_runner():
     allow = (settings.get("permissions") or {}).get("allow") or []
     problems += [fail(f"{rel}: missing allow rule {rule}") for rule in RUNNER_ALLOW if rule not in allow]
     cfg = json.loads((REPO / "factory" / "config.json").read_text(encoding="utf-8"))
+    if CI:
+        return problems + check_branch_protection(cfg.get("base_branch")) + ci_state_checks()
     service = (cfg.get("runner") or {}).get("keychain_service")
     if not service:
         problems.append(fail("factory/config.json has no runner.keychain_service"))
+    elif platform_name() == "Linux":
+        problems += linux_runner_checks(service)
     elif not shutil.which("security"):
         problems.append(warn("security not found; Keychain token not checked"))
     elif subprocess.run(["security", "find-generic-password", "-s", service],
@@ -252,7 +360,7 @@ def check_runner():
         problems.append(warn(f"no Keychain item {service}; run claude setup-token and "
                              f"security add-generic-password -s {service} -a \"$USER\" -w"))
     problems += check_branch_protection(cfg.get("base_branch"))
-    if sys.platform == "darwin" and shutil.which("launchctl"):
+    if platform_name() == "Darwin" and shutil.which("launchctl"):
         if subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{launchd_label()}"],
                           capture_output=True, text=True).returncode != 0:
             problems.append(warn("runner LaunchAgent not loaded; run factory/bin/runner install"))
@@ -277,6 +385,7 @@ CHECKS = [
     ("stop-hook", check_stop_hook),
     ("claude-md", check_claude_md),
     ("labels", check_labels),
+    ("paused", check_paused),
     ("runner", check_runner),
     ("checks", check_checks),
 ]
@@ -285,7 +394,10 @@ CHECKS = [
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--fast", action="store_true", help="skip running factory/checks.sh")
+    parser.add_argument("--ci", action="store_true", help="check the GitHub Actions runner instead of a local one")
     opts = parser.parse_args(argv)
+    global CI
+    CI = opts.ci
     failed = False
     for name, check in CHECKS:
         if opts.fast and name == "checks":
