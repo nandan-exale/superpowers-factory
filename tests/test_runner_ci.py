@@ -315,9 +315,9 @@ class TickCiTest(CiCase):
     def test_missing_token_with_work_logs_the_secret_to_add(self):
         base, runner = self.runner.load_config()
         with mock.patch.object(self.runner, "chores"), mock.patch.object(self.runner, "has_work", return_value=True), \
-                mock.patch.object(self.runner, "run_claude") as run_claude:
+                mock.patch.object(self.runner, "run_orchestrate") as run_orchestrate:
             self.assertEqual(self.runner.tick_body(base, runner, ""), 1)
-        run_claude.assert_not_called()
+        run_orchestrate.assert_not_called()
         self.assertIn("CLAUDE_CODE_OAUTH_TOKEN isn't set; add the FACTORY_CLAUDE_TOKEN secret",
                       (self.p.root / "factory/jobs/runner.log").read_text())
 
@@ -327,10 +327,11 @@ class TickCiTest(CiCase):
                 mock.patch.object(self.runner, "has_work", return_value=True), \
                 mock.patch.object(self.runner, "read_token", return_value="tok") as read_token, \
                 mock.patch.object(self.runner, "missing_sandbox_tools", return_value=[]), \
-                mock.patch.object(self.runner, "run_claude", return_value=(0, 1)) as run_claude:
+                mock.patch.object(self.runner.shutil, "which", return_value="/bin/claude"), \
+                mock.patch.object(self.runner, "run_orchestrate", return_value=(0, 1)) as run_orchestrate:
             self.assertEqual(self.runner.tick_body(base, runner, None), 0)
         read_token.assert_called_once()
-        self.assertEqual(run_claude.call_args.args[0], "tok")
+        self.assertEqual(run_orchestrate.call_args.args[0], "tok")
 
 
 class DoctorCiTest(CiCase):

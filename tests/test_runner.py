@@ -16,22 +16,33 @@ from unittest import mock
 
 from installed_project import VENDOR, InstalledProject, git, load_script
 
-FAKE_CLAUDE = """#!{python}
-import json, os, sys, time
+FAKE_ORCHESTRATE = """#!{python}
+import json, os, signal, sys, time
 with open(os.environ["FAKE_RECORD"], "a") as f:
-    f.write(json.dumps({{"tool": "claude", "argv": sys.argv[1:],
+    f.write(json.dumps({{"tool": "orchestrate", "argv": sys.argv[1:],
         "has_token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") == "tok-123",
         "has_api_key": "ANTHROPIC_API_KEY" in os.environ,
         "has_base_url": "ANTHROPIC_BASE_URL" in os.environ,
         "scrub": os.environ.get("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"),
         "runner": os.environ.get("FACTORY_RUNNER")}}) + "\\n")
-if os.environ.get("FAKE_CLAUDE_GRANDCHILD"):
+def stopped(signum, frame):
+    open(os.environ["FAKE_RECORD"] + ".sigterm", "w").close()
+    sys.exit(1)
+signal.signal(signal.SIGTERM, stopped)
+if os.environ.get("FAKE_ORCHESTRATE_GRANDCHILD"):
     import subprocess
     subprocess.Popen(["sleep", "20"], start_new_session=True)
-time.sleep(float(os.environ.get("FAKE_CLAUDE_SLEEP", "0")))
-print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
-                  "total_cost_usd": 1.25, "result": "done"}}))
-sys.exit(int(os.environ.get("FAKE_CLAUDE_EXIT", "0")))
+time.sleep(float(os.environ.get("FAKE_ORCHESTRATE_SLEEP", "0")))
+print("004-x: merged PR #3")
+print("SPENT: $1.25")
+sys.exit(int(os.environ.get("FAKE_ORCHESTRATE_EXIT", "0")))
+"""
+
+# The tick still checks that claude is installed; it only records that it ran (it never should).
+FAKE_CLAUDE = """#!{python}
+import json, os, sys
+with open(os.environ["FAKE_RECORD"], "a") as f:
+    f.write(json.dumps({{"tool": "claude", "argv": sys.argv[1:]}}) + "\\n")
 """
 
 # Answers `gh issue list` from $FAKE_ISSUES (JSON list) and everything else with [].
@@ -88,6 +99,8 @@ class RunnerCase(unittest.TestCase):
             path = self.p.fakebin / name
             path.write_text(text.format(python=sys.executable))
             path.chmod(0o755)
+        self.p.write("factory/bin/orchestrate", FAKE_ORCHESTRATE.format(python=sys.executable), executable=True)
+        self.p.commit_all("fake orchestrate")
         self.add_origin()
 
     def add_origin(self):
@@ -169,10 +182,10 @@ class ConfigTest(RunnerCase):
 class TickTest(RunnerCase):
     WORK = [{"number": 7, "title": "Build the widget"}]
 
-    def test_idle_queue_does_not_call_claude(self):
+    def test_idle_queue_does_not_start_orchestrate(self):
         res = self.runner("tick")
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertEqual(self.calls("claude"), [])
+        self.assertEqual(self.calls("orchestrate"), [])
         self.assertTrue(self.log_lines()[-1].endswith(" idle"))
 
     def test_tick_writes_the_report_even_when_idle(self):
@@ -182,34 +195,31 @@ class TickTest(RunnerCase):
         self.assertEqual(report["days"], 7)
         self.assertEqual(len(self.log_lines()), 1)
 
-    def test_paused_tick_is_idle_and_does_not_call_claude(self):
+    def test_paused_tick_is_idle_and_does_not_start_orchestrate(self):
         self.set_issues([{"number": 7, "title": "x"}])
         (self.p.root / "factory/jobs").mkdir(parents=True, exist_ok=True)
         (self.p.root / "factory/jobs/paused.json").write_text(json.dumps({"reason": "red", "time": "t"}))
         res = self.runner("tick")
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertEqual(self.calls("claude"), [])
+        self.assertEqual(self.calls("orchestrate"), [])
         self.assertTrue(self.log_lines()[-1].endswith("idle"))
 
-    def test_work_runs_claude_headless_with_token_and_no_api_vars(self):
+    def test_work_runs_orchestrate_with_token_and_no_api_vars(self):
         self.set_issues(self.WORK)
         res = self.runner("tick")
         self.assertEqual(res.returncode, 0, res.stderr)
-        [call] = self.calls("claude")
-        self.assertEqual(call["argv"][:4], ["-p", "/factory run", "--output-format", "json"])
-        self.assertIn("--permission-mode", call["argv"])
-        self.assertEqual(call["argv"][call["argv"].index("--permission-mode") + 1], "dontAsk")
-        settings = call["argv"][call["argv"].index("--settings") + 1]
-        self.assertTrue(settings.endswith("factory/runner-settings.json"))
+        [call] = self.calls("orchestrate")
+        self.assertEqual(call["argv"], ["run"])
         self.assertTrue(call["has_token"])
         self.assertFalse(call["has_api_key"])
         self.assertFalse(call["has_base_url"])
+        self.assertEqual(self.calls("claude"), [])
         line = self.log_lines()[-1]
         self.assertRegex(line, r" ran exit=0 \d+s cost=\$1\.25$")
         self.assertNotIn("tok-123", line + json.dumps(call["argv"]))
-        runs = list((self.p.root / "factory/jobs/runs").glob("*.json"))
+        runs = list((self.p.root / "factory/jobs/runs").glob("*.out"))
         self.assertEqual(len(runs), 1)
-        self.assertEqual(json.loads(runs[0].read_text())["result"], "done")
+        self.assertEqual(runs[0].read_text().splitlines()[-1], "SPENT: $1.25")
 
     @unittest.skipUnless(sys.platform == "darwin", "Keychain only; Linux tokens are in test_runner_linux")
     def test_token_is_read_from_the_configured_keychain_item(self):
@@ -223,7 +233,7 @@ class TickTest(RunnerCase):
         self.set_issues(self.WORK)
         res = self.runner("tick", FAKE_SECURITY_EXIT="44", FAKE_SECURITY_OUT="")
         self.assertEqual(res.returncode, 1)
-        self.assertEqual(self.calls("claude"), [])
+        self.assertEqual(self.calls("orchestrate"), [])
         self.assertIn("error: no token in Keychain item factory-claude-token", self.log_lines()[-1])
 
     def test_dirty_tree_is_skipped_and_untouched(self):
@@ -231,7 +241,7 @@ class TickTest(RunnerCase):
         self.p.write("AGENTS.md", "# Agents\nmine\n")
         res = self.runner("tick")
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(self.calls("claude"), [])
+        self.assertEqual(self.calls("orchestrate"), [])
         self.assertIn("skipped: uncommitted changes", self.log_lines()[-1])
         self.assertEqual((self.p.root / "AGENTS.md").read_text(), "# Agents\nmine\n")
 
@@ -261,15 +271,17 @@ class TickTest(RunnerCase):
         self.assertEqual(res.returncode, 0)
         self.assertTrue(self.log_lines()[-1].endswith(" busy"))
 
-    def test_timeout_kills_claude(self):
+    def test_timeout_stops_orchestrate_with_sigterm(self):
+        # SIGTERM first, so orchestrate stops the agents it started in their own sessions.
         self.set_issues(self.WORK)
-        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="1", FAKE_CLAUDE_SLEEP="10")
+        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="1", FAKE_ORCHESTRATE_SLEEP="10")
         self.assertEqual(res.returncode, 1)
         self.assertRegex(self.log_lines()[-1], r" timeout after \d+s$")
+        self.assertTrue(Path(str(self.record) + ".sigterm").exists())
 
-    def test_claude_failure_is_logged_with_exit_code(self):
+    def test_orchestrate_failure_is_logged_with_exit_code(self):
         self.set_issues(self.WORK)
-        res = self.runner("tick", FAKE_CLAUDE_EXIT="3")
+        res = self.runner("tick", FAKE_ORCHESTRATE_EXIT="3")
         self.assertEqual(res.returncode, 1)
         self.assertIn(" ran exit=3 ", self.log_lines()[-1])
 
@@ -381,7 +393,7 @@ class SecurityTest(RunnerCase):
         self.set_issues(self.WORK)
         res = self.runner("tick")
         self.assertEqual(res.returncode, 1)
-        self.assertEqual(self.calls("claude"), [])
+        self.assertEqual(self.calls("orchestrate"), [])
         self.assertEqual(self.log_lines()[-1].split(" ", 1)[1], self.HOOKS_ERROR)
 
     def test_executable_hook_is_refused(self):
@@ -412,7 +424,7 @@ class SecurityTest(RunnerCase):
         self.set_issues(self.WORK)
         res = self.runner("tick")
         self.assertEqual(res.returncode, 1)
-        self.assertEqual(self.calls("claude"), [])
+        self.assertEqual(self.calls("orchestrate"), [])
         self.assertIn(f"error: git config in this clone sets {key}; remove it", self.log_lines()[-1])
 
     def test_risky_local_config_keys_are_refused(self):
@@ -436,16 +448,16 @@ class SecurityTest(RunnerCase):
         path.write_text("[credential]\n\thelper = !gh auth git-credential\n")
         return path
 
-    def test_claude_child_scrubs_the_token_from_its_subprocesses(self):
+    def test_orchestrate_scrubs_the_token_from_its_subprocesses(self):
         self.set_issues(self.WORK)
         self.runner("tick")
-        [call] = self.calls("claude")
+        [call] = self.calls("orchestrate")
         self.assertEqual(call["scrub"], "1")
 
-    def test_claude_child_is_marked_as_a_runner_session(self):
+    def test_orchestrate_is_marked_as_a_runner_session(self):
         self.set_issues(self.WORK)
         self.runner("tick")
-        [call] = self.calls("claude")
+        [call] = self.calls("orchestrate")
         self.assertEqual(call["runner"], "1")
 
 
@@ -461,7 +473,7 @@ class SpecGapTest(RunnerCase):
             {"t": now, "stage": "build", "cost_usd": 500, "delta_usd": 500}) + "\n")
         res = self.runner("tick")
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertEqual(self.calls("claude"), [])
+        self.assertEqual(self.calls("orchestrate"), [])
         self.assertTrue(self.log_lines()[-1].endswith(" idle"))
 
     def test_queue_failure_is_an_error(self):
@@ -477,7 +489,7 @@ class SpecGapTest(RunnerCase):
         res = self.runner("tick")
         self.assertEqual(res.returncode, 0)
         self.assertRegex(self.log_lines()[-1], r" skipped: pull failed: ")
-        self.assertEqual(self.calls("claude"), [])
+        self.assertEqual(self.calls("orchestrate"), [])
 
 
 class RobustnessTest(RunnerCase):
@@ -486,7 +498,7 @@ class RobustnessTest(RunnerCase):
     def test_grandchild_holding_stdout_does_not_hang_the_tick(self):
         self.set_issues(self.WORK)
         start = time.monotonic()
-        res = self.runner("tick", FAKE_CLAUDE_GRANDCHILD="1")
+        res = self.runner("tick", FAKE_ORCHESTRATE_GRANDCHILD="1")
         self.assertLess(time.monotonic() - start, 10)
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn(" ran exit=0 ", self.log_lines()[-1])
@@ -495,34 +507,35 @@ class RobustnessTest(RunnerCase):
         self.set_issues(self.WORK)
         self.runner("tick")
         runs = self.p.root / "factory/jobs/runs"
-        [out] = list(runs.glob("*.json"))
+        [out] = list(runs.glob("*.out"))
         [err] = list(runs.glob("*.stderr.log"))
-        self.assertEqual(json.loads(out.read_text())["result"], "done")
-        self.assertEqual(err.name, out.name.removesuffix(".json") + ".stderr.log")
+        self.assertIn("004-x: merged PR #3", out.read_text())
+        self.assertEqual(err.name, out.name.removesuffix(".out") + ".stderr.log")
 
     def test_timeout_still_kills_with_output_in_files(self):
         self.set_issues(self.WORK)
         start = time.monotonic()
-        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="1", FAKE_CLAUDE_SLEEP="10",
-                          FAKE_CLAUDE_GRANDCHILD="1")
+        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="1", FAKE_ORCHESTRATE_SLEEP="10",
+                          FAKE_ORCHESTRATE_GRANDCHILD="1")
         self.assertLess(time.monotonic() - start, 8)
         self.assertEqual(res.returncode, 1)
         self.assertRegex(self.log_lines()[-1], r" timeout after \d+s$")
 
-    def test_sigterm_kills_claude_and_logs_stopped(self):
+    def test_sigterm_stops_orchestrate_and_logs_stopped(self):
         self.set_issues(self.WORK)
         proc = subprocess.Popen([sys.executable, str(self.p.root / "factory/bin/runner"), "tick"],
-                                cwd=self.p.root, env=self.runner_env(FAKE_CLAUDE_SLEEP="30"),
+                                cwd=self.p.root, env=self.runner_env(FAKE_ORCHESTRATE_SLEEP="30"),
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.addCleanup(proc.kill)
         deadline = time.monotonic() + 15
-        while not self.calls("claude") and time.monotonic() < deadline:
+        while not self.calls("orchestrate") and time.monotonic() < deadline:
             time.sleep(0.1)
-        self.assertTrue(self.calls("claude"), "claude never started")
+        self.assertTrue(self.calls("orchestrate"), "orchestrate never started")
         proc.send_signal(signal.SIGTERM)
         proc.communicate(timeout=10)
         self.assertEqual(proc.returncode, 1)
         self.assertTrue(self.log_lines()[-1].endswith(" stopped"))
+        self.assertTrue(Path(str(self.record) + ".sigterm").exists())
 
     def test_missing_claude_is_logged(self):
         self.set_issues(self.WORK)
@@ -532,20 +545,21 @@ class RobustnessTest(RunnerCase):
         res = self.runner("tick", PATH=os.pathsep.join((str(bin2), str(self.p.toolbin), "/usr/bin", "/bin")))
         self.assertEqual(res.returncode, 1)
         self.assertTrue(self.log_lines()[-1].endswith(" error: claude not found on PATH"))
+        self.assertEqual(self.calls("orchestrate"), [])
 
     def test_only_the_newest_fifty_runs_are_kept(self):
         self.set_issues(self.WORK)
         runs = self.p.root / "factory/jobs/runs"
         runs.mkdir(parents=True)
         for n in range(55):
-            (runs / f"2020-01-01T0000{n:02d}Z.json").write_text("{}")
+            (runs / f"2020-01-01T0000{n:02d}Z.out").write_text("")
             (runs / f"2020-01-01T0000{n:02d}Z.stderr.log").write_text("")
         self.runner("tick")
         names = sorted(f.name for f in runs.iterdir())
         self.assertEqual(len(names), 100)
-        self.assertNotIn("2020-01-01T000000Z.json", names)
+        self.assertNotIn("2020-01-01T000000Z.out", names)
         self.assertNotIn("2020-01-01T000004Z.stderr.log", names)
-        self.assertIn("2020-01-01T000054Z.json", names)
+        self.assertIn("2020-01-01T000054Z.out", names)
         self.assertTrue(any(not n.startswith("2020") for n in names))
 
 
