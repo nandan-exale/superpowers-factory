@@ -6,6 +6,7 @@ import importlib.util
 import io
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -14,6 +15,11 @@ SPEC_PATH = "docs/superpowers/specs/2026-11-12-widget-design.md"
 PLAN_PATH = "docs/superpowers/plans/2026-11-12-widget.md"
 SPEC_TEXT = "# Widget design\n\nThe widget spins.\n"
 PLAN_TEXT = "# Widget plan\n\n### Task 1: Spin\n"
+
+# A job loaded in this process finds `runtimes` already imported from the plugin's copy, not from its
+# project's factory/lib: Python caches the package once, and a project's folder is deleted with its test.
+sys.path.insert(0, str(VENDOR / "factory" / "lib"))
+import runtimes  # noqa: E402,F401
 
 
 def git(cwd, *args):
@@ -43,6 +49,9 @@ class FactoryProject:
         (self.repo / "factory" / "bin").mkdir(parents=True)
         for script in ("job", "route"):
             shutil.copy(VENDOR / "factory" / "bin" / script, self.repo / "factory" / "bin" / script)
+        # job imports the runtime adapters for their CAPS.
+        shutil.copytree(VENDOR / "factory" / "lib", self.repo / "factory" / "lib",
+                        ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copy(VENDOR / "factory" / "config.json", self.repo / "factory" / "config.json")
         for path, text in ((SPEC_PATH, SPEC_TEXT), (PLAN_PATH, PLAN_TEXT)):
             target = self.repo / path

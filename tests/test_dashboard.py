@@ -32,5 +32,9 @@ class DashboardTest(unittest.TestCase):
         self.assertIn('id="pause"', self.html)
         self.assertIn("if (paused) return", self.html)
 
+    def test_unknown_cost_shows_the_run_count(self):
+        self.assertIn("cost_known === false", self.html)
+        self.assertIn("n/a (${job.runs} runs)", self.html)
+
     def test_folders_without_job_json_are_skipped(self):
         self.assertIn(".filter(Boolean)", self.html)

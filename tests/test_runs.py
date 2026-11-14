@@ -47,6 +47,13 @@ class RunsTest(unittest.TestCase):
         self.record("intake", None)
         self.assertEqual(self.job.cost_for_folder(self.d), 0.0)
 
+    def test_unknown_cost_is_priced_from_tokens(self):
+        self.job.runtime_config = lambda: {"prices_usd_per_mtok": {"m": {"input": 2.0, "output": 10.0}}}
+        run = {"runtime": "codex", "model": "m", "cost_usd": None, "cost_source": None,
+               "usage": {"input_tokens": 1_000_000, "output_tokens": 0, "cache_read_input_tokens": 0}}
+        self.main("record-run", self.job_id, "builder", stdin=json.dumps(run))
+        self.assertEqual(self.job.cost_by_model(self.d), {"m": 2.0})
+
     def test_other_files_in_runs_are_not_runs(self):
         (self.d / "runs").mkdir()
         (self.d / "runs" / "20261113T000000000000Z-builder.settings.json").write_text("{}")

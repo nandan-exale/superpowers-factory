@@ -28,6 +28,8 @@ class TierCase(unittest.TestCase):
             node[keys[-1]] = value
         path.write_text(json.dumps(cfg))
         self.job = self.project.load_job()
+        # job loads the runtime's adapter for its CAPS; codex and cursor's adapters arrive in Tasks 8–11.
+        self.job.runtime_caps = lambda: {"reports_cost": True, "reports_tokens": True}
         self.job_id = self.project.create_job(self.job)
 
     def agent(self, role):
