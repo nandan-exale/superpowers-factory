@@ -111,6 +111,26 @@ To update later:
 If you installed it for a single project (`--scope project`), run the update
 from that project with the same scope.
 
+### Other agents
+
+The `plugins` CLI (Node.js 18+) installs the plugin into every supported agent
+it finds on your `PATH`: Claude Code, Codex, Cursor and GitHub Copilot CLI.
+
+```bash
+npx plugins add nandan-exale/superpowers-factory
+```
+
+Add `-t <target>` to install into one agent only (`claude-code`, `codex`,
+`cursor`, `github-copilot`), and set `DISABLE_TELEMETRY=1` to turn off its
+install telemetry. To update, run the same command again. Install from GitHub
+as shown, not from a local checkout: a local path is copied whole, `.git` and
+`.worktrees/` included.
+
+The factory itself still runs on Claude Code; other agents get the install,
+handoff and update skills. Codex runs the plugin's session hook only after you
+trust it with `/hooks`. Each agent also needs
+[Superpowers](#requirements) installed.
+
 Installed it before the marketplace was renamed (as
 `superpowers-factory@superpowers-factory-dev`)? Remove the old marketplace and
 install again:
