@@ -184,6 +184,28 @@ class DoctorLinuxTest(LinuxCase):
         self.assertIn("loginctl not found; linger not checked", texts)
         self.assertIn("systemctl not found; the systemd timer can't run", texts)
 
+    def use_runtime(self, name):
+        path = self.p.root / "factory/config.json"
+        path.write_text(json.dumps({**json.loads(path.read_text()), "runtime": name}))
+
+    def test_other_runtime_needs_no_sandbox_tools_and_names_its_token(self):
+        self.use_runtime("codex")
+        for tool in ("bwrap", "socat"):
+            (self.bin / tool).unlink()
+        problems = self.runner_check(FAKE_SECRET_TOOL_EXIT="1", FAKE_LOGINCTL_OUT="Linger=yes\n",
+                                     FAKE_SYSTEMCTL_OUT="active\n")
+        self.assertEqual(problems, [("WARN", "no runner token; store one with secret-tool store --label factory "
+                                             "service factory-codex-token, or in ~/.config/factory/codex-token "
+                                             "with chmod 600")])
+        self.assertEqual(self.calls("secret-tool"), [["lookup", "service", "factory-codex-token"]])
+
+    def test_copilot_needs_no_token(self):
+        self.use_runtime("copilot")
+        problems = self.runner_check(FAKE_SECRET_TOOL_EXIT="1", FAKE_LOGINCTL_OUT="Linger=yes\n",
+                                     FAKE_SYSTEMCTL_OUT="active\n")
+        self.assertEqual(problems, [])
+        self.assertEqual(self.calls("secret-tool"), [])
+
     def test_all_good_is_quiet(self):
         problems = self.runner_check(FAKE_SECRET_TOOL_OUT="t\n", FAKE_LOGINCTL_OUT="Linger=yes\n",
                                      FAKE_SYSTEMCTL_OUT="active\n")
