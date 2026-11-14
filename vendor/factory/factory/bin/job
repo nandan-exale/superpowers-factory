@@ -19,8 +19,9 @@ Usage:
   job pr-feedback <job>          trusted PR comments → feedback-<k>.md; an escalated job goes back to build
   job reject <job>               needs-info or needs-human → rejected, with your reason (stdin) as rejection.md
   job route <job>                ACCEPTed intake → every later agent's model and effort from config.json
-  job agent <job> <role>         print model=<alias> effort=<level> for intake, spec-writer, builder, approver, reviewer-<r>,
-                                 or learner (then <job> is a learning tag)
+  job agent <job> <role>         print model=<model> effort=<level> (and a NOTE: line when the effort was lowered) for
+                                 intake, spec-writer, builder, approver, reviewer-<r>, or learner (then <job> is a
+                                 learning tag)
   job planned <job>              factory:planned issue → intake.md, spec.md, plan.md, routed, in build
   job sync <job>                 refresh reviews, gate and cost from the job's files
   job evidence <job>             write evidence.md; make it the PR body if there is a PR
@@ -841,8 +842,7 @@ def cmd_learn_file(tag):
 def cmd_agent_learner(tag):
     if not TAG_NAME.fullmatch(tag):
         die(f"not a learning tag: {tag!r}")
-    setting = agent_setting("agents.learner", CONFIG.get("agents", {}).get("learner"))
-    print(f"model={setting['model']} effort={setting['effort']}")
+    print_setting("agents.learner", CONFIG.get("agents", {}).get("learner"))
 
 
 # ---- Planned issues: the block /factory-handoff writes --------------------
@@ -922,16 +922,61 @@ def check_plan_commit(plan):
 AGENT_ROLES = ("spec-writer", "builder", "approver")
 
 
+TIERS = ("fast", "balanced", "strong", "frontier")
+# Settings written before tiers named a Claude alias; an in-flight job's job.json may still hold one.
+LEGACY_TIER = {"haiku": "fast", "sonnet": "balanced", "opus": "strong", "fable": "frontier"}
+CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+
+def runtime_name():
+    return CONFIG.get("runtime", "claude")
+
+
+def runtime_config():
+    name = runtime_name()
+    conf = (CONFIG.get("runtimes") or {}).get(name)
+    require(isinstance(conf, dict), f"factory/config.json runtime {name!r} has no runtimes.{name} object")
+    return conf
+
+
 def agent_setting(where, setting):
-    """A config `{model, effort}` entry, checked against model_aliases and effort_levels."""
-    require(isinstance(setting, dict) and set(setting) == {"model", "effort"},
-            f"{where} must be {{model, effort}}, got {setting!r}")
-    aliases, levels = CONFIG["model_aliases"], CONFIG["effort_levels"]
-    require(setting["model"] in aliases,
-            f"{where}.model {setting['model']!r} isn't in model_aliases ({', '.join(aliases)})")
-    require(setting["effort"] in levels,
-            f"{where}.effort {setting['effort']!r} isn't in effort_levels ({', '.join(levels)})")
+    """A config `{tier, effort}` entry (or a legacy `{model, effort}` one), checked."""
+    require(isinstance(setting, dict) and set(setting) in ({"tier", "effort"}, {"model", "effort"}),
+            f"{where} must be {{tier, effort}}, got {setting!r}")
+    if "tier" in setting:
+        require(setting["tier"] in TIERS, f"{where}.tier {setting['tier']!r} isn't one of {', '.join(TIERS)}")
+    else:
+        require(setting["model"] in LEGACY_TIER,
+                f"{where}.model {setting['model']!r} isn't a known alias; use tier ({', '.join(TIERS)})")
+    require(setting["effort"] in CLAUDE_EFFORTS,
+            f"{where}.effort {setting['effort']!r} isn't one of {', '.join(CLAUDE_EFFORTS)}")
     return dict(setting)
+
+
+def resolve_setting(where, setting):
+    """(model, effort, note) for the configured runtime. note says when the effort was lowered."""
+    setting = agent_setting(where, setting)
+    name, conf = runtime_name(), runtime_config()
+    tier = setting.get("tier") or LEGACY_TIER[setting["model"]]
+    model = (conf.get("tiers") or {}).get(tier)
+    require(isinstance(model, str) and model,
+            f"factory/config.json runtimes.{name}.tiers.{tier} isn't set: name the {name} model for the {tier} tier")
+    efforts = conf.get("efforts") or []
+    want = setting["effort"]
+    if not efforts:
+        return model, "none", None
+    if want in efforts:
+        return model, want, None
+    lower = [e for e in CLAUDE_EFFORTS[:CLAUDE_EFFORTS.index(want)] if e in efforts]
+    got = lower[-1] if lower else efforts[0]
+    return model, got, f"effort {want} → {got} ({name} supports {', '.join(efforts)})"
+
+
+def print_setting(where, setting):
+    model, effort, note = resolve_setting(where, setting)
+    print(f"model={model} effort={effort}")
+    if note:
+        print(f"NOTE: {note}")
 
 
 def route_agents(risk, surfaces):
@@ -2163,7 +2208,8 @@ def cmd_route(job):
     job["agents"] = route_agents(job["intake"]["risk"], job["intake"]["surfaces"])
     save(job)
     settings = {**{r: job["agents"][r] for r in AGENT_ROLES}, **job["agents"]["reviewers"]}
-    print(f"{job['id']}: " + ", ".join(f"{name} {s['model']}/{s['effort']}" for name, s in settings.items()))
+    print(f"{job['id']}: " + ", ".join(f"{name} {s.get('tier') or s.get('model')}/{s['effort']}"
+                                       for name, s in settings.items()))
 
 
 def cmd_agent(job, role):
@@ -2179,7 +2225,7 @@ def cmd_agent(job, role):
     else:
         die(f"{job['id']} has no agent {role!r}; routed: "
             + ", ".join([*AGENT_ROLES, *(f"reviewer-{r}" for r in job["agents"]["reviewers"])]))
-    print(f"model={setting['model']} effort={setting['effort']}")
+    print_setting(f"{job['id']}.{role}", setting)
 
 
 TASK_HEADING = re.compile(r"^### Task \d+", re.M)
