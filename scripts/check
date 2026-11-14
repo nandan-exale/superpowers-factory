@@ -79,7 +79,7 @@ def check_config(root, opts):
 FRONTMATTER_GLOBS = (
     "skills/*/SKILL.md",
     "vendor/factory/.claude/skills/*/SKILL.md",
-    "vendor/factory/.claude/agents/*.md",
+    "vendor/factory/factory/agents/*.md",
 )
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):(.*)$")
 

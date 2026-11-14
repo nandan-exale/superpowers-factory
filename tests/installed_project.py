@@ -11,11 +11,15 @@ from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1]
 VENDOR = PLUGIN / "vendor" / "factory"
-AGENTS = ("intake", "spec-writer", "builder", "reviewer-code",
-          "reviewer-security", "reviewer-ux", "reviewer-ui", "approver", "learner")
+sys.path.insert(0, str(PLUGIN / "bin"))
+
+from factory_files import AGENTS, LIB  # noqa: E402
+
 COPIED = (
     ".claude/skills/factory/SKILL.md",
-    *(f".claude/agents/{name}.md" for name in AGENTS),
+    *(f"factory/agents/{name}.md" for name in AGENTS),
+    *LIB,
+    "factory/bin/orchestrate",
     "factory/config.json",
     "factory/bin/job",
     "factory/bin/gate",

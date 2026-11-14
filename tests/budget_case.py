@@ -3,10 +3,8 @@
 import contextlib
 import io
 import json
-import os
 import tempfile
 import unittest
-from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -24,9 +22,6 @@ class BudgetCase(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        patcher = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tmp.name})
-        patcher.start()
-        self.addCleanup(patcher.stop)
         self.project = FactoryProject(tmp.name)
         self.project.set_issue("Build the widget.", labels=("factory",))
         self.job = self.project.load_job()

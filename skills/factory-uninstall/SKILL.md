@@ -16,10 +16,12 @@ project root. Commit nothing. Ask before anything this list doesn't cover.
 3. **Runner.** If `factory/bin/runner status` reports the launchd agent
    installed, run `factory/bin/runner uninstall`.
 4. **Files.** The file list is the keys of `files` in `factory/manifest.json`
-   that are also in `FILES` from `$PLUGIN/bin/factory_files.py`; delete only
-   those. A key that is absolute, has a `..` segment, or isn't in `FILES`:
-   never delete it, and list it for the human. Without a manifest, use
-   `FILES`. Delete each listed file that exists, except `factory/checks.sh`
+   that are also in `FILES` from `$PLUGIN/bin/factory_files.py` (the agents
+   in `factory/agents`, the orchestrator in `factory/lib`, and the rest), or in
+   its `RETIRED` (`.claude/agents`, if present: installs before 0.5.0); delete only
+   those. A key that is absolute, has a `..` segment, or isn't in `FILES` or
+   `RETIRED`: never delete it, and list it for the human. Without a manifest,
+   use `FILES` and `RETIRED`. Delete each listed file that exists, except `factory/checks.sh`
    when it differs from `$PLUGIN/vendor/factory/factory/checks.sh` (it holds
    the project's own checks: keep it and say so). Delete
    `factory/manifest.json`. Then remove directories left empty under

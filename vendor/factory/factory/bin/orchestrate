@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Run the software factory: the pipeline the factory skill describes, as a script. Every agent is a
+child process of the configured runtime (config.json `runtime`, default claude).
+
+Usage:
+  orchestrate run          drain the queue: every open `factory` issue, `concurrency` at a time; also resumes
+  orchestrate run <n>      run one issue now
+
+It prints one line per step and ends with `job summary` and `SPENT: $<usd>`. SIGTERM stops every agent;
+state is in files, so the next run resumes.
+"""
+
+import os
+import shutil
+import signal
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "factory" / "lib"))
+sys.dont_write_bytecode = True  # __pycache__ in factory/lib would make the checkout dirty, and the runner skips it
+
+import runtimes  # noqa: E402
+from orchestrator.jobcli import JobCli  # noqa: E402
+from orchestrator.loop import Loop  # noqa: E402
+from orchestrator.pipeline import Pipeline  # noqa: E402
+
+# Agents get these back in their own environment; job, gate, gh, git and their hooks never see them.
+SECRET_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
+
+
+def say(line):
+    print(line, flush=True)
+
+
+def main(argv):
+    if not argv or argv[0] != "run" or len(argv) > 2 or (len(argv) == 2 and not argv[1].isdigit()):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    secrets = {name: os.environ.pop(name) for name in SECRET_ENV if name in os.environ}
+    cli = JobCli(REPO)
+    runtime = runtimes.load(cli.config().get("runtime", "claude"))
+    if not shutil.which(runtime.BINARY):
+        print(f"orchestrate: {runtime.BINARY} not found on PATH; install it, then run again", file=sys.stderr)
+        return 1
+    loop = Loop(cli, Pipeline(cli, say=say), runtime, say=say, agent_env=secrets)
+
+    def on_sigterm(signum, frame):
+        loop.stop()
+        say("stopped")
+        sys.exit(1)
+
+    signal.signal(signal.SIGTERM, on_sigterm)
+    return loop.run(int(argv[1]) if len(argv) == 2 else None)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

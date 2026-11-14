@@ -8,12 +8,15 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
 - `skills/factory-install`, `skills/factory-handoff`: this plugin's skills.
 - `vendor/factory/`: the vendored factory, with edits. `factory/bin/job` is the
   job state machine; `factory/config.json` holds models, efforts and routing;
-  `.claude/skills/factory` is the orchestrator; `.claude/agents/` the agents.
+  `factory/bin/orchestrate` (with `factory/lib/orchestrator/`) is the
+  orchestrator and `.claude/skills/factory` its entry point;
+  `factory/lib/runtimes/` holds the agent CLI adapters; `factory/agents/` the
+  agents.
 - `tests/`: stdlib `unittest`. `tests/factory_project.py` builds a throwaway
   project with a bare origin.
 - `scripts/check`: every repo rule. The Stop hook is the installed factory's
   `factory/bin/stop-hook`, which runs `factory/checks.sh` (= `scripts/check`).
-- `factory/`, `.claude/agents/`, `.claude/skills/factory/`: the factory
+- `factory/`, `factory/agents/`, `.claude/skills/factory/`: the factory
   **installed** in this repo to build it (see "Software factory" below). Not the
   source: change `vendor/factory/` instead. The installed copy changes only
   through `/factory-update`, by a human.

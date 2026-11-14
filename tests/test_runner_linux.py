@@ -220,28 +220,28 @@ class LinuxTickTest(RunnerCase):
     def test_missing_bubblewrap_skips_with_a_log_line(self):
         (self.p.toolbin / "bwrap").unlink()
         self.assertEqual(self.tick(FAKE_SECRET_TOOL_OUT="tok-123\n"), 1)
-        self.assertEqual(self.calls("claude"), [])
+        self.assertEqual(self.calls("orchestrate"), [])
         self.assertTrue(self.log_lines()[-1].endswith(
             "error: bwrap missing; Claude Code's Linux sandbox needs bubblewrap and socat"))
 
     def test_no_token_is_an_error(self):
         self.assertEqual(self.tick(FAKE_SECRET_TOOL_EXIT="1"), 1)
-        self.assertEqual(self.calls("claude"), [])
+        self.assertEqual(self.calls("orchestrate"), [])
         self.assertTrue(self.log_lines()[-1].endswith(
             "error: no token from secret-tool (service factory-claude-token) or ~/.config/factory/claude-token"))
 
     def test_open_token_file_is_refused_with_the_chmod_fix(self):
         self.token_file("file-token\n", 0o644)
         self.assertEqual(self.tick(FAKE_SECRET_TOOL_EXIT="1"), 1)
-        self.assertEqual(self.calls("claude"), [])
+        self.assertEqual(self.calls("orchestrate"), [])
         last = self.log_lines()[-1]
         self.assertIn("must be mode 600 and yours; run chmod 600", last)
         self.assertNotIn("file-token", last)
 
-    def test_private_token_file_reaches_claude_only_through_its_environment(self):
+    def test_private_token_file_reaches_orchestrate_only_through_its_environment(self):
         self.token_file("tok-123\n", 0o600)
         self.assertEqual(self.tick(FAKE_SECRET_TOOL_EXIT="1"), 0)
-        [call] = self.calls("claude")
+        [call] = self.calls("orchestrate")
         self.assertTrue(call["has_token"])
         self.assertNotIn("tok-123", json.dumps(call["argv"]))
         self.assertNotIn("tok-123", "\n".join(self.log_lines()))

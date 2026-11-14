@@ -32,6 +32,7 @@ EXPECT_KEYS = {"stage", "stage_not", "decision_prefix", "budget_stopped", "revie
                "learning_issue", "runner_log_contains"}
 FINISHED = {"merged", "rejected", "needs-info", "needs-human"}
 STALL_SESSIONS = 3
+STOP_SECONDS = 30  # how long orchestrate gets to stop its agents after SIGTERM
 RUN_ENV = {"FACTORY_RUNNER": "1", "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1",
            "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
 
@@ -139,8 +140,8 @@ def log_spend(jobs_dir, since):
 
 
 class Spend:
-    """What this e2e run has spent. Job logs miss the orchestrator session, and a session's own
-    total may include its subagents, so both are added: the cap errs towards stopping early."""
+    """What this e2e run has spent: the job and learning logs, which count every agent run (orchestrate
+    itself costs nothing), plus any session spend added with add_session."""
 
     def __init__(self, jobs_dir, cap):
         self.jobs_dir, self.cap = jobs_dir, cap
@@ -303,8 +304,8 @@ class ScenarioError(Exception):
 
 
 def run_session(cmd, cwd, repo, seconds, out_path):
-    """(exit code or None on timeout, stdout). Stderr goes to <out>.stderr.log so stdout stays JSON.
-    Kills the whole process group, like the runner does, so nothing claude started outlives it."""
+    """(exit code or None on timeout, stdout). Stderr goes to <out>.stderr.log. On timeout, SIGTERM first
+    so orchestrate stops its agents, then the whole process group, like the runner does."""
     env = {**os.environ, **RUN_ENV, "GH_REPO": repo}
     err_path = out_path.with_name(out_path.name.removesuffix(".json") + ".stderr.log")
     with out_path.open("w") as out, err_path.open("w") as err:
@@ -314,6 +315,11 @@ def run_session(cmd, cwd, repo, seconds, out_path):
             code = proc.wait(timeout=max(1, seconds))
         except subprocess.TimeoutExpired:
             code = None
+            proc.terminate()
+            try:
+                proc.wait(timeout=STOP_SECONDS)
+            except subprocess.TimeoutExpired:
+                pass
         finally:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
@@ -321,13 +327,6 @@ def run_session(cmd, cwd, repo, seconds, out_path):
                 pass  # the group already exited
             proc.wait()
     return code, out_path.read_text()
-
-
-def session_cost(text):
-    try:
-        return float(json.loads(text)["total_cost_usd"])
-    except (ValueError, KeyError, TypeError):
-        return 0.0  # no JSON result (timeout or crash); the job logs still count its agents
 
 
 class Run:
@@ -385,10 +384,8 @@ def one_session(r, scenario, name, n, seconds):
     if scenario.get("drive") == "runner":
         cmd = [str(r.sandbox / "factory" / "bin" / "runner"), "tick"]
     else:
-        cmd = ["claude", "-p", "/factory run", "--output-format", "json", "--permission-mode", "dontAsk",
-               "--settings", str(r.sandbox / "factory" / "runner-settings.json")]
+        cmd = [str(r.sandbox / "factory" / "bin" / "orchestrate"), "run"]
     code, text = run_session(cmd, r.sandbox, r.repo, seconds, out_path)
-    r.spend.add_session(session_cost(text))
     if code is None:
         raise ScenarioError(f"timed out after {scenario['timeout_minutes']} minutes")
     return text

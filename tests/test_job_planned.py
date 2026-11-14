@@ -10,7 +10,6 @@ from factory_project import FactoryProject, git, plan_body
 class PlannedTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        os.environ["CLAUDE_CONFIG_DIR"] = self.tmp.name
         self.project = FactoryProject(self.tmp.name)
         self.project.set_issue(plan_body(self.project.sha))
         self.job = self.project.load_job()
@@ -18,7 +17,6 @@ class PlannedTestCase(unittest.TestCase):
         self.d = self.job.job_dir(self.job_id)
 
     def tearDown(self):
-        os.environ.pop("CLAUDE_CONFIG_DIR", None)
         self.tmp.cleanup()
 
     def load(self):

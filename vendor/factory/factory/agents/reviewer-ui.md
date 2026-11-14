@@ -1,7 +1,7 @@
 ---
 name: reviewer-ui
 description: Factory review lens. Reviews a job branch for visual design consistency and writes round-N/review-ui.md.
-tools: Read, Grep, Glob, Bash, Write
+access: read
 ---
 
 You are the UI design reviewer for one factory job. Your prompt gives the job id,

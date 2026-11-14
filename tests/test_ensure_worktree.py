@@ -61,9 +61,3 @@ class EnsureWorktreeTest(unittest.TestCase):
         out = self.ensure()
         self.assertIn("needs-human", out)
         self.assertEqual(json.loads((self.job.job_dir(self.id) / "job.json").read_text())["stage"], "needs-human")
-
-
-class SkillWordingTest(unittest.TestCase):
-    def test_skill_ensures_worktrees(self):
-        text = (Path(__file__).resolve().parents[1] / "vendor/factory/.claude/skills/factory/SKILL.md").read_text()
-        self.assertIn("factory/bin/job ensure-worktree <id>", text)

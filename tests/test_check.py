@@ -119,9 +119,9 @@ class CheckTest(RepoCopyTest):
         self.assertFails("config", "agents.intake: expected an object with model and effort")
 
     def test_agent_with_model_fails(self):
-        self.edit("vendor/factory/.claude/agents/builder.md",
+        self.edit("vendor/factory/factory/agents/builder.md",
                   lambda text: text.replace("name: builder\n", "name: builder\nmodel: opus\n", 1))
-        self.assertFails("frontmatter", "vendor/factory/.claude/agents/builder.md: sets model")
+        self.assertFails("frontmatter", "vendor/factory/factory/agents/builder.md: sets model")
 
     def test_skill_missing_description_fails(self):
         self.edit("skills/factory-install/SKILL.md",
@@ -129,12 +129,12 @@ class CheckTest(RepoCopyTest):
         self.assertFails("frontmatter", "skills/factory-install/SKILL.md: missing description")
 
     def test_file_without_frontmatter_fails(self):
-        self.edit("vendor/factory/.claude/agents/intake.md", lambda text: "no frontmatter\n" + text)
-        self.assertFails("frontmatter", "vendor/factory/.claude/agents/intake.md: no --- frontmatter block")
+        self.edit("vendor/factory/factory/agents/intake.md", lambda text: "no frontmatter\n" + text)
+        self.assertFails("frontmatter", "vendor/factory/factory/agents/intake.md: no --- frontmatter block")
 
     def test_nested_model_key_is_ignored(self):
-        self.edit("vendor/factory/.claude/agents/approver.md",
-                  lambda text: text.replace("tools:", "extra:\n  model: nested\ntools:", 1))
+        self.edit("vendor/factory/factory/agents/approver.md",
+                  lambda text: text.replace("access:", "extra:\n  model: nested\naccess:", 1))
         self.refresh_hashes()
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
@@ -169,14 +169,14 @@ class CheckTest(RepoCopyTest):
         self.assertIn("not a git repository", out)
 
     def test_bom_does_not_hide_frontmatter(self):
-        self.edit("vendor/factory/.claude/agents/intake.md", lambda text: "\ufeff" + text)
+        self.edit("vendor/factory/factory/agents/intake.md", lambda text: "\ufeff" + text)
         self.refresh_hashes()
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
 
     def test_unreadable_file_does_not_hide_other_problems(self):
-        (self.root / "vendor/factory/.claude/agents/intake.md").write_bytes(b"\xff\xfe---")
-        self.edit("vendor/factory/.claude/agents/builder.md",
+        (self.root / "vendor/factory/factory/agents/intake.md").write_bytes(b"\xff\xfe---")
+        self.edit("vendor/factory/factory/agents/builder.md",
                   lambda text: text.replace("name: builder\n", "name: builder\nmodel: x\n", 1))
         code, out = self.run_check()
         self.assertEqual(code, 1, out)

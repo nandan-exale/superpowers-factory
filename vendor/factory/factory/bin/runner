@@ -2,7 +2,7 @@
 """Run the software factory unattended.
 
 Usage:
-  runner tick                  one scheduled run: lock, preflight, pull, report and digest, check the queue, run /factory run headless
+  runner tick                  one scheduled run: lock, preflight, pull, report and digest, check the queue, run factory/bin/orchestrate run
   runner tick --ci             the same from GitHub Actions: no lock, token from the environment, state on factory-state
   runner install [--dry-run]   install the scheduler: a launchd LaunchAgent on macOS, a systemd user timer on Linux
   runner uninstall             remove it
@@ -44,9 +44,9 @@ JOBS = FACTORY / "jobs"
 LOG = JOBS / "runner.log"
 RUNS = JOBS / "runs"
 KEEP_RUNS = 50
-SETTINGS = FACTORY / "runner-settings.json"
-PROMPT = "/factory run"
-CHILD = None  # the running claude process, for the SIGTERM handler
+ORCHESTRATE = FACTORY / "bin" / "orchestrate"
+CHILD = None  # the running orchestrate process, for the SIGTERM handler
+STOP_SECONDS = 30  # how long orchestrate gets to stop its agents after SIGTERM
 STRIPPED_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN")
 
 
@@ -225,17 +225,26 @@ def kill_group(proc):
         pass
 
 
-def run_claude(token, max_seconds, out_path, err_path):
+def stop(proc):
+    """SIGTERM first: orchestrate starts each agent in its own session, so only it can stop them."""
+    proc.terminate()
+    try:
+        proc.wait(timeout=STOP_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+    kill_group(proc)
+
+
+def run_orchestrate(token, max_seconds, out_path, err_path):
     """(exit code or None on timeout, elapsed seconds). Output goes to files, never pipes, so a
-    process that outlives claude with the output open can't keep this call waiting."""
+    process that outlives orchestrate with the output open can't keep this call waiting."""
     global CHILD
     env = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}
     env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "1"  # keep the token out of hooks and tests claude starts
     env.update(GIT_ENV)
     env["FACTORY_RUNNER"] = "1"  # plugin SessionStart hooks stay quiet in unattended sessions
-    cmd = ["claude", "-p", PROMPT, "--output-format", "json",
-           "--permission-mode", "dontAsk", "--settings", str(SETTINGS)]
+    cmd = [sys.executable, str(ORCHESTRATE), "run"]
     start = time.monotonic()
     with out_path.open("w") as out, err_path.open("w") as err:
         proc = subprocess.Popen(cmd, cwd=REPO, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
@@ -246,8 +255,9 @@ def run_claude(token, max_seconds, out_path, err_path):
             code = proc.returncode
         except subprocess.TimeoutExpired:
             code = None
+            stop(proc)
         finally:
-            kill_group(proc)  # on purpose, even after a clean exit: stops dev servers claude left behind
+            kill_group(proc)  # on purpose, even after a clean exit: stops dev servers left behind
             proc.wait()
             CHILD = None
     return code, int(time.monotonic() - start)
@@ -255,26 +265,29 @@ def run_claude(token, max_seconds, out_path, err_path):
 
 def on_sigterm(signum, frame):
     if CHILD is not None:
-        kill_group(CHILD)
+        stop(CHILD)
     log("stopped")
     sys.exit(1)
 
 
 def prune_runs():
-    """Keep the newest KEEP_RUNS runs (a run is its .json plus .stderr.log)."""
+    """Keep the newest KEEP_RUNS runs (a run is its .out plus .stderr.log)."""
     stems = {}
     for f in RUNS.iterdir():
-        stems.setdefault(f.name.removesuffix(".stderr.log").removesuffix(".json"), []).append(f)
+        stems.setdefault(f.name.removesuffix(".stderr.log").removesuffix(".out"), []).append(f)
     for stem in sorted(stems)[:-KEEP_RUNS]:
         for f in stems[stem]:
             f.unlink(missing_ok=True)
 
 
 def cost_of(path):
+    """The SPENT line orchestrate ends with, or ?."""
     try:
-        return f"${json.loads(path.read_text())['total_cost_usd']:.2f}"
-    except (OSError, ValueError, KeyError, TypeError):
+        lines = path.read_text().splitlines()
+    except OSError:
         return "?"
+    spent = [l for l in lines if l.startswith("SPENT: $")]
+    return spent[-1].removeprefix("SPENT: ") if spent else "?"
 
 
 CHORE_SECONDS = 120
@@ -530,17 +543,17 @@ def tick_body(base, runner, ci_token_value):
     if platform_name() == "Linux" and missing_sandbox_tools():
         log(f"error: {', '.join(missing_sandbox_tools())} missing; Claude Code's Linux sandbox needs bubblewrap and socat")
         return 1
-    max_seconds = int(os.environ.get("FACTORY_RUNNER_MAX_SECONDS") or runner["max_minutes"] * 60)
-    RUNS.mkdir(parents=True, exist_ok=True)
-    out_path = RUNS / f"{stamp().replace(':', '')}.json"
-    err_path = out_path.with_name(out_path.name.removesuffix(".json") + ".stderr.log")
-    try:
-        code, seconds = run_claude(token, max_seconds, out_path, err_path)
-    except FileNotFoundError:
+    if not shutil.which("claude"):
         log("error: claude not found on PATH")
         return 1
+    max_seconds = int(os.environ.get("FACTORY_RUNNER_MAX_SECONDS") or runner["max_minutes"] * 60)
+    RUNS.mkdir(parents=True, exist_ok=True)
+    out_path = RUNS / f"{stamp().replace(':', '')}.out"
+    err_path = out_path.with_name(out_path.name.removesuffix(".out") + ".stderr.log")
+    try:
+        code, seconds = run_orchestrate(token, max_seconds, out_path, err_path)
     except OSError as exc:
-        log(f"error: could not start claude: {exc}")
+        log(f"error: could not start orchestrate: {exc}")
         return 1
     prune_runs()
     if code is None:

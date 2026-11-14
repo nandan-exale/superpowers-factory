@@ -8,5 +8,5 @@ class SkillWordingTest(unittest.TestCase):
     def test_report_command_and_end_of_run_steps(self):
         text = SKILL.read_text()
         self.assertIn("/factory report", text)
-        self.assertIn("factory/bin/job report --write", text)
-        self.assertIn("factory/bin/job digest", text)
+        # The end-of-run report and digest are orchestrate's now: tests.test_loop checks them.
+        self.assertIn("report and digest", text)

@@ -7,10 +7,9 @@ VENDOR = Path(__file__).resolve().parents[1] / "vendor/factory"
 class SafetyWordingTest(unittest.TestCase):
     def test_skill_watches_first_and_respects_the_pause(self):
         text = (VENDOR / ".claude/skills/factory/SKILL.md").read_text()
-        self.assertIn("factory/bin/job watch", text)
+        # Watching and the risk-ok resume are orchestrate's now: tests.test_loop and tests.test_pipeline check them.
         self.assertIn("PAUSED:", text)
         self.assertIn("factory/bin/job resume", text)
-        self.assertIn("factory:risk-ok added", text)
 
     def test_runner_watches_in_its_chores(self):
         text = (VENDOR / "factory/bin/runner").read_text()

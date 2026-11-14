@@ -33,10 +33,10 @@ elif args[:2] == ["pr", "view"]:
 '''
 
 # Each run writes job 001-e2e for issue 7 at $FAKE_STAGE and logs $FAKE_DELTA of spend.
-FAKE_CLAUDE = r'''
+FAKE_ORCHESTRATE = r'''
 import datetime, json, os, sys
 with open(os.environ["FAKE_RECORD"], "a") as f:
-    f.write(json.dumps({"argv": sys.argv[1:], "runner": os.environ.get("FACTORY_RUNNER"),
+    f.write(json.dumps({"tool": "orchestrate", "argv": sys.argv[1:], "runner": os.environ.get("FACTORY_RUNNER"),
                         "scrub": os.environ.get("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"),
                         "gh_repo": os.environ.get("GH_REPO")}) + "\n")
 job = os.path.join("factory", "jobs", "001-e2e")
@@ -47,8 +47,15 @@ with open(os.path.join(job, "job.json"), "w") as f:
 t = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 with open(os.path.join(job, "log.jsonl"), "a") as f:
     f.write(json.dumps({"t": t, "delta_usd": float(os.environ.get("FAKE_DELTA", "0.10"))}) + "\n")
-print(json.dumps({"total_cost_usd": float(os.environ.get("FAKE_SESSION_COST", "0.05")),
-                  "result": os.environ.get("FAKE_RESULT", "done")}))
+print(os.environ.get("FAKE_RESULT", "done"))
+print(f"SPENT: ${float(os.environ.get('FAKE_SESSION_COST', '0.05')):.2f}")
+'''
+
+# orchestrate starts the agents; the e2e driver must never start claude itself.
+FAKE_CLAUDE = r'''
+import json, os, sys
+with open(os.environ["FAKE_RECORD"], "a") as f:
+    f.write(json.dumps({"tool": "claude", "argv": sys.argv[1:]}) + "\n")
 '''
 
 FAKE_SECURITY = r'''
@@ -83,6 +90,7 @@ class E2ESandbox:
         (factory / "bin").mkdir(parents=True)
         write_exe(factory / "bin" / "job", "#!/bin/sh\nexit 0\n")
         write_exe(factory / "bin" / "doctor", '#!/bin/sh\nexit "${FAKE_DOCTOR_EXIT:-0}"\n')
+        write_exe(factory / "bin" / "orchestrate", f"#!{sys.executable}\n{FAKE_ORCHESTRATE}")
         shutil.copy(VENDOR_CONFIG, factory / "config.json")
         (factory / "runner-settings.json").write_text("{}\n")
         (self.repo / ".gitignore").write_text("/factory/jobs/\n")
@@ -104,7 +112,10 @@ class E2ESandbox:
         return [json.loads(line) for line in self.record.read_text().splitlines() if line]
 
     def claude_calls(self):
-        return [c for c in self.calls() if isinstance(c, dict)]
+        return [c for c in self.calls() if isinstance(c, dict) and c["tool"] == "claude"]
+
+    def orchestrate_calls(self):
+        return [c for c in self.calls() if isinstance(c, dict) and c["tool"] == "orchestrate"]
 
     def gh_calls(self):
         return [c[2:] for c in self.calls() if isinstance(c, list)]

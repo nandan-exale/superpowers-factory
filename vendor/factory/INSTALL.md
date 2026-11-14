@@ -26,19 +26,30 @@ Copy these files to the same paths in the project, unchanged:
 
 ```
 .claude/skills/factory/SKILL.md
-.claude/agents/intake.md
-.claude/agents/spec-writer.md
-.claude/agents/builder.md
-.claude/agents/reviewer-code.md
-.claude/agents/reviewer-security.md
-.claude/agents/reviewer-ux.md
-.claude/agents/reviewer-ui.md
-.claude/agents/approver.md
+factory/agents/intake.md
+factory/agents/spec-writer.md
+factory/agents/builder.md
+factory/agents/reviewer-code.md
+factory/agents/reviewer-security.md
+factory/agents/reviewer-ux.md
+factory/agents/reviewer-ui.md
+factory/agents/approver.md
+factory/agents/learner.md
 factory/config.json
 factory/checks.sh
 factory/bin/job
 factory/bin/gate
 factory/bin/route
+factory/bin/orchestrate
+factory/lib/runtimes/__init__.py
+factory/lib/runtimes/claude.py
+factory/lib/orchestrator/__init__.py
+factory/lib/orchestrator/agents.py
+factory/lib/orchestrator/jobcli.py
+factory/lib/orchestrator/prompts.py
+factory/lib/orchestrator/readonly.py
+factory/lib/orchestrator/pipeline.py
+factory/lib/orchestrator/loop.py
 factory/dashboard.html
 ```
 
@@ -47,7 +58,7 @@ SRC=<the folder the user pointed you at>
 for f in <the paths above>; do
   mkdir -p "$(dirname "$f")" && cp "$SRC/$f" "$f"
 done
-chmod +x factory/checks.sh factory/bin/job factory/bin/gate factory/bin/route
+chmod +x factory/checks.sh factory/bin/job factory/bin/gate factory/bin/route factory/bin/orchestrate
 ```
 
 Don't copy `README.md`, `DESIGN.md`, `INSTALL.md`, `LICENSE`, `examples/` or
@@ -79,7 +90,7 @@ It must be non-interactive, must not rewrite files (no `--fix`, no
 - Leave `concurrency`, `max_rounds`, `model_aliases`, `effort_levels`,
   `agents`, `routing`, `surface_reviewers` and `prices_usd_per_mtok` as they
   are unless the user asks. Every agent's model and effort is set there, never
-  in `.claude/agents/`.
+  in `factory/agents/`.
 
 **Agents.** The checklists are general on purpose. Tailor them to the stack
 without changing their structure, file names, first-line formats or one-line
@@ -128,7 +139,7 @@ read `.gitignore` sees those copies too; exclude `.worktrees/` in its config.
 local to the machine running the factory. Each job's worktree is a full
 checkout in `.worktrees/<job-id>`. Neither belongs in the repo. Everything you
 copied in step 1 does: the skill in `.claude/skills/factory/`, the agents in
-`.claude/agents/` and the rest of `factory/` are part of the project and get
+`factory/agents/` and the rest of `factory/` are part of the project and get
 committed, so ignore only these two paths, never `.claude/` or `factory/`.
 
 **Labels.** Create them on GitHub:
@@ -145,10 +156,9 @@ gh label create factory:needs-human --color D93F0B --description "The factory ne
    If it fails there, the factory can never pass a job: fix the
    script (not the project) or tell the user what's broken.
 2. `factory/bin/job queue` runs without an error.
-3. Each file in `.claude/agents/` has only these frontmatter keys: `name`,
-   `description`, `tools`, and `hooks` on the builder. No agent sets `model`:
-   `factory/config.json` does, at spawn time. Claude Code
-   ignores unknown keys without a warning, so a typo silently changes behaviour.
+3. Each file in `factory/agents/` has only these frontmatter keys: `name`,
+   `description` and `access` (`read` or `write`). No agent sets `model`:
+   `factory/config.json` does, at spawn time.
 4. `python3 -m json.tool factory/config.json` succeeds.
 5. `git check-ignore factory/jobs/x .worktrees/x` prints both paths, and
    `git status --porcelain --untracked-files=all` lists every file from step 1
@@ -164,7 +174,7 @@ so the install must be on that branch there before the first run.
 Then tell the user, in a few lines:
 
 - Label one or two small issues `factory`, then run `/factory run` in Claude
-  Code from the project root.
+  Code, or `factory/bin/orchestrate run` in a terminal, from the project root.
 - Every job ends as a PR. The approver merges what it approves; the rest wait
   labeled `factory:needs-human`. Approve one by merging it on GitHub, or tell
   the factory what to change with `/factory <anything>`.

@@ -139,8 +139,8 @@ install again:
    through brainstorming and a written plan.
 5. **Hand it off.** When asked how to execute the plan, choose
    **"3. Factory"**. Confirm the risk level, and the issue is filed.
-6. **Run the factory.** In a fresh session: `/factory run`. Watch the PR
-   appear on GitHub. Start with `concurrency: 1` and read every PR until you
+6. **Run the factory.** In a fresh session: `/factory run`, or
+   `factory/bin/orchestrate run` from a terminal. Watch the PR appear on GitHub. Start with `concurrency: 1` and read every PR until you
    trust it.
 
 ---
@@ -157,10 +157,15 @@ install again:
 | `/factory-handoff` | Claude Code, after a plan | Files the committed spec and plan as one `factory:planned` issue. |
 | `/factory run` | Claude Code | Builds every open `factory` issue, `concurrency` at a time. |
 | `/factory run <n>` | Claude Code | Builds only issue `#n`. |
+| `factory/bin/orchestrate run [<n>]` | terminal | The same as `/factory run [<n>]`, without a Claude Code session. |
 | `/factory <anything>` | Claude Code | Ask about jobs, give feedback on an escalated PR, or describe a new feature. |
 | `factory/bin/doctor` | terminal | Checks the install. `--fast` skips running your checks. |
 | `factory/bin/job summary` | terminal | Table of jobs: stage, PR, cost against budget, time. |
 | `factory/bin/job queue` | terminal | What `/factory run` would do with each issue right now. |
+
+Each agent runs as its own `claude -p` process, started by
+`factory/bin/orchestrate`; `factory/jobs/<id>/runs/` holds every run's prompt,
+log and cost.
 
 A live dashboard: `cd factory && python3 -m http.server`, then open
 <http://localhost:8000/dashboard.html>.
@@ -308,16 +313,16 @@ Keychain item holding its token. See below.
 | File | What it is |
 |---|---|
 | `factory/checks.sh` | Your project's checks. Must exit non-zero on any failure. |
-| `factory/runner-settings.json` | Sandbox and permission rules for the scheduled runner. Add your package registries to `sandbox.network.allowedDomains`. |
-| `.claude/agents/reviewer-*.md` | Reviewer checklists, tailored at install. |
+| `factory/runner-settings.json` | Sandbox and permission rules for every agent the factory starts. Add your package registries to `sandbox.network.allowedDomains`. |
+| `factory/agents/reviewer-*.md` | Reviewer checklists, tailored at install. |
 | `AGENTS.md` | Setup and validation commands every agent reads. |
 
 ---
 
 ## Hands-off running
 
-Want the factory to work while you're away? The runner starts `/factory run`
-on a schedule, but only when there's work.
+Want the factory to work while you're away? The runner starts
+`factory/bin/orchestrate run` on a schedule, but only when there's work.
 
 1. **Make a separate clone** of your project for the runner. It never touches a
    checkout with uncommitted changes.
@@ -433,7 +438,7 @@ Good to know:
 | Problem | Try |
 |---|---|
 | Something seems off | `factory/bin/doctor` lists each check as PASS, WARN or FAIL with the fix. |
-| `/factory run` can't find the agents | Start a fresh session; agents load only at session start. |
+| `factory/bin/orchestrate` can't find an agent | `factory/bin/doctor` names the missing file in `factory/agents/`; `/factory-update` restores it. |
 | Claude doesn't offer `/factory-install` | The project needs a GitHub `origin`. If you declined before, `bin/factory-state reset` (in the plugin) brings the offer back. |
 | A job is stuck or escalated | `factory/bin/job summary`, then read the PR's evidence block and the latest `factory/jobs/<job>/decision.md`. |
 | The runner isn't running | `factory/bin/runner status` shows the last runs and why it skipped. |
