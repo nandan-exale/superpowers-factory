@@ -357,11 +357,10 @@ class Pipeline:
         """A learner spawn per tag `job learn` reports."""
         spawns = []
         for line in self.run("learn").splitlines():
-            m = re.match(r"LEARN: (\S+) \(", line)
+            m = re.match(r"LEARN: (\S+) \(.*\) factory/jobs/learning/([^/\s]+)/evidence\.md", line)
             if not m:
                 continue
-            tag = m.group(1)
-            tag_dir = tag.replace(":", "--")
+            tag, tag_dir = m.groups()
             folder = self.repo / "factory" / "jobs" / "learning" / tag_dir
             spawns.append(self.make(tag, "learner", prompts.learner(self.repo, tag_dir, tag), self.repo,
                                     ("proposal.md",), folder=folder))

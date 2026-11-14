@@ -684,7 +684,8 @@ def untagged(path):
 
 
 def tag_dir(tag):
-    return LEARNING / tag.replace(":", "--")
+    # The prefix keeps a tag from naming a folder agents may be denied, such as secrets/.
+    return LEARNING / ("tag-" + tag.replace(":", "--"))
 
 
 def learn_state():
