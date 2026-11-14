@@ -76,6 +76,8 @@ Non-blocking observations. Optional.
 - The first line must be exactly `VERDICT: PASS` or `VERDICT: CHANGES`.
 - Use CHANGES only for problems a visitor would actually hit that are in scope
   for the spec. Put matters of taste under Notes.
+- Raise every blocking finding in this round. Each round costs a rebuild, a
+  gate and a review, so never hold one back or park it under Notes for later.
 - `## Summary` comes right after the header: 3 to 5 short bullets a human can
   skim on the dashboard. The detail goes in the sections below it.
 - Under Findings, write "None." when there are none.
