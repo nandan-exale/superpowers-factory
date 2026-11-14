@@ -3,6 +3,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -161,6 +162,21 @@ REVIEW = """VERDICT: CHANGES
 """
 
 
+class RunSessionTest(E2ECase):
+    def test_timeout_stops_orchestrate_with_sigterm_first(self):
+        # orchestrate starts each agent in its own session; only a SIGTERM lets it stop them.
+        tmp = self.tmp
+        marker = tmp / "sigterm"
+        script = tmp / "orchestrate"
+        script.write_text(f"#!{sys.executable}\nimport signal, sys, time\n"
+                          f"def stopped(s, f):\n    open({str(marker)!r}, 'w').close()\n    sys.exit(1)\n"
+                          "signal.signal(signal.SIGTERM, stopped)\ntime.sleep(30)\n")
+        script.chmod(0o755)
+        code, _ = self.e2e.run_session([str(script)], tmp, "o/r", 1, tmp / "s.run-1.json")
+        self.assertIsNone(code)
+        self.assertTrue(marker.exists())
+
+
 class ExpectTest(E2ECase):
     def ctx(self, stage="merged", review=REVIEW, **extra):
         jobs = self.tmp / "jobs"
@@ -276,10 +292,10 @@ class MainTest(E2ECase):
         self.assertIn("PASSED", self.result("happy"))
         create = next(c for c in self.sb.gh_calls() if c[:2] == ["issue", "create"])
         self.assertEqual(create[create.index("--label") + 1], "factory")
-        (call,) = self.sb.claude_calls()
-        self.assertEqual(call["argv"][:2], ["-p", "/factory run"])
-        self.assertIn("dontAsk", call["argv"])
+        (call,) = self.sb.orchestrate_calls()
+        self.assertEqual(call["argv"], ["run"])
         self.assertEqual((call["runner"], call["scrub"]), ("1", "1"))
+        self.assertEqual(self.sb.claude_calls(), [])
         log = git(self.tmp, "--git-dir", str(self.sb.bare), "log", "--format=%s", "main")
         self.assertEqual(log.splitlines()[:2], ["chore(e2e): restore config", "chore(e2e): happy config"])
         cfg = json.loads(git(self.tmp, "--git-dir", str(self.sb.bare), "show", "main~1:factory/config.json"))
@@ -297,7 +313,7 @@ class MainTest(E2ECase):
                   if args[:2] not in (["auth", "status"], ["repo", "view"])]
         self.assertIn(["pr", "close", "3", "--delete-branch"], [args for _, args in writes])
         self.assertEqual({repo for repo, _ in writes}, {"tester/factory-e2e"})
-        self.assertEqual({c["gh_repo"] for c in self.sb.claude_calls()}, {"tester/factory-e2e"})
+        self.assertEqual({c["gh_repo"] for c in self.sb.orchestrate_calls()}, {"tester/factory-e2e"})
 
     def test_a_failing_expectation_fails_the_run_and_closes_an_open_pr(self):
         self.scenario("happy", HAPPY)
@@ -316,7 +332,7 @@ class MainTest(E2ECase):
         self.scenario("happy", HAPPY)
         code, _ = self.main("--max-usd", "5", FAKE_STAGE="build")
         self.assertEqual(code, 1)
-        self.assertEqual(len(self.sb.claude_calls()), 3)
+        self.assertEqual(len(self.sb.orchestrate_calls()), 3)
         self.assertIn("no progress", self.result("happy"))
 
     def test_the_cap_skips_the_remaining_scenarios(self):
@@ -324,7 +340,7 @@ class MainTest(E2ECase):
         self.scenario("b-second", HAPPY)
         code, out = self.main("--max-usd", "1", FAKE_DELTA="2")
         self.assertEqual(code, 1)
-        self.assertEqual(len(self.sb.claude_calls()), 1)
+        self.assertEqual(len(self.sb.orchestrate_calls()), 1)
         self.assertIn("CAPPED", out)
         self.assertIn("b-second", out)
 
@@ -333,13 +349,13 @@ class MainTest(E2ECase):
         code, out = self.main("--max-usd", "5")
         self.assertEqual(code, 0, out)
         self.assertIn("SKIPPED", out)
-        self.assertEqual(self.sb.claude_calls(), [])
+        self.assertEqual(self.sb.orchestrate_calls(), [])
 
     def test_the_guard_refuses_before_any_spend(self):
         self.scenario("happy", HAPPY)
         code, out = self.main("--max-usd", "5", FAKE_DOCTOR_EXIT=1)
         self.assertEqual(code, 2, out)
-        self.assertEqual(self.sb.claude_calls(), [])
+        self.assertEqual(self.sb.orchestrate_calls(), [])
         self.assertFalse(any(c[:2] == ["issue", "create"] for c in self.sb.gh_calls()))
 
     def test_a_cap_of_zero_is_refused(self):
