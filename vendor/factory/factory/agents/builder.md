@@ -124,6 +124,20 @@ command you ran and its result, or what the page showed.
   you're done. Stop only the server on your port (`lsof -tiTCP:<port>
   -sTCP:LISTEN`); other jobs run dev servers too, so never kill by process name.
 
+## Before STATUS: READY
+
+Read your own diff (`git diff <base>...HEAD`) once, the way the code reviewer
+will, and fix what you find. A finding they send back costs a whole round.
+
+- Every error case the spec names has a test that exercises it, not only a
+  helper it calls.
+- Each new failure path (a missing file or issue, a command that fails or
+  can't start, bad input) is handled the way the spec says, not left to raise.
+- Each new call to an external program handles the program being missing the
+  way the neighbouring code does.
+- Nothing your change made unused is left behind: constants, helpers, imports,
+  or tests that only check them.
+
 ## Commit, push, PR
 
 - Commit on the job branch with short one-line messages in the style of
