@@ -5,8 +5,9 @@ Usage: factory-update-plan <project> [--apply-safe | --resolved <path>]
 
 Prints `<group>\t<path>` per vendored file. Groups: new, unchanged, safe,
 merge, owned (factory/checks.sh, never touched), config (factory/config.json:
-missing keys added, pre-0.2.0 bare model strings turned into {model, effort} keeping
-the model; unchanged when that would change nothing), settings (factory/runner-settings.json:
+missing keys added, model settings (pre-0.2.0 bare strings and {model, effort}) turned into
+{tier, effort} keeping the model's tier, model_aliases and effort_levels dropped and
+prices_usd_per_mtok moved under runtimes.claude; unchanged when that would change nothing), settings (factory/runner-settings.json:
 upstream file, keeping the domains the project added; upstream's own domains are
 always kept in sync with upstream, so one the project removed comes back; a settings file
 the project changed beyond domains is a merge, or unchanged if upstream didn't
@@ -138,28 +139,43 @@ def classify(project, vendor, manifest):
     return rows
 
 
+LEGACY_TIER = {"haiku": "fast", "sonnet": "balanced", "opus": "strong", "fable": "frontier"}
+MOVED_TO_CLAUDE = ("prices_usd_per_mtok",)
+DROPPED = ("model_aliases", "effort_levels")
+
+
 def is_entry(value):
-    """True for a {model, effort} setting."""
-    return isinstance(value, dict) and set(value) == {"model", "effort"}
+    """True for a routing setting, old ({model, effort}) or new ({tier, effort})."""
+    return isinstance(value, dict) and set(value) in ({"model", "effort"}, {"tier", "effort"})
 
 
 def migrate_entry(mine, upstream, aliases):
-    """The project's {model, effort} for an upstream setting, or None to leave `mine` alone.
-    A bare model string (the pre-0.2.0 shape) keeps its model when it is a known alias; a
-    partial object keeps the keys it has."""
-    if isinstance(mine, str):
-        return {"model": mine if mine in aliases else upstream["model"], "effort": upstream["effort"]}
-    if isinstance(mine, dict) and not is_entry(mine) and not set(mine) - {"model", "effort"}:
-        return {**upstream, **mine}
-    return None
+    """The project's setting in upstream's shape, or None to leave it alone. A bare alias (pre-0.2.0) or
+    {model, effort} keeps the project's choice as the matching tier."""
+    model = mine if isinstance(mine, str) else mine.get("model") if isinstance(mine, dict) else None
+    if model is None or "tier" not in upstream:
+        return None
+    effort = mine.get("effort", upstream["effort"]) if isinstance(mine, dict) else upstream["effort"]
+    return {"tier": LEGACY_TIER.get(model, upstream["tier"]), "effort": effort}
+
+
+def migrate_runtimes(mine):
+    """Move the Claude-only top-level keys under runtimes.claude (add_missing then fills the rest)."""
+    if "runtimes" in mine:
+        return mine
+    claude = {key: mine.pop(key) for key in MOVED_TO_CLAUDE if key in mine}
+    for key in DROPPED:
+        mine.pop(key, None)
+    mine["runtimes"] = {"claude": claude}
+    return mine
 
 
 def add_missing(mine, upstream, aliases=None, path="", notes=None):
     """Add upstream keys the project lacks, recursively, and bring old-shape model settings up
-    to {model, effort}; never change a model the project chose. `notes` collects the dotted
+    to {tier, effort}; never change a model the project chose. `notes` collects the dotted
     paths of keys that were added to a routing or reviewer table."""
-    if aliases is None:
-        aliases = upstream.get("model_aliases", [])
+    if path == "":
+        migrate_runtimes(mine)
     for key, value in upstream.items():
         here = f"{path}.{key}" if path else key
         if key not in mine:
@@ -170,8 +186,9 @@ def add_missing(mine, upstream, aliases=None, path="", notes=None):
         elif is_entry(value):
             migrated = migrate_entry(mine[key], value, aliases)
             if migrated is not None:
-                if notes is not None and isinstance(mine[key], str) and migrated["model"] != mine[key]:
-                    notes.append(f"{here} (was {mine[key]})")
+                old_model = mine[key] if isinstance(mine[key], str) else mine[key]["model"]
+                if notes is not None and old_model not in LEGACY_TIER:
+                    notes.append(f"{here} (was {old_model})")
                 mine[key] = migrated
         elif isinstance(mine[key], dict) and isinstance(value, dict):
             add_missing(mine[key], value, aliases, here, notes)

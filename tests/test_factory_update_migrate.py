@@ -1,3 +1,4 @@
+import copy
 import json
 import shutil
 import subprocess
@@ -12,9 +13,12 @@ sys.path.insert(0, str(REPO / "tests"))
 
 import factory_files as ff  # noqa: E402
 from installed_project import InstalledProject  # noqa: E402
+from script_loader import load_script  # noqa: E402
 
 PLAN = REPO / "bin/factory-update-plan"
 OLD_CONFIG = REPO / "tests/fixtures/config-pre-0.2.0.json"
+VENDOR_CONFIG = ff.VENDOR / "factory/config.json"
+fup = load_script(PLAN, "factory_update_plan")
 
 
 class MigrateOldConfigTest(unittest.TestCase):
@@ -40,9 +44,9 @@ class MigrateOldConfigTest(unittest.TestCase):
         upstream = json.loads((ff.VENDOR / "factory/config.json").read_text())
         for risk in ("low", "medium", "high"):
             self.assertEqual(cfg["routing"][risk]["code"],
-                             {"model": "haiku", "effort": upstream["routing"][risk]["code"]["effort"]})
-        self.assertEqual(cfg["surface_reviewers"]["ui"]["ux"]["model"], "haiku")
-        self.assertEqual(cfg["surface_reviewers"]["security"]["security"]["model"], "haiku")
+                             {"tier": "fast", "effort": upstream["routing"][risk]["code"]["effort"]})
+        self.assertEqual(cfg["surface_reviewers"]["ui"]["ux"]["tier"], "fast")
+        self.assertEqual(cfg["surface_reviewers"]["security"]["security"]["tier"], "fast")
         self.assertEqual(cfg["surface_reviewers"]["ui"]["ux"]["effort"],
                          upstream["surface_reviewers"]["ui"]["ux"]["effort"])
 
@@ -60,8 +64,36 @@ class MigrateOldConfigTest(unittest.TestCase):
         (self.p.root / "factory/config.json").write_text(json.dumps(mine))
         self.plan("--apply-safe")
         entry = self.config()["routing"]["low"]["code"]
-        self.assertEqual(entry["model"], "haiku")
+        self.assertEqual(entry["tier"], "fast")
         self.assertIn(entry["effort"], ff_efforts())
+
+    def migrate(self, cfg):
+        return fup.add_missing(copy.deepcopy(cfg), json.loads(VENDOR_CONFIG.read_text()))
+
+    def test_model_aliases_become_tiers_and_move_under_runtimes(self):
+        old = json.loads(VENDOR_CONFIG.read_text())
+        for key in ("runtime", "runtimes"):
+            old.pop(key)
+        old["model_aliases"] = ["fable", "opus", "sonnet", "haiku"]
+        old["effort_levels"] = ["low", "medium", "high", "xhigh", "max"]
+        old["prices_usd_per_mtok"] = {"claude-opus-5-5": {"input": 3.0}}  # the project's own price
+        old["agents"]["intake"] = {"model": "sonnet", "effort": "low"}  # the project's own choice
+        new = self.migrate(old)
+        self.assertEqual(new["agents"]["intake"], {"tier": "balanced", "effort": "low"})
+        self.assertEqual(new["runtime"], "claude")
+        self.assertEqual(new["runtimes"]["claude"]["prices_usd_per_mtok"]["claude-opus-5-5"]["input"], 3.0)
+        self.assertEqual(new["runtimes"]["claude"]["tiers"]["frontier"], "fable")
+        for key in ("model_aliases", "effort_levels", "prices_usd_per_mtok"):
+            self.assertNotIn(key, new)
+
+    def test_old_config_moves_its_prices_and_reports_nothing_for_known_models(self):
+        res = self.plan("--apply-safe")
+        cfg = self.config()
+        old = json.loads(OLD_CONFIG.read_text())
+        self.assertEqual(cfg["runtimes"]["claude"]["prices_usd_per_mtok"]["claude-fable-5-2"],
+                         old["prices_usd_per_mtok"]["claude-fable-5-2"])
+        self.assertNotIn("prices_usd_per_mtok", cfg)
+        self.assertNotIn("(was haiku)", res.stdout)
 
     def test_new_roles_come_from_upstream_defaults_and_are_reported(self):
         # The pre-0.2.0 file only routed `code`; spec-writer, builder and approver are new keys,
@@ -250,7 +282,7 @@ class PendingCountTest(unittest.TestCase):
 
 
 def ff_efforts():
-    return json.loads((ff.VENDOR / "factory/config.json").read_text())["effort_levels"]
+    return json.loads((ff.VENDOR / "factory/config.json").read_text())["runtimes"]["claude"]["efforts"]
 
 
 if __name__ == "__main__":

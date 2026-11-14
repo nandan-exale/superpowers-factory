@@ -64,13 +64,37 @@ class DoctorTest(unittest.TestCase):
         self.edit("factory/config.json", change)
         self.assertFails("config", "learning.tags")
 
-    def test_bad_learner_model_fails(self):
+    def test_old_learner_model_entry_fails(self):
         def change(text):
             cfg = json.loads(text)
-            cfg["agents"]["learner"]["model"] = "gpt"
+            cfg["agents"]["learner"] = {"model": "opus", "effort": "high"}
             return json.dumps(cfg)
         self.edit("factory/config.json", change)
-        self.assertFails("config", "agents.learner: model 'gpt' not in model_aliases")
+        self.assertFails("config", "agents.learner: model 'opus' is the old shape; use tier")
+
+    def test_unknown_runtime_fails(self):
+        def change(text):
+            cfg = json.loads(text)
+            cfg["runtime"] = "nope"
+            return json.dumps(cfg)
+        self.edit("factory/config.json", change)
+        self.assertFails("config", "runtime 'nope' has no runtimes.nope")
+
+    def test_runtime_without_the_tiers_routing_uses_fails(self):
+        def change(text):
+            cfg = json.loads(text)
+            cfg["runtime"] = "codex"
+            return json.dumps(cfg)
+        self.edit("factory/config.json", change)
+        self.assertFails("config", "runtimes.codex.tiers.strong isn't set")
+
+    def test_bad_run_cap_fails(self):
+        def change(text):
+            cfg = json.loads(text)
+            cfg["budgets"]["daily_runs"] = 2.5
+            return json.dumps(cfg)
+        self.edit("factory/config.json", change)
+        self.assertFails("config", "budgets.daily_runs must be a positive integer or null")
 
     def test_missing_revert_and_risk_ok_labels_fail(self):
         self.p.set_labels([n for n in LABELS if n not in ("factory:revert", "factory:risk-ok")])
@@ -205,13 +229,13 @@ class DoctorTest(unittest.TestCase):
         self.assertIn("FAIL checks: factory/checks.sh exited 3", res.stdout)
         self.assertIn("checks output line", res.stdout)
 
-    def test_unknown_model_alias_fails(self):
+    def test_unknown_tier_fails(self):
         def change(text):
             cfg = json.loads(text)
-            cfg["routing"]["low"]["builder"]["model"] = "gpt"
+            cfg["routing"]["low"]["builder"]["tier"] = "huge"
             return json.dumps(cfg)
         self.edit("factory/config.json", change)
-        self.assertFails("config", "routing.low.builder: model 'gpt' not in model_aliases")
+        self.assertFails("config", "routing.low.builder: tier 'huge' isn't one of fast, balanced, strong, frontier")
 
     def test_agent_with_model_fails(self):
         self.edit("factory/agents/builder.md", lambda t: t.replace("name: builder\n", "name: builder\nmodel: opus\n", 1))

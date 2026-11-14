@@ -106,17 +106,29 @@ class CheckTest(RepoCopyTest):
         self.edit(CONFIG, lambda text: text + "}")
         self.assertFails("json", "vendor/factory/factory/config.json")
 
-    def test_unknown_model_alias_fails(self):
-        self.edit_config(lambda cfg: cfg["routing"]["low"]["builder"].update(model="gpt"))
-        self.assertFails("config", "routing.low.builder: model 'gpt' not in model_aliases")
+    def test_unknown_tier_fails(self):
+        self.edit_config(lambda cfg: cfg["routing"]["low"]["builder"].update(tier="huge"))
+        self.assertFails("config", "routing.low.builder: tier 'huge' isn't one of fast, balanced, strong, frontier")
+
+    def test_old_model_entry_fails(self):
+        self.edit_config(lambda cfg: cfg["routing"]["low"].update(builder={"model": "opus", "effort": "high"}))
+        self.assertFails("config", "routing.low.builder: model 'opus' is the old shape; use tier")
+
+    def test_unknown_runtime_fails(self):
+        self.edit_config(lambda cfg: cfg.update(runtime="nope"))
+        self.assertFails("config", "runtime 'nope' has no runtimes.nope object")
+
+    def test_bad_run_cap_fails(self):
+        self.edit_config(lambda cfg: cfg["budgets"].update(job_runs=0))
+        self.assertFails("config", "budgets.job_runs must be a positive integer or null")
 
     def test_unknown_effort_fails(self):
         self.edit_config(lambda cfg: cfg["surface_reviewers"]["ui"]["ux"].update(effort="huge"))
-        self.assertFails("config", "surface_reviewers.ui.ux: effort 'huge' not in effort_levels")
+        self.assertFails("config", "surface_reviewers.ui.ux: effort 'huge' isn't one of low, medium, high, xhigh, max")
 
     def test_intake_entry_checked(self):
         self.edit_config(lambda cfg: cfg["agents"].update(intake="fable"))
-        self.assertFails("config", "agents.intake: expected an object with model and effort")
+        self.assertFails("config", "agents.intake: expected an object with tier and effort")
 
     def test_agent_with_model_fails(self):
         self.edit("vendor/factory/factory/agents/builder.md",
