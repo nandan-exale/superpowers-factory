@@ -22,3 +22,20 @@ def load(name):
     if name not in NAMES:
         raise ValueError(f"unknown runtime {name!r}; known: {', '.join(NAMES)}")
     return importlib.import_module(f"runtimes.{name}")
+
+
+def prepend_system(run):
+    """Put the agent's instructions in front of the task, for CLIs with no system-prompt option."""
+    system = run["system_path"].read_text()
+    task = run["prompt_path"].read_text()
+    run["prompt_path"].write_text(f"{system}\n\n---\n\n# Your task\n\n{task}")
+
+
+def base_env(run):
+    return {"FACTORY_RUNNER": "1", "FACTORY_JOB": run["job_id"]}
+
+
+def writable_dirs(run):
+    """What a non-Claude agent may write: the job folder, and the main checkout's .git (worktree commits
+    and `job push` write objects and refs there). Its cwd is writable too."""
+    return [run["settings_dir"].parent, run["repo"] / ".git"]
