@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -37,7 +38,7 @@ class GateHookCase(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
         self.job_id = "004-x"
-        folder = root / "factory" / "jobs" / self.job_id
+        folder = self.job_dir = root / "factory" / "jobs" / self.job_id
         folder.mkdir(parents=True)
         (root / "wt").mkdir()
         (folder / "job.json").write_text(json.dumps({"id": self.job_id, "worktree": str(root / "wt")}))
@@ -55,6 +56,21 @@ class GateHookCase(unittest.TestCase):
                 contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as ctx:
             self.gate.hook()
         return ctx.exception.code, err.getvalue()
+
+    def run_gate(self, *args):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as ctx:
+            self.gate.main(list(args))
+        return subprocess.CompletedProcess(args, ctx.exception.code or 0, out.getvalue(), "")
+
+
+class CheckModeTest(GateHookCase):
+    def test_check_mode_reports_and_writes_nothing(self):
+        res = self.run_gate("--check", self.job_id)
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("factory/checks.sh fails in your worktree (exit 1)", res.stdout)
+        self.assertIn("broken", res.stdout)
+        self.assertFalse(any(self.job_dir.glob("round-*/checks.md")))
 
 
 class HookJobFromEnvTest(GateHookCase):

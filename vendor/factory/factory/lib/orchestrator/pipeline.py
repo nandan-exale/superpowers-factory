@@ -55,8 +55,10 @@ def header_field(path, key):
 
 
 class Pipeline:
-    def __init__(self, cli, say=print):
+    def __init__(self, cli, say=print, caps=None):
         self.cli, self.say = cli, say
+        self.caps = caps or {"stop_hook": True}
+        self.nudged = set()      # (job_id, round): builders already sent back once for failing checks
         self.repo = cli.repo
         self.cfg = cli.config()
         self.base = self.cfg["base_branch"]
@@ -106,9 +108,13 @@ class Pipeline:
 
     def make(self, job_id, role, prompt, cwd, own, resume=None, fresh_prompt=None, folder=None):
         out = self.run("agent", job_id, role).strip()
-        m = re.fullmatch(r"model=(\S+) effort=(\S+)", out)
+        first, *rest = out.splitlines() or [""]
+        m = re.fullmatch(r"model=(\S+) effort=(\S+)", first)
         if not m:
             raise Stop(f"job agent {job_id} {role} printed {out!r}")
+        for line in rest:
+            if line.startswith("NOTE:"):
+                self.say(f"{job_id} {role}: {line}")
         return Spawn(job_id, role, prompt, Path(cwd), folder or self.folder(job_id), tuple(own),
                      m.group(1), m.group(2), resume, fresh_prompt)
 
@@ -309,6 +315,16 @@ class Pipeline:
             return []
         if status != "STATUS: READY":
             return self.again(done.spawn, f"build.md starts with {status!r}, not STATUS: READY or STATUS: BLOCKED.")
+        # Claude Code's Stop hook sends the builder back while checks.sh fails; other runtimes get it once here.
+        n = self.cli.state(job_id)["round"]
+        if not self.caps.get("stop_hook") and (job_id, n) not in self.nudged:
+            self.nudged.add((job_id, n))
+            checks = self.cli.gate("--check", job_id)
+            if not checks.ok:
+                self.say(f"{job_id}: checks fail before the gate; the builder gets one more try this round")
+                session = (self.cli.state(job_id).get("sessions") or {}).get("builder")
+                return [replace(done.spawn, prompt=checks.out.strip(), resume=session,
+                                fresh_prompt=f"{done.spawn.fresh_prompt or done.spawn.prompt}\n\n{checks.out.strip()}")]
         try:
             moved = self.move(job_id, "gate")
         except Refused as e:

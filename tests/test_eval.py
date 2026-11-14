@@ -35,11 +35,10 @@ class AgentTest(EvalCase):
             self.ev.agent_prompt("nope")
 
     def test_model_for_each_kind_of_agent(self):
-        self.assertEqual(self.ev.model_for("intake", self.cfg), self.cfg["agents"]["intake"])
-        self.assertEqual(self.ev.model_for("reviewer-code", self.cfg), self.cfg["routing"]["medium"]["code"])
-        self.assertEqual(self.ev.model_for("approver", self.cfg), self.cfg["routing"]["medium"]["approver"])
-        self.assertEqual(self.ev.model_for("reviewer-security", self.cfg),
-                         self.cfg["surface_reviewers"]["security"]["security"])
+        self.assertEqual(self.ev.model_for("intake", self.cfg), {"model": "fable", "effort": "high"})
+        self.assertEqual(self.ev.model_for("reviewer-code", self.cfg), {"model": "sonnet", "effort": "high"})
+        self.assertEqual(self.ev.model_for("approver", self.cfg), {"model": "opus", "effort": "high"})
+        self.assertEqual(self.ev.model_for("reviewer-security", self.cfg), {"model": "opus", "effort": "high"})
         with self.assertRaisesRegex(self.ev.Stop, "no model"):
             self.ev.model_for("reviewer-nope", self.cfg)
 
@@ -134,9 +133,8 @@ class RunTest(EvalCase):
         self.assertEqual(first["branch"], "factory/eval")
         self.assertIn(f"Job folder: {first['cwd']}/factory/jobs/eval/", first["prompt"])
         argv = first["argv"]
-        model = self.cfg["routing"]["medium"]["code"]
-        self.assertEqual(argv[argv.index("--model") + 1], model["model"])
-        self.assertEqual(argv[argv.index("--effort") + 1], model["effort"])
+        self.assertEqual(argv[argv.index("--model") + 1], "sonnet")
+        self.assertEqual(argv[argv.index("--effort") + 1], "high")
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
         allowed = argv[argv.index("--allowedTools") + 1].split(",")
         self.assertIn("Write(./**)", allowed)

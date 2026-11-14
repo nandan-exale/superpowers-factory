@@ -5,7 +5,7 @@ import json
 NAME = "claude"
 BINARY = "claude"
 CAPS = {"resume": True, "reports_cost": True, "reports_tokens": True,
-        "efforts": ["low", "medium", "high", "xhigh", "max"]}
+        "efforts": ["low", "medium", "high", "xhigh", "max"], "stop_hook": True, "silent_new_session": False}
 
 # The tools each agent had as a Claude Code subagent (its old `tools:` frontmatter).
 TOOLS = {

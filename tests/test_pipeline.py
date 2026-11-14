@@ -41,8 +41,8 @@ class FakeCli:
     def job(self, *args, stdin=None):
         return self._reply(("job", *map(str, args)), stdin)
 
-    def gate(self, job_id):
-        return self._reply(("gate", job_id))
+    def gate(self, *args):
+        return self._reply(("gate", *args))
 
     def route(self, job_id):
         return self._reply(("route", job_id))
@@ -69,7 +69,7 @@ class PipelineCase(unittest.TestCase):
         (self.folder / "round-1").mkdir(parents=True)
         self.cli = FakeCli(self.repo)
         self.lines = []
-        self.p = Pipeline(self.cli, say=self.lines.append)
+        self.p = Pipeline(self.cli, say=self.lines.append, caps={"stop_hook": True})
         self.cli.jobs["004-x"] = {"id": "004-x", "issue": 12, "stage": "intake", "round": 0,
                                   "worktree": str(self.repo / ".worktrees/004-x"), "branch": "factory/004-x",
                                   "pr": None, "agents": None, "reviews": {}}
@@ -87,6 +87,38 @@ class PipelineCase(unittest.TestCase):
     def only(self, spawns):
         self.assertEqual(len(spawns), 1, spawns)
         return spawns[0]
+
+
+class NudgeTest(PipelineCase):
+    def builder_spawn(self):
+        return pipeline.Spawn("004-x", "builder", "P", self.repo, self.folder, ())
+
+    def test_runtime_without_stop_hook_gets_one_checks_nudge(self):
+        self.p = Pipeline(self.cli, say=self.lines.append, caps={"stop_hook": False})
+        self.write("build.md", "STATUS: READY\n")
+        self.cli.answer("gate", "--check", "004-x", code=1, out="factory/checks.sh fails in your worktree (exit 1).\nboom\n")
+        again = self.only(self.p.after("004-x", [self.done(self.builder_spawn())]))
+        self.assertEqual(again.role, "builder")
+        self.assertIn("boom", again.prompt)
+        self.assertEqual(self.cli.called("job", "advance", "004-x", "gate"), [])
+        self.cli.answer("gate", "004-x", out="GATE: FAIL\n")
+        self.p.after("004-x", [self.done(again)])
+        self.assertEqual(len(self.cli.called("gate", "--check", "004-x")), 1)   # once per round
+        self.assertEqual(self.cli.called("job", "advance", "004-x", "gate"), [("job", "advance", "004-x", "gate")])
+
+    def test_claude_is_not_nudged(self):
+        self.write("build.md", "STATUS: READY\n")
+        self.cli.answer("gate", "004-x", out="GATE: PASS\n")
+        self.set(agents={"reviewers": {"code": {}}})
+        self.p.after("004-x", [self.done(self.builder_spawn())])
+        self.assertEqual(self.cli.called("gate", "--check"), [])
+
+    def test_make_reports_note_lines(self):
+        self.cli.answer("job", "agent", "004-x", "spec-writer",
+                        out="model=m effort=high\nNOTE: effort max → high (codex supports low, medium, high)\n")
+        s = self.p.make("004-x", "spec-writer", "P", self.repo, ("spec.md",))
+        self.assertEqual((s.model, s.effort), ("m", "high"))
+        self.assertIn("004-x spec-writer: NOTE: effort max → high (codex supports low, medium, high)", self.lines)
 
 
 class StartTest(PipelineCase):

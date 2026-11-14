@@ -49,8 +49,12 @@ def check_json(root, opts):
     return problems
 
 
+TIERS = ("fast", "balanced", "strong", "frontier")
+CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+
 def model_entries(cfg):
-    """Yield (where, entry) for every {model, effort} the factory spawns with."""
+    """Yield (where, entry) for every {tier, effort} the factory spawns with."""
     for role, entry in cfg.get("agents", {}).items():
         yield f"agents.{role}", entry
     for risk, roles in cfg.get("routing", {}).items():
@@ -63,17 +67,25 @@ def model_entries(cfg):
 
 def check_config(root, opts):
     cfg = json.loads((root / FACTORY / "config.json").read_text(encoding="utf-8"))
-    aliases = set(cfg.get("model_aliases", []))
-    efforts = set(cfg.get("effort_levels", []))
     problems = []
     for where, entry in model_entries(cfg):
-        if not isinstance(entry, dict):
-            problems.append(f"{where}: expected an object with model and effort")
+        if not isinstance(entry, dict) or set(entry) != {"tier", "effort"}:
+            if isinstance(entry, dict) and "model" in entry:
+                problems.append(f"{where}: model {entry['model']!r} is the old shape; use tier ({', '.join(TIERS)})")
+            else:
+                problems.append(f"{where}: expected an object with tier and effort")
             continue
-        if entry.get("model") not in aliases:
-            problems.append(f"{where}: model {entry.get('model')!r} not in model_aliases")
-        if entry.get("effort") not in efforts:
-            problems.append(f"{where}: effort {entry.get('effort')!r} not in effort_levels")
+        if entry["tier"] not in TIERS:
+            problems.append(f"{where}: tier {entry['tier']!r} isn't one of {', '.join(TIERS)}")
+        if entry["effort"] not in CLAUDE_EFFORTS:
+            problems.append(f"{where}: effort {entry['effort']!r} isn't one of {', '.join(CLAUDE_EFFORTS)}")
+    name = cfg.get("runtime", "claude")
+    if not isinstance((cfg.get("runtimes") or {}).get(name), dict):
+        problems.append(f"runtime {name!r} has no runtimes.{name} object")
+    for key in ("job_runs", "daily_runs"):
+        v = (cfg.get("budgets") or {}).get(key)
+        if v is not None and (isinstance(v, bool) or not isinstance(v, int) or v <= 0):
+            problems.append(f"budgets.{key} must be a positive integer or null, not {v!r}")
     return problems
 
 

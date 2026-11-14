@@ -9,10 +9,10 @@ from factory_project import FactoryProject
 
 INTAKE = "DECISION: {decision}\nRISK: {risk}\nSURFACES: {surfaces}\nRESCOPED: no\n\n## Summary\n- test\n"
 LOW = {
-    "spec-writer": {"model": "opus", "effort": "medium"},
-    "builder": {"model": "opus", "effort": "medium"},
-    "approver": {"model": "opus", "effort": "medium"},
-    "reviewers": {"code": {"model": "haiku", "effort": "medium"}},
+    "spec-writer": {"tier": "strong", "effort": "medium"},
+    "builder": {"tier": "strong", "effort": "medium"},
+    "approver": {"tier": "strong", "effort": "medium"},
+    "reviewers": {"code": {"tier": "fast", "effort": "medium"}},
 }
 
 
@@ -70,19 +70,19 @@ class RouteTest(RoutingTestCase):
         self.accept("high", "ui, security")
         self.route()
         agents = self.job.load(self.job_id)["agents"]
-        self.assertEqual(agents["builder"], {"model": "opus", "effort": "high"})
+        self.assertEqual(agents["builder"], {"tier": "strong", "effort": "high"})
         self.assertEqual(agents["reviewers"], {
-            "code": {"model": "sonnet", "effort": "high"},
-            "ux": {"model": "sonnet", "effort": "medium"},
-            "ui": {"model": "haiku", "effort": "medium"},
-            "security": {"model": "opus", "effort": "high"},
+            "code": {"tier": "balanced", "effort": "high"},
+            "ux": {"tier": "balanced", "effort": "medium"},
+            "ui": {"tier": "fast", "effort": "medium"},
+            "security": {"tier": "strong", "effort": "high"},
         })
 
     def test_route_prints_every_agent(self):
         self.accept("low")
         out = self.route()
-        self.assertIn("builder opus/medium", out)
-        self.assertIn("code haiku/medium", out)
+        self.assertIn("builder strong/medium", out)
+        self.assertIn("code fast/medium", out)
 
     def test_route_refuses_job_intake_did_not_accept(self):
         self.accept("low", decision="REJECT")
@@ -91,15 +91,20 @@ class RouteTest(RoutingTestCase):
 
 
 class RouteValidationTest(RoutingTestCase):
-    def test_unknown_model(self):
-        self.edit_config(lambda c: c["routing"]["low"]["builder"].update(model="gpt"))
+    def test_unknown_tier(self):
+        self.edit_config(lambda c: c["routing"]["low"]["builder"].update(tier="huge"))
         self.accept("low")
-        self.refused("routing.low.builder.model 'gpt' isn't in model_aliases")
+        self.refused("routing.low.builder.tier 'huge' isn't one of fast, balanced, strong, frontier")
+
+    def test_unknown_legacy_model(self):
+        self.edit_config(lambda c: c["routing"]["low"].update(builder={"model": "gpt", "effort": "high"}))
+        self.accept("low")
+        self.refused("routing.low.builder.model 'gpt' isn't a known alias; use tier")
 
     def test_unknown_effort(self):
         self.edit_config(lambda c: c["routing"]["low"]["builder"].update(effort="ludicrous"))
         self.accept("low")
-        self.refused("routing.low.builder.effort 'ludicrous' isn't in effort_levels")
+        self.refused("routing.low.builder.effort 'ludicrous' isn't one of low, medium, high, xhigh, max")
 
     def test_missing_role(self):
         self.edit_config(lambda c: c["routing"]["low"].pop("approver"))
@@ -109,12 +114,12 @@ class RouteValidationTest(RoutingTestCase):
     def test_old_string_setting(self):
         self.edit_config(lambda c: c["routing"]["low"].update(code="haiku"))
         self.accept("low")
-        self.refused("routing.low.code must be {model, effort}")
+        self.refused("routing.low.code must be {tier, effort}")
 
     def test_bad_surface_setting(self):
-        self.edit_config(lambda c: c["surface_reviewers"]["ui"]["ux"].update(model="gpt"))
+        self.edit_config(lambda c: c["surface_reviewers"]["ui"]["ux"].update(tier="gpt"))
         self.accept("low", "ui")
-        self.refused("surface_reviewers.ui.ux.model 'gpt'")
+        self.refused("surface_reviewers.ui.ux.tier 'gpt'")
 
     def test_unknown_surface(self):
         self.accept("low", "billing")
@@ -146,10 +151,22 @@ class AgentTest(RoutingTestCase):
             self.agent("reviewer-ux")
 
     def test_bad_intake_config_refused(self):
-        self.edit_config(lambda c: c["agents"]["intake"].update(model="gpt"))
+        self.edit_config(lambda c: c["agents"]["intake"].update(tier="gpt"))
         with self.assertRaises(self.job.Refused) as ctx:
             self.agent("intake")
-        self.assertIn("agents.intake.model 'gpt'", str(ctx.exception))
+        self.assertIn("agents.intake.tier 'gpt'", str(ctx.exception))
+
+    def test_job_routed_before_tiers_still_resolves(self):
+        job = self.job.load(self.job_id)
+        self.job.save({**job, "agents": {**LOW, "builder": {"model": "sonnet", "effort": "low"}}})
+        self.assertEqual(self.agent("builder"), "model=sonnet effort=low")
+
+    def test_missing_tier_exits_naming_the_key(self):
+        self.edit_config(lambda c: c["runtimes"]["claude"]["tiers"].pop("frontier"))
+        res = subprocess.run([str(self.project.repo / "factory" / "bin" / "job"), "agent", self.job_id, "intake"],
+                             capture_output=True, text=True)
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("runtimes.claude.tiers.frontier isn't set", res.stderr)
 
 
 class RouteWrapperTest(RoutingTestCase):
@@ -158,7 +175,7 @@ class RouteWrapperTest(RoutingTestCase):
         res = subprocess.run([str(self.project.repo / "factory" / "bin" / "route"), self.job_id],
                              capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("code haiku/medium", res.stdout)
+        self.assertIn("code fast/medium", res.stdout)
         self.assertEqual(json.loads((self.d / "job.json").read_text())["agents"], LOW)
 
 
