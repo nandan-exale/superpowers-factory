@@ -1,5 +1,6 @@
 """A throwaway project with the vendored factory installed as /factory-install leaves it."""
 
+import atexit
 import importlib.machinery
 import importlib.util
 import json
@@ -7,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -122,15 +124,38 @@ def git(cwd, *args):
     return res.stdout
 
 
+_TEMPLATES = {}
+
+
+def _template(commit):
+    """A built project to copy: nothing in it names its own path, so a copy works anywhere."""
+    if commit not in _TEMPLATES:
+        tmp = tempfile.TemporaryDirectory(prefix="installed-project-template-")
+        atexit.register(tmp.cleanup)
+        root = Path(tmp.name).resolve()
+        project = InstalledProject.__new__(InstalledProject)
+        project._paths(root)
+        project._build(commit)
+        _TEMPLATES[commit] = root
+    return _TEMPLATES[commit]
+
+
 class InstalledProject:
     """`tmp` is an empty directory; the project is tmp/project, helpers live beside it."""
 
     def __init__(self, tmp, commit=True):
         tmp = Path(tmp).resolve()
+        self._paths(tmp)
+        shutil.copytree(_template(commit), tmp, symlinks=True, dirs_exist_ok=True)
+
+    def _paths(self, tmp):
         self.root = tmp / "project"
         self.fakebin = tmp / "fakebin"
         self.toolbin = tmp / "toolbin"
         self.labels_file = tmp / "labels.json"
+
+    def _build(self, commit):
+        """The install, manifest and git calls a project costs; done once per process, then copied."""
         self.root.mkdir()
         self.fakebin.mkdir()
         self.toolbin.mkdir()
