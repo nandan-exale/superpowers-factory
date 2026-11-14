@@ -36,8 +36,8 @@ class JobCli:
     def job(self, *args, stdin=None):
         return self._run([sys.executable, str(self.bin / "job"), *map(str, args)], stdin)
 
-    def gate(self, job_id):
-        return self._run([sys.executable, str(self.bin / "gate"), job_id])
+    def gate(self, *args):
+        return self._run([sys.executable, str(self.bin / "gate"), *args])
 
     def route(self, job_id):
         return self._run([sys.executable, str(self.bin / "route"), job_id])

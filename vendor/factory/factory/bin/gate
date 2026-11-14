@@ -5,6 +5,7 @@ Usage:
   gate <job-id>            write round-N/checks.md; exit 0 on PASS, 1 on FAIL
   gate <job-id> --merge    same, as round-N/merge-checks.md (job merge runs it)
   gate --hook              the builder's Stop hook: run the checks once, exit 2 on failure
+  gate --check <job-id>    run the checks in the worktree once; print the failure; write nothing
 
 The gate runs the main checkout's factory/checks.sh inside the job's worktree,
 so a branch can't change the checks it is judged by. It also fails when the
@@ -143,6 +144,13 @@ def job_from_transcript(event):
     return prompt.split("Job: ", 1)[1].split(".", 1)[0]
 
 
+def failure_text(code, log):
+    """What the builder is told when checks.sh fails in its worktree before the gate."""
+    tail = "\n".join(log.rstrip().splitlines()[-40:])
+    return (f"factory/checks.sh fails in your worktree (exit {code}). The gate will reject this "
+            f"build. Fix it, or write STATUS: BLOCKED in build.md if you can't.\n\n{tail}")
+
+
 def hook():
     event = json.load(sys.stdin)
     if event.get("stop_hook_active"):
@@ -151,16 +159,25 @@ def hook():
     job = json.loads((FACTORY / "jobs" / job_id / "job.json").read_text())
     code, log, _ = run_checks(job["worktree"])
     if code != 0:
-        tail = "\n".join(log.rstrip().splitlines()[-40:])
-        print(f"factory/checks.sh fails in your worktree (exit {code}). The gate will reject this "
-              f"build. Fix it, or write STATUS: BLOCKED in build.md if you can't.\n\n{tail}",
-              file=sys.stderr)
+        print(failure_text(code, log), file=sys.stderr)
         sys.exit(2)
+
+
+def check(job_id):
+    """Run checks.sh once in the job's worktree and print the failure for the builder; write nothing."""
+    job = json.loads((FACTORY / "jobs" / job_id / "job.json").read_text())
+    code, log, _ = run_checks(job["worktree"])
+    if code != 0:
+        print(failure_text(code, log))
+        sys.exit(1)
+    print("checks.sh passes")
 
 
 def main(argv):
     if argv == ["--hook"]:
         hook()
+    elif len(argv) == 2 and argv[0] == "--check":
+        check(argv[1])
     elif len(argv) == 1 and not argv[0].startswith("-"):
         gate(argv[0], merge=False)
     elif len(argv) == 2 and argv[1] == "--merge":

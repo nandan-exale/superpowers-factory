@@ -43,7 +43,7 @@ def main(argv):
     if not shutil.which(runtime.BINARY):
         print(f"orchestrate: {runtime.BINARY} not found on PATH; install it, then run again", file=sys.stderr)
         return 1
-    loop = Loop(cli, Pipeline(cli, say=say), runtime, say=say, agent_env=secrets)
+    loop = Loop(cli, Pipeline(cli, say=say, caps=runtime.CAPS), runtime, say=say, agent_env=secrets)
 
     def on_sigterm(signum, frame):
         loop.stop()
