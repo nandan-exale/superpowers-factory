@@ -266,8 +266,8 @@ No agent file names a model; every agent's model and effort come from config,
 chosen per job by its risk:
 
 ```json
-"agents":  { "intake":  { "model": "fable", "effort": "high" },
-             "learner": { "model": "opus",  "effort": "high" } },
+"agents":  { "intake":  { "tier": "strong", "effort": "high" },
+             "learner": { "tier": "strong", "effort": "high" } },
 "routing": {
   "low":    { "spec-writer": {...}, "builder": {...}, "approver": {...}, "code": {...} },
   "medium": { ... },
@@ -279,8 +279,13 @@ chosen per job by its risk:
 }
 ```
 
-- `model` is one of `model_aliases` (`fable`, `opus`, `sonnet`, `haiku`).
-- `effort` is one of `effort_levels` (`low` … `max`).
+- `tier` is one of `fast`, `balanced`, `strong`, `frontier`; `runtimes.<runtime>.tiers`
+  maps each to a model (for Claude: haiku, sonnet, opus, fable).
+- `effort` is one of `low` … `max`.
+- By default builders use `balanced` (Sonnet) for low- and medium-risk jobs and
+  `strong` (Opus) for high-risk ones. Builders use most of the factory's tokens, so
+  this keeps usage limits further away; raise `routing.<risk>.builder.tier` if you
+  want Opus everywhere.
 - `routing.<risk>.code` is the code reviewer; `surface_reviewers` adds reviewers
   when intake says a change touches the UI or security.
 - See what an agent will run on: `factory/bin/job agent <job> <role>`.
