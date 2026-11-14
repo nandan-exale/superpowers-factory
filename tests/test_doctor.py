@@ -414,6 +414,26 @@ class DoctorTest(unittest.TestCase):
         self.p.write("factory/config.json", json.dumps(cfg))
         self.assertNotIn("digest", self.p.run("doctor", "--fast").stdout)
 
+    def set_notify(self, notify):
+        cfg = json.loads((self.p.root / "factory/config.json").read_text())
+        cfg["notify"] = notify
+        self.p.write("factory/config.json", json.dumps(cfg))
+
+    def test_bad_notify_config_fails(self):
+        for notify in ({"command": "osascript"}, {"command": []}, {"command": ["say", 1]}, "say"):
+            with self.subTest(notify=notify):
+                self.set_notify(notify)
+                self.assertFails("config", "notify.command must be a non-empty list of strings")
+
+    def test_notify_program_not_found_warns(self):
+        self.set_notify({"command": ["/nonexistent/notify-me", "hi"]})
+        res = self.p.run("doctor", "--fast")
+        self.assertIn("WARN config: notify.command: /nonexistent/notify-me not found", res.stdout)
+
+    def test_valid_notify_config_says_nothing(self):
+        self.set_notify({"command": [sys.executable, "-c", "pass"]})
+        self.assertNotIn("notify", self.p.run("doctor", "--fast").stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1493,6 +1493,55 @@ def publish_evidence(job):
     return path
 
 
+# ---- Notifications ---------------------------------------------------------
+
+NOTIFY_TIMEOUT = 30  # seconds
+NOTIFY_LINES = 5
+NOTIFY_LINE_CHARS = 200
+
+
+def notify_message(job, stage):
+    """`<stage>: <issue title>`, then the first lines of why the job is waiting."""
+    first = f"{stage}: {job['title']}"
+    name, heading = WAITING_REASON[stage]
+    path = job_dir(job["id"]) / name
+    body = section(path, heading) if path.exists() else None
+    lines = [line.strip()[:NOTIFY_LINE_CHARS] for line in (body or "").splitlines() if line.strip()]
+    return f"{first}\n\n" + "\n".join(lines[:NOTIFY_LINES]) if lines else first
+
+
+def notify_waiting(job, stage):
+    """Run config's notify.command, if any, to tell the operator the job waits on them.
+
+    No shell: the job's details reach the command only as FACTORY_NOTIFY_* values, and credential
+    variables are removed. A failure is a NOTE; it never stops the job's move."""
+    command = (CONFIG.get("notify") or {}).get("command")
+    if not command:
+        return
+    secrets = runtimes.credential_vars(CONFIG)
+    env = {k: v for k, v in os.environ.items() if k not in secrets}
+    env.update(
+        FACTORY_NOTIFY_TITLE=f"Factory: #{job['issue']} needs you",
+        FACTORY_NOTIFY_MESSAGE=notify_message(job, stage),
+        FACTORY_NOTIFY_URL=job.get("pr_url") or job.get("issue_url") or "",
+        FACTORY_NOTIFY_STAGE=stage,
+        FACTORY_NOTIFY_JOB=job["id"],
+    )
+    program = command[0]
+    try:
+        res = subprocess.run(command, env=env, cwd=REPO, stdin=subprocess.DEVNULL,
+                             capture_output=True, text=True, timeout=NOTIFY_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        print(f"NOTE: notify: {program} timed out after {NOTIFY_TIMEOUT}s")
+        return
+    except OSError as e:
+        print(f"NOTE: notify: can't run {program}: {e}")
+        return
+    if res.returncode != 0:
+        last = res.stderr.strip().splitlines()[-1:]
+        print(f"NOTE: notify: {program} exited {res.returncode}" + (f": {last[0]}" if last else ""))
+
+
 def notify_needs_human(job):
     """Post decision.md's reason where the human will look, and label the issue."""
     d = job_dir(job["id"])
@@ -1504,6 +1553,7 @@ def notify_needs_human(job):
     else:
         comment("issue", job["issue"], body)
     label("issue", job["issue"], add=LABELS["needs_human"])
+    notify_waiting(job, "needs-human")
 
 
 def find_pr(job):
@@ -1599,6 +1649,7 @@ def advance(job, stage):
         comment("issue", job["issue"], f"{title}\n\n{intake_body()}")
         if stage == "needs-info":
             label("issue", job["issue"], add=LABELS["needs_info"])
+            notify_waiting(job, "needs-info")
         elif stage == "rejected":
             label("issue", job["issue"], remove=LABELS["queue"])
         else:
