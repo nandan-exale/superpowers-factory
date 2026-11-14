@@ -183,6 +183,59 @@ class CheckTest(RepoCopyTest):
         self.assertIn("agents/intake.md: unreadable", out)
         self.assertIn("agents/builder.md: sets model", out)
 
+    def append_to(self, rel, code):
+        self.edit(rel, lambda text: text + "\n" + code)
+        self.refresh_hashes()
+
+    def test_unguarded_systemctl_fails(self):
+        doctor = "vendor/factory/factory/bin/doctor"
+        self.edit(doctor, lambda text: text.replace('shutil.which("systemctl")', "None"))
+        self.append_to(doctor, 'subprocess.run(["systemctl", "x"])\n')
+        self.assertFails("external-binaries", "shutil.which('systemctl')")
+
+    def test_unguarded_binary_message_names_file_line_and_remedy(self):
+        self.append_to("vendor/factory/factory/bin/doctor", 'subprocess.run(["nonexistent-tool", "x"])\n')
+        code, out = self.run_check()
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"FAIL external-binaries: vendor/factory/factory/bin/doctor:\d+: 'nonexistent-tool'")
+        self.assertIn("shutil.which('nonexistent-tool')", out)
+        self.assertIn("die(", out)
+
+    def test_guarded_binary_passes(self):
+        self.append_to("vendor/factory/factory/bin/doctor",
+                       'subprocess.run(["nonexistent-tool", "x"])\nshutil.which("nonexistent-tool")\n')
+        code, out = self.run_check()
+        self.assertEqual(code, 0, out)
+
+    def test_git_and_bash_are_baseline(self):
+        self.append_to("vendor/factory/factory/bin/doctor",
+                       'subprocess.run(["git", "status"])\nsubprocess.run(["bash", "-c", "true"])\n')
+        code, out = self.run_check()
+        self.assertEqual(code, 0, out)
+
+    def test_variable_and_computed_heads_are_ignored(self):
+        self.append_to("vendor/factory/factory/bin/doctor",
+                       'subprocess.run([tool, "x"])\nsubprocess.run([sys.executable, "x"])\n'
+                       'subprocess.run(cmd)\nsubprocess.run([*argv])\n')
+        code, out = self.run_check()
+        self.assertEqual(code, 0, out)
+
+    def test_unguarded_binary_in_lib_fails(self):
+        self.append_to("vendor/factory/factory/lib/orchestrator/loop.py",
+                       'subprocess.check_output(("nonexistent-tool",))\n')
+        self.assertFails("external-binaries", "shutil.which('nonexistent-tool')")
+
+    def test_orchestrate_without_which_fails(self):
+        path = "vendor/factory/factory/bin/orchestrate"
+        self.edit(path, lambda text: text.replace("shutil.which", "shutil.where"))
+        self.refresh_hashes()
+        self.assertFails("external-binaries", "orchestrate must check shutil.which")
+
+    def test_missing_orchestrate_skips_the_popen_rule(self):
+        (self.root / "vendor/factory/factory/bin/orchestrate").unlink()
+        code, out = self.run_check()
+        self.assertNotIn("orchestrate must check shutil.which", out)
+
 
 class CheckHookTest(RepoCopyTest):
     def run_hook(self, payload=None, cwd=None, hook=HOOK, stdin=None):

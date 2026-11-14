@@ -2,6 +2,7 @@
 """Check this repo's rules. Prints PASS/FAIL per check and exits 1 on any failure."""
 
 import argparse
+import ast
 import hashlib
 import json
 import re
@@ -183,6 +184,73 @@ def check_branding(root, opts):
     return problems
 
 
+# Tools every machine running the factory has; any other tool the factory spawns needs a which() guard.
+BASELINE_BINARIES = frozenset({"git", "bash", "python3"})
+SPAWNERS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
+PYTHON_SHEBANG = "#!/usr/bin/env python"
+
+
+def scanned_python_files(root):
+    bin_dir = root / FACTORY / "bin"
+    files = []
+    if bin_dir.is_dir():
+        for path in sorted(bin_dir.iterdir()):
+            if not path.is_file():
+                continue
+            if path.suffix == ".py" or path.read_text(encoding="utf-8", errors="replace").startswith(PYTHON_SHEBANG):
+                files.append(path)
+    lib_dir = root / FACTORY / "lib"
+    if lib_dir.is_dir():
+        files.extend(sorted(lib_dir.rglob("*.py")))
+    return files
+
+
+def is_attr_call(node, names):
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in names
+
+
+def literal_head(call):
+    """The string literal a spawn's argv list starts with, or None when it isn't one."""
+    if not call.args or not isinstance(call.args[0], (ast.List, ast.Tuple)) or not call.args[0].elts:
+        return None
+    head = call.args[0].elts[0]
+    return head.value if isinstance(head, ast.Constant) and isinstance(head.value, str) else None
+
+
+def has_popen(path):
+    tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+    return any(is_attr_call(node, {"Popen"}) and isinstance(node.func.value, ast.Name)
+               and node.func.value.id == "subprocess" for node in ast.walk(tree))
+
+
+def check_external_binaries(root, opts):
+    problems = []
+    for path in scanned_python_files(root):
+        rel = path.relative_to(root)
+        tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        guarded = {call.args[0].value for call in calls
+                   if is_attr_call(call, {"which"}) and call.args
+                   and isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str)}
+        for call in calls:
+            if not (is_attr_call(call, SPAWNERS) and isinstance(call.func.value, ast.Name)
+                    and call.func.value.id == "subprocess"):
+                continue
+            name = literal_head(call)
+            if name is None or name in BASELINE_BINARIES or name in guarded:
+                continue
+            problems.append(f"{rel}:{call.lineno}: {name!r} is spawned without shutil.which({name!r}) in the file; "
+                            "a missing tool must degrade (doctor: WARN; runner/orchestrate: die(...)), "
+                            "not raise a FileNotFoundError traceback")
+    orchestrate = root / FACTORY / "bin" / "orchestrate"
+    orchestrator = root / FACTORY / "lib" / "orchestrator"
+    if orchestrate.is_file() and orchestrator.is_dir() and any(has_popen(p) for p in sorted(orchestrator.rglob("*.py"))):
+        if "shutil.which" not in orchestrate.read_text(encoding="utf-8"):
+            problems.append("orchestrate must check shutil.which(<adapter BINARY>) and exit non-zero before "
+                            "building the Loop; a missing runtime CLI otherwise escalates every job.")
+    return problems
+
+
 def check_tests(root, opts):
     res = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"],
                          cwd=root, capture_output=True, text=True)
@@ -199,6 +267,7 @@ CHECKS = [
     ("compile", check_compile),
     ("hashes", check_hashes),
     ("branding", check_branding),
+    ("external-binaries", check_external_binaries),
     ("tests", check_tests),
 ]
 
