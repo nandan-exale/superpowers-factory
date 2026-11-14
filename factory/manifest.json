@@ -1,5 +1,5 @@
 {
-  "vendor_hash": "0a45b5ff9e775a6638168864cee3c1b53e39752a884787384027b1c67f2f99cb",
+  "vendor_hash": "f375dbad1442a735aec988dd59488eacc592017bfadf9eeb0d68166df84e3c06",
   "files": {
     ".claude/skills/factory/SKILL.md": "b79d58bef9e56ea6b9065f087e7c26de8b5b08b9f37d5420ddf88f31334a6f9d",
     "factory/agents/intake.md": "172ba6d1caeecc562811b7df3a29091d475d68c4f0ca130657ba7ada4c898142",
@@ -12,7 +12,7 @@
     "factory/agents/approver.md": "469aab1818f9a4be230ac975f6489c53149111c31df9ca6167c39bcdca209ecd",
     "factory/agents/learner.md": "8d031c2e0a279b36931a0c21709bea454e13644cf1a91dd2ab6f5a2d7ad184b5",
     "factory/lib/runtimes/__init__.py": "e57c460c17bfc50de6c1e57d0660857e6eea233013f0f087a012e4780bd0c371",
-    "factory/lib/runtimes/claude.py": "1c158c8896916f80029248e1fa20531e85087e5eede797cd939ba1a9f8582e4a",
+    "factory/lib/runtimes/claude.py": "03c304643bd9380ec90167a4feba13c53df4066f5793376de5ff219398bc29c1",
     "factory/lib/runtimes/codex.py": "f3904af752a39be035dec15623d61bb56bb77dd2fdebc2f6cf2d252872ca3992",
     "factory/lib/runtimes/opencode.py": "4f89ce2e24e5dc648aa082dfa920ff52b359b052072ddf4b49f73ef3da9a2fe9",
     "factory/lib/runtimes/copilot.py": "dbd5a13fc457c254190bee8c10f5ce058d93e3516d50257e068de1fce7065cc2",
