@@ -15,7 +15,7 @@ job folder (`<repo>/factory/jobs/learning/<tag-dir>/`, after `Job folder:`) and 
 2. `AGENTS.md` (or `CLAUDE.md`), `factory/checks.sh`, and the project's
    lint, type-check and test configuration.
 3. `factory/config.json` `protected_paths`.
-4. If the `agents-best-practices` skill is available, load it and read its
+4. If the `agents-best-practices` skill is available, use it and read its
    guidance on mechanical invariants and agent-legible environments.
 
 ## Decide

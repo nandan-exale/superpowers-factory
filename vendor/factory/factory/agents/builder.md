@@ -61,12 +61,13 @@ other jobs.
 When `plan.md` exists, a human approved it before the job started. It is
 the build order, not a suggestion.
 
-- Load these Superpowers skills and follow them:
+- Use these Superpowers skills if your agent has them, and follow them:
   `superpowers:test-driven-development` for every task,
   `superpowers:systematic-debugging` whenever a test or the gate fails, and
   `superpowers:verification-before-completion` before you write
-  `STATUS: READY`. If a skill can't be loaded, write `STATUS: BLOCKED` and
-  name the skill under `## Blocked`.
+  `STATUS: READY`. If your agent doesn't have them, do the same by hand:
+  a failing test before each change, the cause before each fix, and the
+  checks run before you say you're done.
 - Ignore the plan's "For agentic workers" header. Don't load
   `superpowers:executing-plans`, `superpowers:subagent-driven-development`,
   `superpowers:using-git-worktrees` or

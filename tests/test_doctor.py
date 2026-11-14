@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -6,7 +7,17 @@ import unittest
 
 from installed_project import LABELS, VENDOR, InstalledProject, load_script
 
-CHECK_NAMES = ("config", "agents", "files", "gitignore", "stop-hook", "claude-md", "labels", "paused", "runner")
+CHECK_NAMES = ("config", "runtime", "agents", "files", "gitignore", "stop-hook", "claude-md", "labels", "paused",
+               "runner")
+# Prints $FAKE_<NAME>_VERSION for --version and exits $FAKE_<NAME>_EXIT (default 0).
+FAKE_CLI = """#!{python}
+import os, sys
+name = os.path.basename(sys.argv[0]).upper().replace("-", "_")
+sys.stdout.write(os.environ.get(f"FAKE_{{name}}_VERSION", "{version}\\n"))
+sys.exit(int(os.environ.get(f"FAKE_{{name}}_EXIT", "0")))
+"""
+DENY_NOTE = ("runner-settings.json's deny rules (secret files, force pushes) bind only Claude Code; "
+             "{name} agents aren't held to them")
 
 
 class DoctorTest(unittest.TestCase):
@@ -14,12 +25,29 @@ class DoctorTest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.p = InstalledProject(tmp.name)
+        self.fake_cli("claude", "2.1.300 (Claude Code)")
+
+    def fake_cli(self, binary, version):
+        """An agent CLI in toolbin, which is on PATH with or without gh."""
+        path = self.p.toolbin / binary
+        path.write_text(FAKE_CLI.format(python=sys.executable, version=version))
+        path.chmod(0o755)
+
+    def use_runtime(self, name, **budgets):
+        """runtime: <name> with every tier set, so config passes."""
+        def change(text):
+            cfg = json.loads(text)
+            cfg["runtime"] = name
+            cfg["runtimes"][name]["tiers"] = {t: "m1" for t in ("fast", "balanced", "strong", "frontier")}
+            cfg["budgets"].update(budgets)
+            return json.dumps(cfg)
+        self.edit("factory/config.json", change)
 
     def doctor(self, *args, gh=True):
         return self.p.run("doctor", *args, gh=gh)
 
-    def assertFails(self, name, needle, *args):
-        res = self.doctor("--fast", *args)
+    def assertFails(self, name, needle, *args, env=None):
+        res = self.p.run("doctor", "--fast", *args, env=env)
         self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
         self.assertIn(f"FAIL {name}: ", res.stdout)
         self.assertIn(needle, res.stdout)
@@ -87,6 +115,74 @@ class DoctorTest(unittest.TestCase):
             return json.dumps(cfg)
         self.edit("factory/config.json", change)
         self.assertFails("config", "runtimes.codex.tiers.strong isn't set")
+
+    def test_missing_runtime_cli_fails(self):
+        self.use_runtime("codex")
+        path = os.pathsep.join((str(self.p.fakebin), str(self.p.toolbin), "/usr/bin", "/bin"))
+        self.assertFails("runtime", "codex not found on PATH", env={"PATH": path})
+
+    def test_runtime_cli_whose_version_fails_fails(self):
+        self.use_runtime("codex")
+        self.fake_cli("codex", "codex 0.9.0")
+        self.assertFails("runtime", "codex --version failed", env={"FAKE_CODEX_EXIT": "3"})
+
+    def test_other_runtime_warns_that_deny_rules_bind_only_claude(self):
+        self.use_runtime("codex")
+        self.fake_cli("codex", "codex 0.9.0")
+        out = self.doctor("--fast").stdout
+        self.assertNotIn("FAIL runtime", out)
+        self.assertIn("WARN runtime: " + DENY_NOTE.format(name="codex"), out)
+
+    def test_claude_runtime_passes_without_warnings(self):
+        self.assertIn("PASS runtime\n", self.doctor("--fast").stdout)
+
+    def test_runtime_without_cost_and_run_caps_warns(self):
+        self.use_runtime("cursor", job_runs=None)
+        self.fake_cli("cursor-agent", "2026.11.01")
+        self.assertIn("WARN runtime: cursor reports no cost; set budgets.job_runs and budgets.daily_runs",
+                      self.doctor("--fast").stdout)
+
+    def test_runtime_without_cost_but_with_run_caps_is_quiet_about_cost(self):
+        self.use_runtime("cursor", job_runs=40, daily_runs=150)
+        self.fake_cli("cursor-agent", "2026.11.01")
+        self.assertNotIn("reports no cost", self.doctor("--fast").stdout)
+
+    def test_other_runtime_needs_no_stop_hook(self):
+        self.use_runtime("opencode")
+        self.fake_cli("opencode", "1.0.0")
+        self.p.write(".claude/settings.json", "{}\n")
+        self.assertIn("PASS stop-hook\n", self.doctor("--fast").stdout)
+
+    def test_other_runtime_needs_the_section_in_agents_md(self):
+        self.use_runtime("codex")
+        self.fake_cli("codex", "codex 0.9.0")
+        self.p.write("CLAUDE.md", "@AGENTS.md\n\n## Software factory\n\nx\n")
+        self.assertFails("claude-md", "codex reads AGENTS.md; move the Software factory section there")
+
+    def test_other_runtime_with_the_section_in_agents_md_passes(self):
+        self.use_runtime("codex")
+        self.fake_cli("codex", "codex 0.9.0")
+        self.p.write("AGENTS.md", "# Agents\n\n## Software factory\n\nx\n")
+        self.assertIn("PASS claude-md\n", self.doctor("--fast").stdout)
+
+    def test_doctor_never_looks_for_recorded_fixtures(self):
+        self.use_runtime("copilot", job_runs=40, daily_runs=150)
+        self.fake_cli("copilot", "1.0.0")
+        self.assertNotIn("fixture", self.doctor("--fast").stdout)
+
+    @unittest.skipUnless(sys.platform == "darwin", "Keychain only; Linux tokens are in test_runner_linux")
+    def test_other_runtime_keychain_item_is_named_for_it(self):
+        self.use_runtime("codex")
+        self.fake_cli("codex", "codex 0.9.0")
+        out = self.p.run("doctor", "--fast", env={"FAKE_SECURITY_EXIT": "44"}).stdout
+        self.assertIn("WARN runner: no Keychain item factory-codex-token", out)
+
+    @unittest.skipUnless(sys.platform == "darwin", "Keychain only; Linux tokens are in test_runner_linux")
+    def test_copilot_needs_no_keychain_item(self):
+        self.use_runtime("copilot", job_runs=40, daily_runs=150)
+        self.fake_cli("copilot", "1.0.0")
+        out = self.p.run("doctor", "--fast", env={"FAKE_SECURITY_EXIT": "44"}).stdout
+        self.assertNotIn("Keychain", out)
 
     def test_bad_run_cap_fails(self):
         def change(text):

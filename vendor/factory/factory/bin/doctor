@@ -20,6 +20,11 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "factory" / "lib"))
+sys.dont_write_bytecode = True  # __pycache__ in factory/lib would make the checkout dirty
+
+import runtimes  # noqa: E402
+
 AGENTS = ("intake", "spec-writer", "builder", "reviewer-code",
           "reviewer-security", "reviewer-ux", "reviewer-ui", "approver", "learner")
 AGENT_KEYS = {"name", "description", "access"}
@@ -30,11 +35,11 @@ LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:plann
           "factory:learning", "factory:digest", "factory:revert", "factory:risk-ok")
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):")
 CHECKS_TAIL = 20
-# Checks run project code, so they never see the runner's Claude credentials.
-SECRET_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
 CI = False
 TIERS = ("fast", "balanced", "strong", "frontier")
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+DENY_NOTE = ("runner-settings.json's deny rules (secret files, force pushes) bind only Claude Code; "
+             "{name} agents aren't held to them")
 
 
 def fail(message):
@@ -146,6 +151,37 @@ def check_config():
     return problems
 
 
+def load_config():
+    return json.loads((REPO / "factory" / "config.json").read_text(encoding="utf-8"))
+
+
+def runtime_name(cfg):
+    return cfg.get("runtime", "claude")
+
+
+def check_runtime():
+    cfg = load_config()
+    name = runtime_name(cfg)
+    try:
+        rt = runtimes.load(name)
+    except ValueError as exc:
+        return [fail(str(exc))]
+    if not shutil.which(rt.BINARY):
+        return [fail(f"{rt.BINARY} not found on PATH")]
+    problems = []
+    res = subprocess.run([rt.BINARY, "--version"], capture_output=True, text=True, timeout=30)
+    if res.returncode != 0:
+        problems.append(fail(f"{rt.BINARY} --version failed: {(res.stderr or res.stdout).strip()[:200]}"))
+    if name != "claude":
+        problems.append(warn(DENY_NOTE.format(name=name)))
+    caps = rt.CAPS
+    b = cfg.get("budgets") or {}
+    priced = caps["reports_tokens"] and ((cfg.get("runtimes") or {}).get(name) or {}).get("prices_usd_per_mtok")
+    if not caps["reports_cost"] and not priced and (b.get("job_runs") is None or b.get("daily_runs") is None):
+        problems.append(warn(f"{name} reports no cost; set budgets.job_runs and budgets.daily_runs"))
+    return problems
+
+
 def frontmatter_keys(text):
     """Top-level keys of a leading --- block, or None if there is no closed block."""
     lines = text.splitlines()
@@ -213,6 +249,8 @@ def check_gitignore():
 
 
 def check_stop_hook():
+    if runtime_name(load_config()) != "claude":
+        return []  # other agents don't run Claude Code's hooks; the gate runs checks.sh for every runtime
     path = REPO / ".claude" / "settings.json"
     if not path.is_file():
         return [fail(".claude/settings.json missing; it must register factory/bin/stop-hook as a Stop hook")]
@@ -224,9 +262,17 @@ def check_stop_hook():
     return [fail("no Stop hook in .claude/settings.json runs factory/bin/stop-hook")]
 
 
+def has_factory_section(path):
+    return path.is_file() and "## Software factory" in path.read_text(encoding="utf-8-sig").splitlines()
+
+
 def check_claude_md():
     has_agents = (REPO / "AGENTS.md").is_file()
     claude = REPO / "CLAUDE.md"
+    name = runtime_name(load_config())
+    if name != "claude" and not has_factory_section(REPO / "AGENTS.md"):
+        verb = "move" if has_factory_section(claude) else "add"
+        return [fail(f"{name} reads AGENTS.md; {verb} the Software factory section there")]
     if not has_agents and not claude.is_file():
         return [fail("neither AGENTS.md nor CLAUDE.md exists")]
     if has_agents and claude.is_file() and not claude.samefile(REPO / "AGENTS.md"):
@@ -308,19 +354,21 @@ def unit_name():
     return f"factory-{hashlib.sha256(str(REPO).encode()).hexdigest()[:12]}"
 
 
-def linux_runner_checks(service):
-    problems = [fail(f"{tool} not found; Claude Code's Linux sandbox needs bubblewrap and socat "
-                     "(apt install bubblewrap socat)") for tool in ("bwrap", "socat") if not shutil.which(tool)]
-    token = False
-    if shutil.which("secret-tool"):
+def linux_runner_checks(name, service):
+    """service is None when the runtime needs no stored credential (copilot)."""
+    problems = [] if name != "claude" else [
+        fail(f"{tool} not found; Claude Code's Linux sandbox needs bubblewrap and socat "
+             "(apt install bubblewrap socat)") for tool in ("bwrap", "socat") if not shutil.which(tool)]
+    token = service is None
+    if not token and shutil.which("secret-tool"):
         res = subprocess.run(["secret-tool", "lookup", "service", service], capture_output=True, text=True)
         token = res.returncode == 0 and bool(res.stdout.strip())
-    path = Path("~/.config/factory/claude-token").expanduser()
+    path = Path(f"~/.config/factory/{name}-token").expanduser()
     if not token and path.exists():
         token = (path.stat().st_mode & 0o777) == 0o600 and path.stat().st_uid == os.getuid()
     if not token:
         problems.append(warn(f"no runner token; store one with secret-tool store --label factory service {service}, "
-                             "or in ~/.config/factory/claude-token with chmod 600"))
+                             f"or in ~/.config/factory/{name}-token with chmod 600"))
     user = os.environ.get("USER", "")
     if not shutil.which("loginctl"):
         problems.append(warn("loginctl not found; linger not checked"))
@@ -366,19 +414,23 @@ def check_runner():
         problems.append(fail(f"{rel}: sandbox.allowUnsandboxedCommands must be false"))
     allow = (settings.get("permissions") or {}).get("allow") or []
     problems += [fail(f"{rel}: missing allow rule {rule}") for rule in RUNNER_ALLOW if rule not in allow]
-    cfg = json.loads((REPO / "factory" / "config.json").read_text(encoding="utf-8"))
+    cfg = load_config()
     if CI:
         return problems + check_branch_protection(cfg.get("base_branch")) + ci_state_checks()
-    service = (cfg.get("runner") or {}).get("keychain_service")
-    if not service:
+    name = runtime_name(cfg)
+    # Named as factory/bin/runner names them: claude keeps runner.keychain_service, others factory-<runtime>-token.
+    service = (cfg.get("runner") or {}).get("keychain_service") if name == "claude" else f"factory-{name}-token"
+    needs_token = bool(((cfg.get("runtimes") or {}).get(name) or {}).get("credential_env"))
+    if needs_token and not service:
         problems.append(fail("factory/config.json has no runner.keychain_service"))
     elif platform_name() == "Linux":
-        problems += linux_runner_checks(service)
-    elif not shutil.which("security"):
+        problems += linux_runner_checks(name, service if needs_token else None)
+    elif needs_token and not shutil.which("security"):
         problems.append(warn("security not found; Keychain token not checked"))
-    elif subprocess.run(["security", "find-generic-password", "-s", service],
-                        capture_output=True, text=True).returncode != 0:
-        problems.append(warn(f"no Keychain item {service}; run claude setup-token and "
+    elif needs_token and subprocess.run(["security", "find-generic-password", "-s", service],
+                                        capture_output=True, text=True).returncode != 0:
+        how = "run claude setup-token and" if name == "claude" else f"store your {name} credential with"
+        problems.append(warn(f"no Keychain item {service}; {how} "
                              f"security add-generic-password -s {service} -a \"$USER\" -w"))
     problems += check_branch_protection(cfg.get("base_branch"))
     if platform_name() == "Darwin" and shutil.which("launchctl"):
@@ -389,7 +441,9 @@ def check_runner():
 
 
 def check_checks():
-    env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
+    # Checks run project code, so they never see any agent CLI's credentials.
+    secrets = runtimes.credential_vars(load_config())
+    env = {k: v for k, v in os.environ.items() if k not in secrets}
     res = subprocess.run(["bash", str(REPO / "factory" / "checks.sh")], cwd=REPO,
                          capture_output=True, text=True, env=env)
     if res.returncode == 0:
@@ -400,6 +454,7 @@ def check_checks():
 
 CHECKS = [
     ("config", check_config),
+    ("runtime", check_runtime),
     ("agents", check_agents),
     ("files", check_files),
     ("gitignore", check_gitignore),

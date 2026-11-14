@@ -14,6 +14,8 @@ SETTINGS = "factory/runner-settings.json"
 AGENTS = ("intake", "spec-writer", "builder", "reviewer-code",
           "reviewer-security", "reviewer-ux", "reviewer-ui", "approver", "learner")
 LIB = ("factory/lib/runtimes/__init__.py", "factory/lib/runtimes/claude.py",
+       "factory/lib/runtimes/codex.py", "factory/lib/runtimes/opencode.py",
+       "factory/lib/runtimes/copilot.py", "factory/lib/runtimes/cursor.py",
        "factory/lib/orchestrator/__init__.py", "factory/lib/orchestrator/agents.py",
        "factory/lib/orchestrator/jobcli.py", "factory/lib/orchestrator/prompts.py",
        "factory/lib/orchestrator/readonly.py", "factory/lib/orchestrator/pipeline.py",

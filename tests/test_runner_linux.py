@@ -111,7 +111,7 @@ class UnitsTest(LinuxCase):
 class TokenTest(LinuxCase):
     def token(self, **env):
         with mock.patch.dict(os.environ, {**self.env, **env}):
-            return self.runner.read_token("factory-claude-token")
+            return self.runner.read_token("factory-claude-token", self.runner.token_file("claude"))
 
     def write_file_token(self, mode):
         path = self.home / ".config/factory/claude-token"
@@ -136,6 +136,9 @@ class TokenTest(LinuxCase):
 
     def test_no_token_anywhere(self):
         self.assertIsNone(self.token(FAKE_SECRET_TOOL_EXIT="1"))
+
+    def test_each_runtime_has_its_own_token_file(self):
+        self.assertEqual(self.runner.token_file("codex"), Path("~/.config/factory/codex-token"))
 
 
 class SandboxToolsTest(LinuxCase):
@@ -180,6 +183,28 @@ class DoctorLinuxTest(LinuxCase):
         self.assertIn("loginctl not found; linger not checked", texts)
         self.assertIn("systemctl not found; the systemd timer can't run", texts)
 
+    def use_runtime(self, name):
+        path = self.p.root / "factory/config.json"
+        path.write_text(json.dumps({**json.loads(path.read_text()), "runtime": name}))
+
+    def test_other_runtime_needs_no_sandbox_tools_and_names_its_token(self):
+        self.use_runtime("codex")
+        for tool in ("bwrap", "socat"):
+            (self.bin / tool).unlink()
+        problems = self.runner_check(FAKE_SECRET_TOOL_EXIT="1", FAKE_LOGINCTL_OUT="Linger=yes\n",
+                                     FAKE_SYSTEMCTL_OUT="active\n")
+        self.assertEqual(problems, [("WARN", "no runner token; store one with secret-tool store --label factory "
+                                             "service factory-codex-token, or in ~/.config/factory/codex-token "
+                                             "with chmod 600")])
+        self.assertEqual(self.calls("secret-tool"), [["lookup", "service", "factory-codex-token"]])
+
+    def test_copilot_needs_no_token(self):
+        self.use_runtime("copilot")
+        problems = self.runner_check(FAKE_SECRET_TOOL_EXIT="1", FAKE_LOGINCTL_OUT="Linger=yes\n",
+                                     FAKE_SYSTEMCTL_OUT="active\n")
+        self.assertEqual(problems, [])
+        self.assertEqual(self.calls("secret-tool"), [])
+
     def test_all_good_is_quiet(self):
         problems = self.runner_check(FAKE_SECRET_TOOL_OUT="t\n", FAKE_LOGINCTL_OUT="Linger=yes\n",
                                      FAKE_SYSTEMCTL_OUT="active\n")
@@ -211,8 +236,8 @@ class LinuxTickTest(RunnerCase):
         with mock.patch.dict(os.environ, self.runner_env(PATH=self.path, **env), clear=True):
             return self.module.cmd_tick()
 
-    def token_file(self, text, mode):
-        path = self.home / ".config/factory/claude-token"
+    def token_file(self, text, mode, name="claude"):
+        path = self.home / f".config/factory/{name}-token"
         path.parent.mkdir(parents=True)
         path.write_text(text)
         path.chmod(mode)
@@ -245,3 +270,29 @@ class LinuxTickTest(RunnerCase):
         self.assertTrue(call["has_token"])
         self.assertNotIn("tok-123", json.dumps(call["argv"]))
         self.assertNotIn("tok-123", "\n".join(self.log_lines()))
+
+    def use_codex(self):
+        self.edit_config(lambda c: c.update(runtime="codex"))
+        self.put_on_path("codex")
+
+    def test_codex_token_comes_from_its_own_file(self):
+        self.use_codex()
+        self.token_file("tok-123\n", 0o600, name="codex")
+        self.assertEqual(self.tick(FAKE_SECRET_TOOL_EXIT="1"), 0)
+        [call] = self.calls("orchestrate")
+        self.assertTrue(call["env"]["OPENAI_API_KEY_is_test"])
+        self.assertFalse(call["env"]["CLAUDE_CODE_OAUTH_TOKEN_set"])
+
+    def test_no_codex_token_names_its_service_and_file(self):
+        self.use_codex()
+        self.token_file("tok-123\n", 0o600)  # claude's file is not codex's
+        self.assertEqual(self.tick(FAKE_SECRET_TOOL_EXIT="1"), 1)
+        self.assertTrue(self.log_lines()[-1].endswith(
+            "error: no token from secret-tool (service factory-codex-token) or ~/.config/factory/codex-token"))
+
+    def test_only_claude_needs_bubblewrap_and_socat(self):
+        self.use_codex()
+        (self.p.toolbin / "bwrap").unlink()
+        (self.p.toolbin / "socat").unlink()
+        self.assertEqual(self.tick(FAKE_SECRET_TOOL_OUT="tok-123\n"), 0)
+        self.assertEqual(len(self.calls("orchestrate")), 1)

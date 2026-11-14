@@ -5,8 +5,30 @@ description: Use when the user wants to remove the software factory from a proje
 
 # Uninstall the software factory
 
-`$PLUGIN` is this skill's base directory followed by `/../..`. Work from the
-project root. Commit nothing. Ask before anything this list doesn't cover.
+`$PLUGIN` is the plugin's folder, found below. Work from the project root.
+Commit nothing. Ask before anything this list doesn't cover.
+
+## Find the plugin
+
+The plugin's files are two levels above this skill's base directory when the
+plugin is installed whole (Claude Code). An agent that installed only the
+skill folders (`npx skills add`) doesn't have them, so fetch them:
+
+```bash
+PLUGIN="<skill base>/../.."
+if [ ! -d "$PLUGIN/vendor/factory" ]; then
+  TAG=$(git ls-remote --tags --refs https://github.com/nandan-exale/superpowers-factory 'v*' \
+        | sed 's#.*refs/tags/##' | sort -V | tail -1)
+  PLUGIN=$(mktemp -d)/superpowers-factory
+  git clone --depth 1 --branch "$TAG" https://github.com/nandan-exale/superpowers-factory "$PLUGIN"
+fi
+VENDOR="$PLUGIN/vendor/factory"; BIN="$PLUGIN/bin"
+```
+
+Ask your human partner before the clone: say it downloads the plugin's
+release `<TAG>` from GitHub into a temporary folder.
+
+## Steps
 
 1. **Installed?** If `factory/bin/job` doesn't exist, say the factory isn't
    installed here and stop.
