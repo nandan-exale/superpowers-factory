@@ -62,6 +62,12 @@ class BuildTest(unittest.TestCase):
         written = json.loads((self.runs / "s.settings.json").read_text())
         self.assertEqual(written, {"permissions": {"deny": ["Read(./.env)"]}, "sandbox": {"enabled": True}})
 
+    def test_user_settings_are_not_loaded(self):
+        # A user-level `ask` rule such as Bash(git commit:*) beats runner-settings' allow, and with
+        # no one to answer it the builder's commit is denied.
+        argv, _ = claude.build(self.run_for("builder", access="write"))
+        self.assertEqual(argv[argv.index("--setting-sources") + 1], "project,local")
+
     def test_builder_gets_its_tools_and_the_gate_stop_hook(self):
         argv, _ = claude.build(self.run_for("builder", access="write"))
         self.assertEqual(argv[argv.index("--tools") + 1], "Read,Grep,Glob,Bash,Edit,Write,Skill")
