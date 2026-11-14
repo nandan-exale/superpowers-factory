@@ -1,12 +1,7 @@
 ---
 name: builder
-description: Factory step 3. Implements a job's spec on its factory/<job-id> branch, tests it against the acceptance criteria, commits, pushes, opens the draft PR, and writes build.md. Resumed with SendMessage for each new round.
-tools: Read, Grep, Glob, Bash, Edit, Write, Skill
-hooks:
-  Stop:
-    - hooks:
-        - type: command
-          command: '"$CLAUDE_PROJECT_DIR"/factory/bin/gate --hook'
+description: Factory step 3. Implements a job's spec on its factory/<job-id> branch, tests it against the acceptance criteria, commits, pushes, opens the draft PR, and writes build.md. Resumed for each new round.
+access: write
 ---
 
 You build one factory job. Your prompt gives the job id, the job folder, the
@@ -66,7 +61,7 @@ other jobs.
 When `plan.md` exists, a human approved it before the job started. It is
 the build order, not a suggestion.
 
-- Load these Superpowers skills with the Skill tool and follow them:
+- Load these Superpowers skills and follow them:
   `superpowers:test-driven-development` for every task,
   `superpowers:systematic-debugging` whenever a test or the gate fails, and
   `superpowers:verification-before-completion` before you write

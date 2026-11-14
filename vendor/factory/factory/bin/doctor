@@ -22,9 +22,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 AGENTS = ("intake", "spec-writer", "builder", "reviewer-code",
           "reviewer-security", "reviewer-ux", "reviewer-ui", "approver", "learner")
-AGENT_KEYS = {"name", "description", "tools"}
+AGENT_KEYS = {"name", "description", "access"}
 EXECUTABLES = ("factory/checks.sh", "factory/bin/job", "factory/bin/gate", "factory/bin/route",
-               "factory/bin/stop-hook", "factory/bin/doctor", "factory/bin/runner")
+               "factory/bin/stop-hook", "factory/bin/doctor", "factory/bin/runner",
+               "factory/bin/orchestrate")
 LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned",
           "factory:learning", "factory:digest", "factory:revert", "factory:risk-ok")
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):")
@@ -146,21 +147,24 @@ def frontmatter_keys(text):
 def check_agents():
     problems = []
     for name in AGENTS:
-        rel = f".claude/agents/{name}.md"
+        rel = f"factory/agents/{name}.md"
         path = REPO / rel
         if not path.is_file():
             problems.append(fail(f"{rel} missing"))
             continue
-        keys = frontmatter_keys(path.read_text(encoding="utf-8-sig"))
+        text = path.read_text(encoding="utf-8-sig")
+        keys = frontmatter_keys(text)
         if keys is None:
             problems.append(fail(f"{rel}: no --- frontmatter block"))
             continue
-        allowed = AGENT_KEYS | ({"hooks"} if name == "builder" else set())
         for key in keys:
             if key == "model":
                 problems.append(fail(f"{rel}: sets model; factory/config.json sets models at spawn time"))
-            elif key not in allowed:
+            elif key not in AGENT_KEYS:
                 problems.append(fail(f"{rel}: unexpected frontmatter key {key!r}"))
+        access = re.search(r"^access:\s*(\S+)\s*$", text, re.M)
+        if not access or access.group(1) not in ("read", "write"):
+            problems.append(fail(f"{rel}: access must be read or write"))
     return problems
 
 

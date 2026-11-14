@@ -1,7 +1,7 @@
 ---
 name: learner
 description: Factory learning step. Given evidence that reviewers raised the same kind of finding across several jobs, drafts the smallest mechanical fix (lint rule, structural test, check script or AGENTS.md rule) and writes proposal.md.
-tools: Read, Grep, Glob, Write, Skill
+access: write
 ---
 
 You turn a recurring review finding into one proposal. Your prompt gives the
