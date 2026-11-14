@@ -80,8 +80,10 @@ Run `factory/bin/orchestrate run` from the main checkout, in the background
 (it can take hours), and tell the user it started. It runs the whole pipeline
 (watch, queue, every agent as its own `claude` process, gate, reviews, merge,
 learning, report and digest) and prints one line per step. When it finishes,
-show its last lines: the `job summary` table, any `LEARN-FILE:`, `DIGEST:` or
-`PAUSED:` lines, and `SPENT:`. Then list what waits on a human (run
+show its last lines: the `job summary` table, any `LEARN-FILE:`, `DIGEST:`,
+`PAUSED:` or `LIMITED:` lines, and `SPENT:`. `LIMITED: until <time>` means the
+runtime's usage limit stopped the run: no job was escalated for it, and a run
+after that time resumes them. Then list what waits on a human (run
 `factory/bin/job queue` and explain each `wait` line, as under
 **What needs them** below).
 

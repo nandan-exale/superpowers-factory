@@ -8,16 +8,18 @@ import subprocess
 import time
 import uuid
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from orchestrator import agents, readonly
 from orchestrator.pipeline import Done, Stop
 
 POLL_SECONDS = 0.5
 LOG_TAIL = 40
+LIMIT_WAIT = timedelta(hours=1)  # when a usage limit names no reset time
+UTC_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 
-def utc(fmt="%Y-%m-%dT%H:%M:%SZ"):
+def utc(fmt=UTC_FORMAT):
     return datetime.now(timezone.utc).strftime(fmt)
 
 
@@ -38,6 +40,7 @@ class Loop:
         self.touched = []
         self.spent = 0.0
         self.paused = False
+        self.limit = None        # until when the runtime's usage limit holds, once an agent hits it
         self.stopping = False
         self.code = 0
 
@@ -76,6 +79,12 @@ class Loop:
         except ValueError as exc:
             parsed, problem = None, f"exit {code}, output unreadable ({exc})"
         self.record(spawn, record, code, parsed)
+        if parsed and parsed.get("limit"):
+            # Not the job's fault and not worth a retry: leave the job where it is for the next run.
+            self.hit_limit(parsed["limit"])
+            batch["done"][i] = Done(spawn, False, parsed.get("session_id"), "usage limit")
+            batch["limited"] = True
+            return
         if problem and spawn.resume:
             fresh = replace(spawn, resume=None, prompt=spawn.fresh_prompt or spawn.prompt, fresh_prompt=None)
             self.say(f"{spawn.job_id}: {spawn.role} couldn't resume ({problem}); starting a fresh one")
@@ -96,6 +105,30 @@ class Loop:
         batch["done"][i] = Done(spawn, True, parsed.get("session_id"))
         if spawn.role.startswith("reviewer-"):
             self.cli.job("sync", spawn.job_id)
+
+    def limited_path(self):
+        return self.repo / "factory" / "jobs" / "limited.json"
+
+    def hit_limit(self, limit):
+        until = limit.get("until") or datetime.now(timezone.utc) + LIMIT_WAIT
+        if self.limit is None or until > self.limit:
+            self.limit = until
+            path = self.limited_path()
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(json.dumps({"until": until.strftime(UTC_FORMAT), "message": limit.get("message", "")}) + "\n")
+            tmp.replace(path)
+
+    def limit_in_force(self):
+        """The until time in limited.json while it's in the future; an expired file is removed."""
+        path = self.limited_path()
+        try:
+            until = datetime.fromisoformat(json.loads(path.read_text())["until"].replace("Z", "+00:00"))
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        if until > datetime.now(timezone.utc):
+            return until
+        path.unlink(missing_ok=True)
+        return None
 
     def record(self, spawn, record, code, parsed):
         p = parsed or {}
@@ -123,6 +156,9 @@ class Loop:
         batch = self.batches.pop(key)
         dones = [batch["done"][i] for i in range(len(batch["spawns"]))]
         first = batch["spawns"][0]
+        if batch.get("limited"):
+            self.say(f"{first.job_id}: {first.role} hit the usage limit; the job resumes after the reset")
+            return
         if batch["snap"] is not None and all(d.ok for d in dones):
             own = {f for s in batch["spawns"] for f in s.own}
             after = readonly.snapshot(first.folder, first.cwd, first.cwd != self.repo)
@@ -159,7 +195,7 @@ class Loop:
     only = None
 
     def fill(self, only):
-        if self.stopping or self.pipe.daily:
+        if self.stopping or self.pipe.daily or self.limit:
             return
         out = self.cli.job("queue")
         if not out.ok:
@@ -208,13 +244,17 @@ class Loop:
 
     def run(self, only=None):
         self.only = only
+        self.limit = self.limit_in_force()
+        if self.limit:
+            self.wrap_up(only)
+            return self.code
         if only is None:
             for line in self.cli.job("watch").out.splitlines():
                 if line.strip() and line.strip() != "WATCH: off":
                     self.say(line)
         self.fill(only)
         self.drain()
-        if only is None and not (self.pipe.daily or self.paused or self.stopping or self.code):
+        if only is None and not (self.pipe.daily or self.paused or self.stopping or self.code or self.limit):
             try:
                 learners = self.pipe.learn()
             except Stop as exc:
@@ -236,6 +276,8 @@ class Loop:
             for line in self.cli.job("digest").out.splitlines():
                 if line.startswith(("DIGEST:", "NOTE:")):
                     self.say(line)
+        if self.limit:
+            self.say(f"LIMITED: until {self.limit.strftime(UTC_FORMAT)}")
         self.say(f"SPENT: ${self.spent:.2f}")
 
     def stop(self):

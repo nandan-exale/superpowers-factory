@@ -47,4 +47,4 @@ def parse(stdout):
     error = any(e.get("type") == "error" for e in evs) or not steps
     return {"session_id": session, "model": None, "usage": usage if steps else None,
             "cost_usd": round(cost, 6) if steps else None, "cost_source": "cli" if steps else None,
-            "cost_by_model": {}, "error": error}
+            "cost_by_model": {}, "error": error, "limit": None}

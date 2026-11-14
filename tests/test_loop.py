@@ -8,6 +8,7 @@ import tempfile
 import time
 import types
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -33,7 +34,9 @@ time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
 code = int(os.environ.get("FAKE_EXIT_" + role.replace("-", "_"), "0"))
 if code:
     sys.exit(code)
-print(json.dumps({"session_id": "sess-" + role, "cost": 0.5, "resumed": "--resume" in sys.argv}))
+limit = os.environ.get("FAKE_LIMIT_" + role.replace("-", "_"))
+print(json.dumps({"session_id": "sess-" + role, "cost": 0.5, "resumed": "--resume" in sys.argv,
+                  **({"limit": limit} if limit is not None else {})}))
 """
 
 
@@ -47,8 +50,13 @@ def fake_runtime(script, own_for, env):
 
     def parse(stdout):
         data = json.loads(stdout)
+        limit = None
+        if "limit" in data:  # FAKE_LIMIT_<role>: an ISO time, or "" for a limit with no readable reset time
+            until = datetime.fromisoformat(data["limit"].replace("Z", "+00:00")) if data["limit"] else None
+            limit = {"message": "You've hit your limit", "until": until}
         return {"session_id": data["session_id"], "model": "m", "usage": None, "cost_usd": data["cost"],
-                "cost_source": "cli", "cost_by_model": {"m": data["cost"]}, "error": False}
+                "cost_source": "cli", "cost_by_model": {"m": data["cost"]}, "error": limit is not None,
+                "limit": limit}
 
     return types.SimpleNamespace(NAME="fake", build=build, parse=parse)
 
@@ -283,6 +291,50 @@ print(json.dumps({"type": "result", "session_id": "s", "is_error": False, "total
                                  capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": ""})
             self.assertEqual(res.returncode, 2, res.stderr)
             self.assertEqual(list(root.rglob("__pycache__")), [])
+
+
+class LimitTest(LoopCase):
+    """A usage limit stops the run without retrying or escalating; the next run waits for the reset."""
+
+    def limited_file(self):
+        return self.repo / "factory" / "jobs" / "limited.json"
+
+    def test_a_limit_is_neither_retried_nor_escalated(self):
+        self.env = {"FAKE_LIMIT_builder": "2099-01-01T00:00:00Z"}
+        lp = self.loop([self.spawn("builder")])
+        self.assertEqual(lp.run(), 0)
+        self.assertEqual(self.pipe.finished, [])
+        self.assertEqual(len(self.recorded()), 1)
+        self.assertIn("LIMITED: until 2099-01-01T00:00:00Z", self.lines)
+        self.assertEqual(json.loads(self.limited_file().read_text())["until"], "2099-01-01T00:00:00Z")
+
+    def test_a_limit_starts_nothing_else(self):
+        self.env = {"FAKE_LIMIT_builder": "2099-01-01T00:00:00Z"}
+        self.loop([self.spawn("builder")]).run()
+        self.assertEqual(len(self.cli.called("job", "queue")), 1)
+
+    def test_a_limit_with_no_reset_time_waits_an_hour(self):
+        self.env = {"FAKE_LIMIT_builder": ""}
+        before = datetime.now(timezone.utc)
+        self.loop([self.spawn("builder")]).run()
+        until = datetime.fromisoformat(json.loads(self.limited_file().read_text())["until"].replace("Z", "+00:00"))
+        self.assertGreaterEqual(until, before + timedelta(minutes=59))
+        self.assertLessEqual(until, before + timedelta(minutes=61))
+
+    def test_a_run_during_a_limit_starts_nothing(self):
+        self.limited_file().write_text(json.dumps({"until": "2099-01-01T00:00:00Z"}))
+        lp = self.loop([self.spawn("builder")])
+        self.assertEqual(lp.run(), 0)
+        self.assertEqual(self.cli.called("job", "queue"), [])
+        self.assertEqual(self.recorded(), [])
+        self.assertIn("LIMITED: until 2099-01-01T00:00:00Z", self.lines)
+
+    def test_an_expired_limit_is_cleared_and_the_run_goes_ahead(self):
+        self.limited_file().write_text(json.dumps({"until": "2000-01-01T00:00:00Z"}))
+        lp = self.loop([self.spawn("builder")])
+        self.assertEqual(lp.run(), 0)
+        self.assertFalse(self.limited_file().exists())
+        self.assertEqual(len(self.pipe.finished), 1)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,9 @@
 """Claude Code: one `claude -p` process per agent run, prompt on stdin, one JSON result on stdout."""
 
 import json
+import re
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 NAME = "claude"
 BINARY = "claude"
@@ -67,6 +70,36 @@ def result_object(stdout):
     raise ValueError("no result object in claude's output")
 
 
+# "You've hit your 5-hour limit · resets 6:50pm (Europe/Stockholm)", as the interactive session showed it
+# on 2026-11-13. claude -p's result for a limit isn't recorded yet, so a 429 counts too.
+LIMIT_RE = re.compile(r"hit your .*limit|usage limit|rate limit", re.I)
+RESET_RE = re.compile(r"resets (?:at )?(\d{1,2})(?::(\d{2}))?\s*([ap]m)\s*\(([^)]+)\)", re.I)
+
+
+def reset_time(text, now):
+    """The UTC time a "resets 6:50pm (Europe/Stockholm)" message names, the next one after `now`; None if unreadable."""
+    m = RESET_RE.search(text or "")
+    if not m or not 1 <= int(m[1]) <= 12:
+        return None
+    try:
+        zone = ZoneInfo(m[4])
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    hour = int(m[1]) % 12 + (12 if m[3].lower() == "pm" else 0)
+    local = now.astimezone(zone)
+    at = local.replace(hour=hour, minute=int(m[2] or 0), second=0, microsecond=0)
+    if at <= local:
+        at += timedelta(days=1)
+    return at.astimezone(timezone.utc)
+
+
+def limit_of(data):
+    text = str(data.get("result") or "")
+    if not data.get("is_error") or not (data.get("api_error_status") == 429 or LIMIT_RE.search(text)):
+        return None
+    return {"message": text, "until": reset_time(text, datetime.now(timezone.utc))}
+
+
 def parse(stdout):
     data = result_object(stdout)
     by_model = {model: round(float(u.get("costUSD") or 0.0), 6)
@@ -80,4 +113,5 @@ def parse(stdout):
         "cost_source": "cli" if cost is not None else None,
         "cost_by_model": by_model,
         "error": bool(data.get("is_error")),
+        "limit": limit_of(data),
     }

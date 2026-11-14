@@ -54,4 +54,4 @@ def parse(stdout):
             usage["cache_read_input_tokens"] += cached
     error = any(e.get("type") in ("turn.failed", "error") for e in evs) or not turns
     return {"session_id": session, "model": None, "usage": usage if turns else None, "cost_usd": None,
-            "cost_source": None, "cost_by_model": {}, "error": error}
+            "cost_source": None, "cost_by_model": {}, "error": error, "limit": None}

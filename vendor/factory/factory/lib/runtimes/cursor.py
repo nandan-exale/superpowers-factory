@@ -33,5 +33,5 @@ def parse(stdout):
                 "output_tokens": u.get("outputTokens", 0),
                 "cache_read_input_tokens": u.get("cacheReadTokens", 0)}
             return {"session_id": data.get("session_id"), "model": None, "usage": usage, "cost_usd": None,
-                    "cost_source": None, "cost_by_model": {}, "error": bool(data.get("is_error"))}
+                    "cost_source": None, "cost_by_model": {}, "error": bool(data.get("is_error")), "limit": None}
     raise ValueError("no result object in cursor-agent's output")
