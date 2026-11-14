@@ -10,7 +10,9 @@ Every adapter has:
                    session_id. The prompt goes to the process on stdin; an adapter may rewrite
                    prompt_path before the loop opens it.
   parse(stdout) -> {"session_id", "model", "usage", "cost_usd", "cost_source", "cost_by_model",
-                   "error"}; ValueError when stdout has no result.
+                   "error", "limit"}; ValueError when stdout has no result. `limit` is None, or
+                   {"message", "until"} when the run hit a usage limit (`until`: aware UTC datetime
+                   or None); orchestrator.loop then waits for the reset instead of escalating.
 """
 
 import importlib

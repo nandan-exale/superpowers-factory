@@ -70,7 +70,9 @@ class RuntimeContract:
             self.assertIsNotNone(r["cost_usd"])
         if self.rt.CAPS["reports_tokens"]:
             self.assertGreater(r["usage"]["input_tokens"] + r["usage"]["output_tokens"], 0)
-        self.assertEqual(set(r), {"session_id", "model", "usage", "cost_usd", "cost_source", "cost_by_model", "error"})
+        self.assertEqual(set(r), {"session_id", "model", "usage", "cost_usd", "cost_source", "cost_by_model", "error",
+                                  "limit"})
+        self.assertIsNone(r["limit"])
 
     def test_recorded_resume_keeps_the_session(self):
         if not self.rt.CAPS["resume"]:

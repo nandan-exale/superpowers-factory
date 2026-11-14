@@ -39,4 +39,4 @@ def parse(stdout):
     error = (not any(e.get("type") == "result" for e in evs)
              or any(str(e.get("type", "")).endswith("error") for e in evs))
     return {"session_id": session, "model": None, "usage": None, "cost_usd": None, "cost_source": None,
-            "cost_by_model": {}, "error": error}
+            "cost_by_model": {}, "error": error, "limit": None}

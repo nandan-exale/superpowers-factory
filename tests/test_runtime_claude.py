@@ -2,6 +2,7 @@ import json
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -118,6 +119,49 @@ class ParseTest(unittest.TestCase):
     def test_missing_cost_is_none(self):
         r = claude.parse(json.dumps({"type": "result", "session_id": "s", "is_error": False}))
         self.assertEqual((r["cost_usd"], r["cost_source"], r["model"], r["cost_by_model"]), (None, None, None, {}))
+
+
+LIMIT_TEXT = "You've hit your 5-hour limit · resets 6:50pm (Europe/Stockholm)"
+
+
+class LimitTest(unittest.TestCase):
+    """A usage limit isn't a failure: the orchestrator waits for the reset instead of escalating.
+
+    claude -p's result for a limit hasn't been recorded; the text is what the interactive session
+    showed on 2026-11-13 (error rate_limit / usage_limit_reached)."""
+
+    def result(self, text, is_error=True, **extra):
+        return json.dumps({"type": "result", "session_id": "s", "is_error": is_error, "result": text, **extra})
+
+    def test_a_limit_result_is_a_limit_with_its_reset_time(self):
+        r = claude.parse(self.result(LIMIT_TEXT))
+        self.assertTrue(r["error"])
+        self.assertEqual(r["limit"]["message"], LIMIT_TEXT)
+        self.assertEqual(r["limit"]["until"].tzinfo, timezone.utc)
+
+    def test_a_429_is_a_limit_whatever_the_text(self):
+        self.assertIsNotNone(claude.parse(self.result("Request rejected", api_error_status=429))["limit"])
+
+    def test_other_errors_and_successes_are_not_limits(self):
+        self.assertIsNone(claude.parse(self.result("No conversation found"))["limit"])
+        self.assertIsNone(claude.parse(self.result("I checked the rate limit code.", is_error=False))["limit"])
+
+    def test_reset_time_is_the_next_one_in_that_zone(self):
+        before = datetime(2026, 11, 13, 14, 23, tzinfo=timezone.utc)  # 15:23 in Stockholm
+        self.assertEqual(claude.reset_time(LIMIT_TEXT, before), datetime(2026, 11, 13, 17, 50, tzinfo=timezone.utc))
+        after = datetime(2026, 11, 13, 18, 0, tzinfo=timezone.utc)  # 19:00 in Stockholm: tomorrow's 6:50pm
+        self.assertEqual(claude.reset_time(LIMIT_TEXT, after), datetime(2026, 11, 14, 17, 50, tzinfo=timezone.utc))
+
+    def test_reset_time_reads_am_and_a_bare_hour(self):
+        now = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
+        self.assertEqual(claude.reset_time("resets 9am (UTC)", now), datetime(2026, 11, 14, 9, 0, tzinfo=timezone.utc))
+        self.assertEqual(claude.reset_time("resets 12pm (UTC)", now), datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc))
+
+    def test_unreadable_reset_time_is_none(self):
+        now = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
+        for text in ("You've hit your limit", "resets 6:50pm (Not/AZone)", "resets 13pm (UTC)"):
+            with self.subTest(text=text):
+                self.assertIsNone(claude.reset_time(text, now))
 
 
 class ClaudeContractTest(RuntimeContract, unittest.TestCase):
