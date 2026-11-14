@@ -9,6 +9,8 @@ than one sample below its baseline. --update-baseline writes the new rates for a
 """
 
 import argparse
+import importlib.machinery
+import importlib.util
 import json
 import re
 import shutil
@@ -20,7 +22,7 @@ from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1]
 VENDOR = PLUGIN / "vendor" / "factory"
-AGENTS = VENDOR / ".claude" / "agents"
+AGENTS = VENDOR / "factory" / "agents"
 CONFIG = VENDOR / "factory" / "config.json"
 EVALS = PLUGIN / "tests" / "evals"
 BASELINE = EVALS / "baseline.json"
@@ -31,12 +33,25 @@ TAG = re.compile(r"\[([^\]\s]+)\]")
 SAMPLE_SECONDS = 900
 
 
+def load_claude_runtime():
+    """The vendored claude adapter: it names the tools each agent gets."""
+    loader = importlib.machinery.SourceFileLoader(
+        "factory_claude_runtime", str(VENDOR / "factory" / "lib" / "runtimes" / "claude.py"))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(module)
+    return module
+
+
+CLAUDE_RUNTIME = load_claude_runtime()
+
+
 class Stop(Exception):
     """The evals can't run at all (exit 2)."""
 
 
 def agent_prompt(agent):
-    """(the agent's prompt without its frontmatter, its tools) from the vendored agent file."""
+    """(the agent's prompt without its frontmatter, its tools) from the vendored agent file and
+    the claude runtime adapter."""
     path = AGENTS / f"{agent}.md"
     if not path.is_file():
         raise Stop(f"no agent {agent!r} in {AGENTS.relative_to(PLUGIN)}")
@@ -47,11 +62,7 @@ def agent_prompt(agent):
         end = -1
     if end < 0:
         raise Stop(f"{path.relative_to(PLUGIN)} has no closed frontmatter")
-    tools = []
-    for line in lines[1:end]:
-        if line.startswith("tools:"):
-            tools = [t.strip() for t in line.removeprefix("tools:").split(",") if t.strip()]
-    return "\n".join(lines[end + 1:]).strip() + "\n", tools
+    return "\n".join(lines[end + 1:]).strip() + "\n", CLAUDE_RUNTIME.tools(agent).split(",")
 
 
 def model_for(agent, cfg):

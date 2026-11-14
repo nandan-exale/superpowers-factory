@@ -12,8 +12,9 @@ always kept in sync with upstream, so one the project removed comes back; a sett
 the project changed beyond domains is a merge, or unchanged if upstream didn't
 change it either). config and settings are unchanged when applying would not change the file.
 A file with no manifest entry that matches a version listed in the plugin's
-vendor/known-hashes.json is safe.
---apply-safe copies new and safe files, merges config and settings, and
+vendor/known-hashes.json is safe. retired (a file earlier versions installed and this one
+doesn't, unedited) and retired-edited (the same, edited in the project) are listed after them.
+--apply-safe copies new and safe files, deletes retired files, merges config and settings, and
 rewrites factory/manifest.json. merge files are left for the user and keep
 their old manifest entry and the old vendor_hash, so the update stays pending.
 --resolved <path> records that the user settled a merge file; once no merge
@@ -29,8 +30,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from factory_files import (FILES, MANIFEST, SETTINGS, known_hashes, manifest_data, settings_core,  # noqa: E402
-                           sha256_file, vendor_dir, write_json)
+from factory_files import (FILES, MANIFEST, RETIRED, SETTINGS, known_hashes, manifest_data,  # noqa: E402
+                           settings_core, sha256_file, vendor_dir, write_json)
 
 OWNED = {"factory/checks.sh"}
 CONFIG = "factory/config.json"
@@ -127,6 +128,13 @@ def classify(project, vendor, manifest):
                 rows.append(("safe", rel))
             else:
                 rows.append(("merge", rel))
+    for rel in RETIRED:
+        path = project / rel
+        if not path.exists():
+            continue
+        mine = sha256_file(path)
+        unedited = mine in known.get(rel, ()) or mine == (base or {}).get(rel)
+        rows.append(("retired" if unedited else "retired-edited", rel))
     return rows
 
 
@@ -212,6 +220,9 @@ def apply_safe(project, vendor, rows, old):
             shutil.copy2(src, dst)
             if rel.startswith("factory/bin/"):
                 dst.chmod(0o755)
+    for group, rel in rows:
+        if group == "retired":
+            (project / rel).unlink()
     if config is not None and config != load_json(project / CONFIG):
         write_json(project / CONFIG, config, indent=indent_of(project / CONFIG))
         if notes:
@@ -259,7 +270,8 @@ def resolve(project, vendor, rel):
         data["settings_core"] = settings_core(theirs)
         data["settings_domains"] = allowed_domains(theirs, SETTINGS)
     remaining = [r for group, r in classify(project, vendor, data)
-                 if group == "merge" or (group != "owned" and r != CONFIG and pending(r, data, vendor))]
+                 if group == "merge" or (group not in ("owned", "retired", "retired-edited") and r != CONFIG
+                                         and pending(r, data, vendor))]
     current = manifest_data(vendor)["vendor_hash"]
     if not remaining:
         data["vendor_hash"] = current

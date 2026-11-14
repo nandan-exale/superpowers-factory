@@ -11,7 +11,7 @@ class HandoffSkillTest(unittest.TestCase):
         self.assertIn("the factory will skip them", SKILL)
 
     def test_warns_when_the_approver_will_escalate(self):
-        self.assertIn(".claude/agents/approver.md", SKILL)
+        self.assertIn("factory/agents/approver.md", SKILL)
         self.assertIn("will stop at needs-human for you to merge", SKILL)
 
     def test_splits_large_plans_into_parts(self):

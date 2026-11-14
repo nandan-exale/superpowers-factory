@@ -27,15 +27,20 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
 
   ```bash
   for f in .claude/skills/factory/SKILL.md \
-    .claude/agents/intake.md .claude/agents/spec-writer.md .claude/agents/builder.md \
-    .claude/agents/reviewer-code.md .claude/agents/reviewer-security.md \
-    .claude/agents/reviewer-ux.md .claude/agents/reviewer-ui.md .claude/agents/approver.md .claude/agents/learner.md \
+    factory/agents/intake.md factory/agents/spec-writer.md factory/agents/builder.md \
+    factory/agents/reviewer-code.md factory/agents/reviewer-security.md \
+    factory/agents/reviewer-ux.md factory/agents/reviewer-ui.md factory/agents/approver.md factory/agents/learner.md \
+    factory/lib/runtimes/__init__.py factory/lib/runtimes/claude.py \
+    factory/lib/orchestrator/__init__.py factory/lib/orchestrator/agents.py \
+    factory/lib/orchestrator/jobcli.py factory/lib/orchestrator/prompts.py \
+    factory/lib/orchestrator/readonly.py factory/lib/orchestrator/pipeline.py \
+    factory/lib/orchestrator/loop.py factory/bin/orchestrate \
     factory/config.json factory/checks.sh factory/bin/job factory/bin/gate factory/bin/route \
     factory/bin/stop-hook factory/bin/doctor factory/bin/runner factory/runner-settings.json \
     factory/dashboard.html
   do mkdir -p "$(dirname "$f")" && cp "$VENDOR/$f" "$f"; done
   chmod +x factory/checks.sh factory/bin/job factory/bin/gate factory/bin/route \
-    factory/bin/stop-hook factory/bin/doctor factory/bin/runner
+    factory/bin/stop-hook factory/bin/doctor factory/bin/runner factory/bin/orchestrate
   ```
 
 - **Step 1 (Copy), manifest:** right after copying, before adapting any file,

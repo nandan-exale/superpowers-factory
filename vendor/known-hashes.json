@@ -71,6 +71,33 @@
     "cf84cd2451ebf866aed690401ea28dd07e806c876beb586a7f096373d57ca5ec",
     "d8295c4a4e6e1a2e895baac87896c963cd883b1a6bcb41d4d64653dfbc74042b"
   ],
+  "factory/agents/approver.md": [
+    "469aab1818f9a4be230ac975f6489c53149111c31df9ca6167c39bcdca209ecd"
+  ],
+  "factory/agents/builder.md": [
+    "09373f6c08afda9430d6cb42302e2278743b7a0571484084c817333f010c5324"
+  ],
+  "factory/agents/intake.md": [
+    "172ba6d1caeecc562811b7df3a29091d475d68c4f0ca130657ba7ada4c898142"
+  ],
+  "factory/agents/learner.md": [
+    "8d062a55678069484d6483aa5584694d99269a9f7373769552bb0cc8d2182706"
+  ],
+  "factory/agents/reviewer-code.md": [
+    "af7e5726fedd587731c8eb0a59221645cfe2db8b8142015fddf4a83cb36b762a"
+  ],
+  "factory/agents/reviewer-security.md": [
+    "8f7089dbc55222107466bb47aedd0e980a72319c727337fdaaa08dbbd56e3df9"
+  ],
+  "factory/agents/reviewer-ui.md": [
+    "8ac71bf672dce47890bd56c72d38a89a933f4a4b20b5ad0fd2b9e4cbc7c7ee3f"
+  ],
+  "factory/agents/reviewer-ux.md": [
+    "af7dbc30dae415ca5007b65edbc402559b4d4301d628a5ec420a733b7d7c6f92"
+  ],
+  "factory/agents/spec-writer.md": [
+    "946c985030b0b12b305a7c2fdfd8fd35884b9310d8aea2d1caea5c03f5264116"
+  ],
   "factory/bin/doctor": [
     "0719f85bbac7e6dcccd83c47b5df91df1b5d1e02910a8e60593f63b98e3cf1bf",
     "122cc2f9847495bf976f4059be07e92075aad7ece088199f1aa57f74c014a077",
@@ -92,6 +119,7 @@
     "bc451741845575204f86ee513c868cb98696d6a2c7a454399268674597ef17d0",
     "bd58310f3cdd2fdf3998e06d79104e6fc047c9e34f609f385d96128e12b07fc2",
     "d382c8b2bdbb73d2d7015076428bd365a517e249fe8370a5866829d9e5f2d8e3",
+    "ea5deba82ff897892988d2507a7d29a6f3c10106cf2ae03ac949939999578111",
     "ee1b8c86b617941afc4873dd267afb1eadd221d960595a57f63f28bdd948bc6c",
     "f126bd7bbe125854440c0274cb4bba4b29275b2835552f13660df1b714035564"
   ],
@@ -149,6 +177,7 @@
     "e8036eec27efce436e71b47ce4472fc88a97ef83ea5a9923f041a5d4ce0b85a8",
     "f03b53ed78432af236d976588fe64ceaa65fa1da092d18fc8dccdb04e1ca1042"
   ],
+  "factory/bin/orchestrate": [],
   "factory/bin/route": [
     "31aced93230c3cd8d2819f297d6868d4c7f3bafba25009ee16673da8d8f7ad5a",
     "e245d96e93203c4551ccbcde3dd0b9b8698d0dc167a4b142837a26aea986e3ec"
@@ -210,6 +239,19 @@
     "8f605f3ca5b6478dd6e47d295f7a0a598464b3eff6d4cf5c15e153f34505b38c",
     "99508421e333900965f8e2f5c5572fa1a7b78542189cd2abb6a5358ba43dbd95",
     "d70d409b3b5b9a9bbd85c37aef11aa75c86d727ba885724dbaf7c7a163fde202"
+  ],
+  "factory/lib/orchestrator/__init__.py": [],
+  "factory/lib/orchestrator/agents.py": [],
+  "factory/lib/orchestrator/jobcli.py": [],
+  "factory/lib/orchestrator/loop.py": [],
+  "factory/lib/orchestrator/pipeline.py": [],
+  "factory/lib/orchestrator/prompts.py": [],
+  "factory/lib/orchestrator/readonly.py": [],
+  "factory/lib/runtimes/__init__.py": [
+    "be2f3de4c1c00a40cd82291eee0dd617653c9c684e03244c84c33c4f1ff48f85"
+  ],
+  "factory/lib/runtimes/claude.py": [
+    "6a542662f498e42c4c80f755c7964aaa88d4ca959d2790f7f2c6b32ae32354d8"
   ],
   "factory/runner-settings.json": [
     "5bfc84a77f69a125af2fd7148660b5d6ae060871d7b2c8f5bba190400ccc0b7e",

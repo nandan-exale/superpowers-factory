@@ -13,9 +13,16 @@ KNOWN_HASHES = PLUGIN / "vendor" / "known-hashes.json"
 SETTINGS = "factory/runner-settings.json"
 AGENTS = ("intake", "spec-writer", "builder", "reviewer-code",
           "reviewer-security", "reviewer-ux", "reviewer-ui", "approver", "learner")
+LIB = ("factory/lib/runtimes/__init__.py", "factory/lib/runtimes/claude.py",
+       "factory/lib/orchestrator/__init__.py", "factory/lib/orchestrator/agents.py",
+       "factory/lib/orchestrator/jobcli.py", "factory/lib/orchestrator/prompts.py",
+       "factory/lib/orchestrator/readonly.py", "factory/lib/orchestrator/pipeline.py",
+       "factory/lib/orchestrator/loop.py")
 FILES = (
     ".claude/skills/factory/SKILL.md",
-    *(f".claude/agents/{name}.md" for name in AGENTS),
+    *(f"factory/agents/{name}.md" for name in AGENTS),
+    *LIB,
+    "factory/bin/orchestrate",
     "factory/config.json",
     "factory/checks.sh",
     "factory/bin/job",
@@ -27,6 +34,8 @@ FILES = (
     "factory/runner-settings.json",
     "factory/dashboard.html",
 )
+# Paths earlier versions installed and this one doesn't: /factory-update removes unedited copies.
+RETIRED = tuple(f".claude/agents/{name}.md" for name in AGENTS)
 
 
 def vendor_dir():

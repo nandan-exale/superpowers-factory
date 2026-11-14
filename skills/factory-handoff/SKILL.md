@@ -81,7 +81,7 @@ Read the spec and plan and propose:
 Give one line of reasoning for each and ask your human partner to confirm or
 change them. Don't file anything until they confirm.
 
-Then read the ESCALATE lists in `.claude/agents/approver.md` (the general
+Then read the ESCALATE lists in `factory/agents/approver.md` (the general
 list and any "In this project" list). If the plan clearly changes something
 on them, tell your human partner which rule, and that the approver will
 escalate, so the job will stop at needs-human for you to merge. This is

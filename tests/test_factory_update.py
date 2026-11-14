@@ -70,12 +70,12 @@ class UpdatePlanTest(unittest.TestCase):
         self.upstream("factory/bin/route", "# upstream route\n")
         self.upstream("factory/bin/gate", "# upstream gate\n")
         self.local("factory/bin/gate", "# my gate\n")
-        self.local(".claude/agents/reviewer-ui.md", "my tailored reviewer\n")
+        self.local("factory/agents/reviewer-ui.md", "my tailored reviewer\n")
         (self.project / "factory/dashboard.html").unlink()
         _, groups = self.run_plan()
         self.assertEqual(groups["factory/bin/route"], "safe")
         self.assertEqual(groups["factory/bin/gate"], "merge")
-        self.assertEqual(groups[".claude/agents/reviewer-ui.md"], "unchanged")
+        self.assertEqual(groups["factory/agents/reviewer-ui.md"], "unchanged")
         self.assertEqual(groups["factory/dashboard.html"], "new")
 
     def test_apply_safe(self):

@@ -164,6 +164,6 @@ class GateSecretAdvanceTest(BudgetCase):
 
 class BuilderWordingTest(unittest.TestCase):
     def test_builder_pushes_through_job_push(self):
-        text = (Path(__file__).resolve().parents[1] / "vendor/factory/.claude/agents/builder.md").read_text()
+        text = (Path(__file__).resolve().parents[1] / "vendor/factory/factory/agents/builder.md").read_text()
         self.assertIn("factory/bin/job push <job-id>", text)
         self.assertNotIn("git push -u origin <branch>", text)

@@ -53,8 +53,8 @@ class DoctorTest(unittest.TestCase):
         self.assertFails("labels", "label 'factory:learning' missing")
 
     def test_missing_learner_agent_fails(self):
-        (self.p.root / ".claude/agents/learner.md").unlink()
-        self.assertFails("agents", ".claude/agents/learner.md missing")
+        (self.p.root / "factory/agents/learner.md").unlink()
+        self.assertFails("agents", "factory/agents/learner.md missing")
 
     def test_bad_learning_config_fails(self):
         def change(text):
@@ -214,16 +214,20 @@ class DoctorTest(unittest.TestCase):
         self.assertFails("config", "routing.low.builder: model 'gpt' not in model_aliases")
 
     def test_agent_with_model_fails(self):
-        self.edit(".claude/agents/builder.md", lambda t: t.replace("name: builder\n", "name: builder\nmodel: opus\n", 1))
-        self.assertFails("agents", ".claude/agents/builder.md: sets model")
+        self.edit("factory/agents/builder.md", lambda t: t.replace("name: builder\n", "name: builder\nmodel: opus\n", 1))
+        self.assertFails("agents", "factory/agents/builder.md: sets model")
 
     def test_unexpected_frontmatter_key_fails(self):
-        self.edit(".claude/agents/approver.md", lambda t: t.replace("name: approver\n", "name: approver\ncolor: red\n", 1))
-        self.assertFails("agents", ".claude/agents/approver.md: unexpected frontmatter key 'color'")
+        self.edit("factory/agents/approver.md", lambda t: t.replace("name: approver\n", "name: approver\ncolor: red\n", 1))
+        self.assertFails("agents", "factory/agents/approver.md: unexpected frontmatter key 'color'")
+
+    def test_bad_access_fails(self):
+        self.edit("factory/agents/reviewer-code.md", lambda t: t.replace("access: read\n", "access: maybe\n", 1))
+        self.assertFails("agents", "factory/agents/reviewer-code.md: access must be read or write")
 
     def test_missing_agent_fails(self):
-        (self.p.root / ".claude/agents/reviewer-ui.md").unlink()
-        self.assertFails("agents", ".claude/agents/reviewer-ui.md missing")
+        (self.p.root / "factory/agents/reviewer-ui.md").unlink()
+        self.assertFails("agents", "factory/agents/reviewer-ui.md missing")
 
     def test_non_executable_script_fails(self):
         (self.p.root / "factory/bin/route").chmod(0o644)

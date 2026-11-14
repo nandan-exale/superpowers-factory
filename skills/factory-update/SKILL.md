@@ -21,6 +21,12 @@ Announce: "I'm using factory-update to update the software factory here."
      changed it beyond domains and upstream changed it too, it is a `merge`);
    - `merge`: changed both here and upstream, decided one by one below;
    - `owned`, `unchanged`: left alone.
+   - `retired`: files earlier versions installed and this one no longer uses
+     (the old `.claude/agents/`), unedited here, so they will be deleted;
+   - `retired-edited`: the same, but edited in this project: show the diff
+     against `factory/agents/<name>.md` and carry the project's changes into
+     that file (the new copy is the one the factory reads), then delete the old
+     file.
 2. Ask your human partner to go ahead. On yes, run
    `"$BIN/factory-update-plan" . --apply-safe`.
 3. For each `merge` file: show `diff -u <project file> <plugin vendor file>`

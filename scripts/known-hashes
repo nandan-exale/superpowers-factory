@@ -18,7 +18,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "bin"))
 
-from factory_files import FILES  # noqa: E402
+from factory_files import FILES, RETIRED  # noqa: E402
 
 OUT = Path("vendor/known-hashes.json")
 
@@ -44,7 +44,7 @@ def versions(root, rel):
 
 
 def generate(root):
-    return {rel: versions(root, rel) for rel in sorted(FILES)}
+    return {rel: versions(root, rel) for rel in sorted({*FILES, *RETIRED})}
 
 
 def missing(root):
