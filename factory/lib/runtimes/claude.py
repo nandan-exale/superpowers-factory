@@ -45,8 +45,12 @@ def build(run):
     # one to answer it the call is denied. runner-settings carries the deny rules agents need.
     argv = [BINARY, "-p", "--output-format", "json", "--model", run["model"], "--effort", run["effort"],
             "--append-system-prompt-file", str(run["system_path"]), "--tools", tools(run["role"]),
+            "--allowedTools", tools(run["role"]),
             "--settings", str(path), "--setting-sources", "project,local",
             "--permission-mode", "dontAsk"]
+    # --allowedTools: with SCRUB set, claude forces the default permission mode over dontAsk, and
+    # refuses tool calls not allowed explicitly (reads of the job folder outside the worktree).
+    # runner-settings' deny rules and the sandbox still apply.
     if run.get("resume"):
         argv += ["--resume", run["resume"]]
     elif run.get("session_id"):
