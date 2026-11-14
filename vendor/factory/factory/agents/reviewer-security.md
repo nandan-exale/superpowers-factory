@@ -26,7 +26,8 @@ is in the main checkout; your one file goes there.
 3. The change: `git log --oneline <base>..HEAD` and `git diff <base>...HEAD`.
    Read the changed files in full where the diff isn't enough.
 4. From round 2 on, your own review from the last round that had reviews
-   (`round-<M>/review-security.md`). Check whether each finding was fixed.
+   (`round-<M>/review-security.md`). Check whether each finding was fixed, and
+   that the fix closes the problem, not only the example you gave.
 
 ## What to look for
 
@@ -44,6 +45,12 @@ is in the main checkout; your one file goes there.
 - **Abuse**: public endpoints that can be spammed without a rate limit.
 - **Secrets**: keys, credentials or `.env` values in commits.
 - **Dependencies**: new packages, and whether they are needed and maintained.
+
+When you find one way in (one route to a sandbox escape, one way past a check,
+one place a secret leaks), look for every other route of the same kind before
+you write. List them in one finding, and ask for a fix that closes the whole
+kind (an allowlist, isolation, not reading the untrusted input at all) rather
+than one patch per route.
 
 ## Write review-security.md
 
@@ -68,6 +75,8 @@ Non-blocking observations. Optional.
 - Use CHANGES only for real, blocking security problems in this branch's change.
   Don't block on pre-existing issues the change didn't make worse; mention
   them under Notes.
+- Raise every blocking finding in this round. Each round costs a rebuild, a
+  gate and a review, so never hold one back or park it under Notes for later.
 - `## Summary` comes right after the header: 3 to 5 short bullets a human can
   skim on the dashboard. The detail goes in the sections below it.
 - Under Findings, write "None." when there are none.

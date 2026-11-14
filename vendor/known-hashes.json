@@ -88,15 +88,19 @@
     "8d062a55678069484d6483aa5584694d99269a9f7373769552bb0cc8d2182706"
   ],
   "factory/agents/reviewer-code.md": [
+    "76926b73c83639c00712a21041fa69c13b6ffa65dd2321098b4c33e320875193",
     "af7e5726fedd587731c8eb0a59221645cfe2db8b8142015fddf4a83cb36b762a"
   ],
   "factory/agents/reviewer-security.md": [
-    "8f7089dbc55222107466bb47aedd0e980a72319c727337fdaaa08dbbd56e3df9"
+    "8f7089dbc55222107466bb47aedd0e980a72319c727337fdaaa08dbbd56e3df9",
+    "f438ef69e53126b71b78e15df6fe68a8c3d58c6294135818d8ac806677dd4275"
   ],
   "factory/agents/reviewer-ui.md": [
+    "137aedbffc6ae1df0aff453e064558ab4a58878b9e0b7b03cc67cc50bb5ac99a",
     "8ac71bf672dce47890bd56c72d38a89a933f4a4b20b5ad0fd2b9e4cbc7c7ee3f"
   ],
   "factory/agents/reviewer-ux.md": [
+    "998b50e53514ac04c4477f3b28e18ffeb0a504a75d05c05bf0cac6a9c6101688",
     "af7dbc30dae415ca5007b65edbc402559b4d4301d628a5ec420a733b7d7c6f92"
   ],
   "factory/agents/spec-writer.md": [
