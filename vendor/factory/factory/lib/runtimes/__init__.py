@@ -16,12 +16,29 @@ Every adapter has:
 import importlib
 
 NAMES = ("claude", "codex", "opencode", "copilot", "cursor")
+# Every agent CLI credential the factory knows. orchestrate hands these only to agents; job, gate, gh,
+# git and checks.sh never see them.
+CREDENTIAL_VARS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+                   "OPENAI_API_KEY", "CODEX_API_KEY", "CURSOR_API_KEY")
+CLAUDE_VARS = CREDENTIAL_VARS[:4]  # what Claude Code reads, whatever runtimes.claude says
 
 
 def load(name):
     if name not in NAMES:
         raise ValueError(f"unknown runtime {name!r}; known: {', '.join(NAMES)}")
     return importlib.import_module(f"runtimes.{name}")
+
+
+def credential_vars(cfg):
+    """CREDENTIAL_VARS plus every runtimes.<r>.credential_env in config (OpenCode's provider key, say)."""
+    extra = [c.get("credential_env") for c in (cfg.get("runtimes") or {}).values() if isinstance(c, dict)]
+    return tuple(dict.fromkeys([*CREDENTIAL_VARS, *(e for e in extra if e)]))
+
+
+def agent_vars(name, cfg):
+    """The credentials an agent of runtime `name` gets: its credential_env, plus the Anthropic ones for claude."""
+    own = ((cfg.get("runtimes") or {}).get(name) or {}).get("credential_env")
+    return ((own,) if own else ()) + (CLAUDE_VARS if name == "claude" else ())
 
 
 def prepend_system(run):

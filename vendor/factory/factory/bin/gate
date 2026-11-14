@@ -24,12 +24,17 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "factory" / "lib"))
+sys.dont_write_bytecode = True  # __pycache__ in factory/lib would make the checkout dirty
+
+import runtimes  # noqa: E402
+
 FACTORY = REPO / "factory"
 CONFIG = json.loads((FACTORY / "config.json").read_text())
 CHECKS = FACTORY / "checks.sh"
 TAIL = 80
-# Checks run project code, so they never see the runner's Claude credentials.
-SECRET_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
+# Checks run project code, so they never see any agent CLI's credentials.
+SECRET_ENV = runtimes.credential_vars(CONFIG)
 
 
 def die(msg):

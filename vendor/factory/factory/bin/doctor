@@ -20,6 +20,11 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "factory" / "lib"))
+sys.dont_write_bytecode = True  # __pycache__ in factory/lib would make the checkout dirty
+
+import runtimes  # noqa: E402
+
 AGENTS = ("intake", "spec-writer", "builder", "reviewer-code",
           "reviewer-security", "reviewer-ux", "reviewer-ui", "approver", "learner")
 AGENT_KEYS = {"name", "description", "access"}
@@ -30,8 +35,6 @@ LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:plann
           "factory:learning", "factory:digest", "factory:revert", "factory:risk-ok")
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):")
 CHECKS_TAIL = 20
-# Checks run project code, so they never see the runner's Claude credentials.
-SECRET_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
 CI = False
 TIERS = ("fast", "balanced", "strong", "frontier")
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -388,8 +391,14 @@ def check_runner():
     return problems
 
 
+def load_config():
+    return json.loads((REPO / "factory" / "config.json").read_text(encoding="utf-8"))
+
+
 def check_checks():
-    env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
+    # Checks run project code, so they never see any agent CLI's credentials.
+    secrets = runtimes.credential_vars(load_config())
+    env = {k: v for k, v in os.environ.items() if k not in secrets}
     res = subprocess.run(["bash", str(REPO / "factory" / "checks.sh")], cwd=REPO,
                          capture_output=True, text=True, env=env)
     if res.returncode == 0:

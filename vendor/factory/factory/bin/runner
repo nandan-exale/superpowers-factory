@@ -7,14 +7,15 @@ Usage:
   runner install [--dry-run]   install the scheduler: a launchd LaunchAgent on macOS, a systemd user timer on Linux
   runner uninstall             remove it
   runner status                scheduler state and the last lines of factory/jobs/runner.log
-  runner workflow --claude-version X.Y.Z   print .github/workflows/factory-runner.yml for the Actions runner
+  runner workflow --cli-version X.Y.Z      print .github/workflows/factory-runner.yml for the Actions runner
+                                           (--claude-version is the same flag)
 
-The Claude token comes from the macOS Keychain item named by
-runner.keychain_service (store it with
-`security add-generic-password -s <service> -a "$USER" -w`). On Linux the token
-comes from `secret-tool lookup service <service>`, or from
-`~/.config/factory/claude-token` with mode 600. It is passed to claude only
-through its environment, never in arguments, files or logs.
+The agent CLI's credential comes from the macOS Keychain item
+`factory-<runtime>-token` (Claude: runner.keychain_service; store it with
+`security add-generic-password -s <service> -a "$USER" -w`), on Linux from
+`secret-tool lookup service <service>` or ~/.config/factory/<runtime>-token
+(mode 600), and reaches the CLI only through its environment, never in
+arguments, files or logs. Copilot needs none: it uses gh's auth.
 """
 
 import base64
@@ -40,6 +41,12 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 FACTORY = REPO / "factory"
+sys.path.insert(0, str(FACTORY / "lib"))
+sys.dont_write_bytecode = True  # __pycache__ in factory/lib would make the checkout dirty, and the tick skips it
+
+import runtimes  # noqa: E402
+from runtimes import CREDENTIAL_VARS  # noqa: E402
+
 JOBS = FACTORY / "jobs"
 LOG = JOBS / "runner.log"
 RUNS = JOBS / "runs"
@@ -47,7 +54,7 @@ KEEP_RUNS = 50
 ORCHESTRATE = FACTORY / "bin" / "orchestrate"
 CHILD = None  # the running orchestrate process, for the SIGTERM handler
 STOP_SECONDS = 30  # how long orchestrate gets to stop its agents after SIGTERM
-STRIPPED_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN")
+STRIPPED_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN")  # a subset of CREDENTIAL_VARS
 
 
 def die(message):
@@ -55,12 +62,34 @@ def die(message):
     sys.exit(1)
 
 
-def load_config():
-    """(base branch, validated runner config); ValueError names the bad key."""
+def read_config():
     try:
-        cfg = json.loads((FACTORY / "config.json").read_text(encoding="utf-8"))
+        return json.loads((FACTORY / "config.json").read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise ValueError(f"factory/config.json unreadable: {exc}")
+
+
+def runtime(cfg):
+    """(name, adapter module, runtimes.<name> config)."""
+    name = cfg.get("runtime", "claude")
+    conf = (cfg.get("runtimes") or {}).get(name)
+    if not isinstance(conf, dict):
+        raise ValueError(f"factory/config.json runtime {name!r} has no runtimes.{name} object")
+    return name, runtimes.load(name), conf
+
+
+def keychain_service(name, runner):
+    """Claude keeps runner.keychain_service (existing installs); others use factory-<runtime>-token."""
+    return runner["keychain_service"] if name == "claude" else f"factory-{name}-token"
+
+
+def token_file(name):
+    return Path(f"~/.config/factory/{name}-token")
+
+
+def load_config():
+    """(base branch, validated runner config); ValueError names the bad key, or the bad runtime."""
+    cfg = read_config()
     runner = cfg.get("runner") if isinstance(cfg, dict) else None
     if not isinstance(runner, dict):
         raise ValueError("factory/config.json has no runner object (interval_minutes, max_minutes, keychain_service)")
@@ -73,6 +102,7 @@ def load_config():
         raise ValueError("factory/config.json runner.keychain_service must be a non-empty string")
     if not isinstance(cfg.get("base_branch"), str) or not cfg["base_branch"]:
         raise ValueError("factory/config.json base_branch must be a non-empty string")
+    runtime(cfg)
     return cfg["base_branch"], runner
 
 
@@ -88,7 +118,7 @@ def main(argv):
             return cmd_uninstall()
         if argv == ["status"]:
             return cmd_status()
-        if len(argv) == 3 and argv[:2] == ["workflow", "--claude-version"]:
+        if len(argv) == 3 and argv[0] == "workflow" and argv[1] in ("--cli-version", "--claude-version"):
             return cmd_workflow(argv[2])
     except ValueError as exc:
         die(str(exc))
@@ -171,7 +201,7 @@ def has_work():
     return any(line.split("\t", 1)[0] in {"resume", "new"} for line in res.stdout.splitlines())
 
 
-TOKEN_FILE = Path("~/.config/factory/claude-token")
+TOKEN_FILE = token_file("claude")
 SANDBOX_TOOLS = ("bwrap", "socat")
 _token_problem = None
 
@@ -190,30 +220,30 @@ def read_keychain(service):
     return token if res.returncode == 0 and token else None
 
 
-def read_linux_token(service):
+def read_linux_token(service, token_path):
     global _token_problem
     _token_problem = None
     if shutil.which("secret-tool"):
         res = subprocess.run(["secret-tool", "lookup", "service", service], capture_output=True, text=True)
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout.strip()
-    path = TOKEN_FILE.expanduser()
+    path = token_path.expanduser()
     if not path.exists():
         return None
     st = path.stat()
     if (st.st_mode & 0o777) != 0o600 or st.st_uid != os.getuid():
-        _token_problem = f"{TOKEN_FILE} must be mode 600 and yours; run chmod 600 {path}"
+        _token_problem = f"{token_path} must be mode 600 and yours; run chmod 600 {path}"
         return None
     return path.read_text().strip() or None
 
 
-def read_token(service):
-    return read_linux_token(service) if platform_name() == "Linux" else read_keychain(service)
+def read_token(service, token_path):
+    return read_linux_token(service, token_path) if platform_name() == "Linux" else read_keychain(service)
 
 
-def ci_token():
-    """The token from the workflow's environment, removed from it so only claude's explicit env carries it."""
-    return os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None) or None
+def ci_token(var):
+    """The token from the workflow's environment, removed from it so only the CLI's explicit env carries it."""
+    return os.environ.pop(var, None) or None
 
 
 def missing_sandbox_tools():
@@ -237,12 +267,14 @@ def stop(proc):
     kill_group(proc)
 
 
-def run_orchestrate(token, max_seconds, out_path, err_path):
+def run_orchestrate(token, credential_env, max_seconds, out_path, err_path):
     """(exit code or None on timeout, elapsed seconds). Output goes to files, never pipes, so a
     process that outlives orchestrate with the output open can't keep this call waiting."""
     global CHILD
-    env = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}
-    env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+    # Only the runtime's own credential reaches orchestrate; every other agent CLI's is stripped.
+    env = {k: v for k, v in os.environ.items() if k not in CREDENTIAL_VARS or k == credential_env}
+    if token and credential_env:
+        env[credential_env] = token
     env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "1"  # keep the token out of hooks and tests claude starts
     env.update(GIT_ENV)
     env["FACTORY_RUNNER"] = "1"  # plugin SessionStart hooks stay quiet in unattended sessions
@@ -484,7 +516,8 @@ def cmd_tick(ci=False):
         signal.signal(signal.SIGTERM, on_sigterm)
         return tick_body(base, runner, None)
     signal.signal(signal.SIGTERM, on_sigterm)
-    token = ci_token()
+    credential_env = runtime(read_config())[2].get("credential_env")
+    token = ci_token(credential_env) if credential_env else None
     url = origin_url()
     if not url:
         log(f"error: no origin remote; {STATE_BRANCH} can't be restored or saved")
@@ -529,31 +562,37 @@ def tick_body(base, runner, ci_token_value):
     if not work:
         log("idle")
         return 0
-    if ci_token_value is not None:
+    name, rt, conf = runtime(read_config())
+    credential_env = conf.get("credential_env")
+    token = None  # stays None without credential_env (copilot): gh's auth, already here for gh, is its credential
+    if credential_env and ci_token_value is not None:
         token = ci_token_value
         if not token:
-            log("error: CLAUDE_CODE_OAUTH_TOKEN isn't set; add the FACTORY_CLAUDE_TOKEN secret")
+            log(f"error: {credential_env} isn't set; add the FACTORY_{name.upper()}_TOKEN secret")
             return 1
-    else:
-        token = read_token(runner["keychain_service"])
+    elif credential_env:
+        service = keychain_service(name, runner)
+        token = read_token(service, token_file(name))
         if not token:
-            where = (token_problem() or f"no token from secret-tool (service {runner['keychain_service']}) "
-                     f"or {TOKEN_FILE}") if platform_name() == "Linux" else \
-                f"no token in Keychain item {runner['keychain_service']}; run claude setup-token and store it"
+            hint = "run claude setup-token and store it" if name == "claude" else \
+                f"store your {name} credential there"
+            where = (token_problem() or f"no token from secret-tool (service {service}) "
+                     f"or {token_file(name)}") if platform_name() == "Linux" else \
+                f"no token in Keychain item {service}; {hint}"
             log(f"error: {where}")
             return 1
-    if platform_name() == "Linux" and missing_sandbox_tools():
+    if name == "claude" and platform_name() == "Linux" and missing_sandbox_tools():
         log(f"error: {', '.join(missing_sandbox_tools())} missing; Claude Code's Linux sandbox needs bubblewrap and socat")
         return 1
-    if not shutil.which("claude"):
-        log("error: claude not found on PATH")
+    if not shutil.which(rt.BINARY):
+        log(f"error: {rt.BINARY} not found on PATH")
         return 1
     max_seconds = int(os.environ.get("FACTORY_RUNNER_MAX_SECONDS") or runner["max_minutes"] * 60)
     RUNS.mkdir(parents=True, exist_ok=True)
     out_path = RUNS / f"{stamp().replace(':', '')}.out"
     err_path = out_path.with_name(out_path.name.removesuffix(".out") + ".stderr.log")
     try:
-        code, seconds = run_orchestrate(token, max_seconds, out_path, err_path)
+        code, seconds = run_orchestrate(token, credential_env, max_seconds, out_path, err_path)
     except OSError as exc:
         log(f"error: could not start orchestrate: {exc}")
         return 1
@@ -754,10 +793,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Sandbox tools
-        run: sudo apt-get update -q && sudo apt-get install -y -q bubblewrap socat
-      - name: Claude Code
-        run: npm install -g @anthropic-ai/claude-code@{claude_version}
+{sandbox_step}      - name: Agent CLI
+        run: npm install -g {npm_package}@{cli_version}
       - name: Git identity from the token's user
         env:
           GH_TOKEN: ${{{{ secrets.FACTORY_GH_TOKEN }}}}
@@ -769,8 +806,7 @@ jobs:
       - name: Factory tick
         run: python3 factory/bin/runner tick --ci
         env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{{{ secrets.FACTORY_CLAUDE_TOKEN }}}}
-          GH_TOKEN: ${{{{ secrets.FACTORY_GH_TOKEN }}}}
+{credential_line}          GH_TOKEN: ${{{{ secrets.FACTORY_GH_TOKEN }}}}
       - name: Keep job state that couldn't be pushed
         if: failure()
         uses: actions/upload-artifact@v4
@@ -786,12 +822,25 @@ def cron(interval_minutes):
     return f"*/{n} * * * *" if n < 60 else f"0 */{max(1, n // 60)} * * *"
 
 
-def cmd_workflow(claude_version):
-    if not re.fullmatch(r"\d+\.\d+\.\d+", claude_version or ""):
-        die(f"--claude-version must be X.Y.Z (claude --version prints it), not {claude_version!r}")
+SANDBOX_STEP = """\
+      - name: Sandbox tools
+        run: sudo apt-get update -q && sudo apt-get install -y -q bubblewrap socat
+"""
+
+
+def cmd_workflow(version):
     _, runner = load_config()
+    name, rt, conf = runtime(read_config())
+    if rt.NPM_PACKAGE is None:
+        die(f"{name}'s CLI has no pinned npm package; run the factory for {name} with launchd or systemd, not Actions")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version or ""):
+        die(f"--cli-version must be X.Y.Z ({rt.BINARY} --version prints it), not {version!r}")
+    var = conf.get("credential_env")
+    credential_line = f"          {var}: ${{{{ secrets.FACTORY_{name.upper()}_TOKEN }}}}\n" if var else ""
     sys.stdout.write(WORKFLOW.format(cron=cron(runner["interval_minutes"]), timeout=runner["max_minutes"] + 10,
-                                     claude_version=claude_version))
+                                     sandbox_step=SANDBOX_STEP if name == "claude" else "",
+                                     npm_package=rt.NPM_PACKAGE, cli_version=version,
+                                     credential_line=credential_line))
     return 0
 
 
