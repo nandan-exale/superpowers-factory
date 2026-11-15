@@ -5,13 +5,16 @@ bin/job passes the shell runner, the base branch and the allow-list in, so this 
 import fnmatch
 import re
 
+# The first five rules match token formats and apply on every path. "assigned secret" is a heuristic that also
+# fires on test data, so `secret_scan.allow` exempts only it. Rule order decides which rule a line reports.
+HEURISTIC_RULE = "assigned secret"
 SECRET_RULES = (
     ("private key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("aws access key", re.compile(r"AKIA[0-9A-Z]{16}")),
     ("github token", re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,}")),
     ("anthropic key", re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}")),
     ("slack token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}")),
-    ("assigned secret", re.compile(r"(api[_-]?key|secret|token|password)\s*[:=]\s*[\"'][^\"']{16,}[\"']", re.I)),
+    (HEURISTIC_RULE, re.compile(r"(api[_-]?key|secret|token|password)\s*[:=]\s*[\"'][^\"']{16,}[\"']", re.I)),
 )
 HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
@@ -50,14 +53,16 @@ def mask(value):
 
 def secret_hits(worktree, run, base, allow):
     """`path:line rule: masked` for each line any branch commit adds that matches a secret rule.
-    Every commit is scanned, because a secret deleted in a later commit is still pushed in history."""
-    diff = run(["git", "-c", "core.quotePath=false", "log", "-p", "--no-merges", "--no-color", "--no-ext-diff",
-                "--format=", "--unified=0", f"origin/{base}..HEAD"], cwd=worktree).stdout
+    Every commit is scanned, because a secret deleted in a later commit is still pushed in history.
+    A merge commit is scanned against its first parent."""
+    diff = run(["git", "-c", "core.quotePath=false", "log", "-p", "--diff-merges=first-parent", "--no-color",
+                "--no-ext-diff", "--format=", "--unified=0", f"origin/{base}..HEAD"], cwd=worktree).stdout
     hits = {}
     for path, n, text in added_lines(diff):
-        if any(path_matches(path, pattern) for pattern in allow):
-            continue
+        allowed = any(path_matches(path, pattern) for pattern in allow)
         for name, rule in SECRET_RULES:
+            if allowed and name == HEURISTIC_RULE:
+                continue
             m = rule.search(text)
             if m:
                 hits.setdefault((path, name, m.group(0)), f"{path}:{n} {name}: {mask(m.group(0))}")
