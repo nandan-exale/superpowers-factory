@@ -16,10 +16,16 @@ superpowers-factory is a Claude Code plugin that joins two halves of the work:
 You stay in charge of the decisions: what gets built, what's allowed to merge,
 and how much it may spend.
 
+This is automation with **harness engineering**: the effort goes into the
+system around the model (checks, state, permissions, budgets, review and
+evidence), so that unattended work is work you can trust.
+[Why that matters](#why-a-factory-harness-engineering).
+
 ---
 
 ## Contents
 
+- [Why a factory: harness engineering](#why-a-factory-harness-engineering)
 - [How it works](#how-it-works)
 - [Requirements](#requirements)
 - [Install](#install)
@@ -32,6 +38,46 @@ and how much it may spend.
 - [Safety: what stays with you](#safety-what-stays-with-you)
 - [Troubleshooting](#troubleshooting)
 - [Contributing and license](#contributing-and-license)
+
+---
+
+## Why a factory: harness engineering
+
+Getting an agent to write code is the easy part. The hard part is knowing
+whether to trust what it wrote. Plain automation ("here's the issue, open a
+PR") speeds up the typing and leaves all of the checking with you, and it gets
+less reliable the longer it runs on its own.
+
+A harness is everything around the model: the code that decides what the model
+may do, checks what it did, and records what happened. In this factory the
+model proposes and the harness decides.
+
+| Plain automation | What the harness does here |
+|---|---|
+| The agent says "done, tests pass." | `factory/bin/gate` runs your `factory/checks.sh`. An exit code decides pass or fail. |
+| The agent edits the test or the check until it goes green. | `protected_paths`: no job can change the checks or the config it is judged by. |
+| The author reviews its own work. | Separate reviewer agents, each starting from a clean context, then an approver. UI and security reviewers join when the change touches those areas. |
+| A stuck agent loops and spends. | `max_rounds`, per-job and daily budgets, enforced in code. |
+| State lives in a chat that can be lost. | One state machine (`factory/bin/job`) is the only writer of job state. Each job has its own git worktree, and every agent run keeps its prompt, log and cost. |
+| The agent guesses what you meant. | You design the feature first. The committed spec and plan are what the builder carries out. |
+| One model setting for everything. | Model and effort are chosen per role and per risk level, from config. |
+| The same mistake comes back every week. | The [learning loop](#the-learning-loop) turns recurring review findings into a lint rule, a test or a check. |
+| You take the agent's word for it. | Every PR carries an evidence block: check output, acceptance criteria, each reviewer's verdict, cost and time. |
+| A bad merge sits on the base branch. | The factory watches the merged commit's CI, pauses the queue and opens a revert PR. |
+
+What this changes for you:
+
+- **You review decisions and evidence**, not every line an agent typed.
+- **Quality compounds.** A failure that keeps happening becomes a check, so it
+  stops depending on a prompt being followed.
+- **Unattended runs stay bounded.** What a job may touch, spend and merge is
+  set by code and config you own.
+- **Cheaper models go further.** The harness catches what a smaller model
+  misses, so most builds run on the `balanced` tier by default.
+
+The bundled `agents-best-practices` skill holds the harness-engineering
+guidance the factory follows, and you can use it to design or audit your own
+agents.
 
 ---
 

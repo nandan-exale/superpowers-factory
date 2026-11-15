@@ -5,6 +5,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from runtimes import writable_dirs
+
 NAME = "claude"
 BINARY = "claude"
 NPM_PACKAGE = "@anthropic-ai/claude-code"
@@ -26,10 +28,21 @@ def tools(role):
     return REVIEWER_TOOLS if role.startswith("reviewer-") else TOOLS[role]
 
 
-def settings(repo, role):
-    """runner-settings.json for every agent; the builder also gets the gate's Stop hook, which sends
-    it back to work while checks.sh fails (it was a hook in the builder's subagent frontmatter)."""
-    data = json.loads((repo / "factory" / "runner-settings.json").read_text())
+def sandbox_writes(data, dirs):
+    """runner-settings with `dirs` added to the sandbox's write paths. Through the sandbox rather than
+    --add-dir: only sandboxed commands (`job push`, git) may write there, not the Edit and Write
+    tools, which could otherwise plant a hook in the main checkout's .git/hooks."""
+    sandbox = dict(data.get("sandbox") or {})
+    fs = dict(sandbox.get("filesystem") or {})
+    fs["allowWrite"] = [*fs.get("allowWrite", []), *(str(d) for d in dirs)]
+    return {**data, "sandbox": {**sandbox, "filesystem": fs}}
+
+
+def settings(repo, role, dirs=()):
+    """runner-settings.json for every agent, with `dirs` writable by its sandboxed commands; the
+    builder also gets the gate's Stop hook, which sends it back to work while checks.sh fails (it
+    was a hook in the builder's subagent frontmatter)."""
+    data = sandbox_writes(json.loads((repo / "factory" / "runner-settings.json").read_text()), dirs)
     if role != "builder":
         return data
     hook = {"type": "command", "command": f'"{repo}/factory/bin/gate" --hook'}
@@ -40,7 +53,7 @@ def settings(repo, role):
 
 def build(run):
     path = run["settings_dir"] / f"{run['stem']}.settings.json"
-    path.write_text(json.dumps(settings(run["repo"], run["role"]), indent=2) + "\n")
+    path.write_text(json.dumps(settings(run["repo"], run["role"], writable_dirs(run)), indent=2) + "\n")
     # No user settings: a user's `ask` rule (say Bash(git commit:*)) beats our allow, and with no
     # one to answer it the call is denied. runner-settings carries the deny rules agents need.
     argv = [BINARY, "-p", "--output-format", "json", "--model", run["model"], "--effort", run["effort"],
