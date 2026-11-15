@@ -288,7 +288,8 @@ class TickTest(RunnerCase):
     def test_timeout_stops_orchestrate_with_sigterm(self):
         # SIGTERM first, so orchestrate stops the agents it started in their own sessions.
         self.set_issues(self.WORK)
-        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="1", FAKE_ORCHESTRATE_SLEEP="10")
+        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="0.5", FACTORY_RUNNER_STOP_SECONDS="2",
+                          FAKE_ORCHESTRATE_SLEEP="10")
         self.assertEqual(res.returncode, 1)
         self.assertRegex(self.log_lines()[-1], r" timeout after \d+s$")
         self.assertTrue(Path(str(self.record) + ".sigterm").exists())
@@ -583,8 +584,8 @@ class RobustnessTest(RunnerCase):
     def test_timeout_still_kills_with_output_in_files(self):
         self.set_issues(self.WORK)
         start = time.monotonic()
-        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="1", FAKE_ORCHESTRATE_SLEEP="10",
-                          FAKE_ORCHESTRATE_GRANDCHILD="1")
+        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="0.5", FACTORY_RUNNER_STOP_SECONDS="2",
+                          FAKE_ORCHESTRATE_SLEEP="10", FAKE_ORCHESTRATE_GRANDCHILD="1")
         self.assertLess(time.monotonic() - start, 8)
         self.assertEqual(res.returncode, 1)
         self.assertRegex(self.log_lines()[-1], r" timeout after \d+s$")
@@ -643,15 +644,41 @@ class InstallRaceTest(RunnerCase):
         self.assertEqual(cmds, ["bootout", "print", "print", "print", "print", "bootstrap"])
 
     def test_bootstrap_is_retried(self):
-        res = self.runner("install", FAKE_LAUNCHCTL_BOOTSTRAP_FAIL_TIMES="2")
+        res = self.runner("install", FAKE_LAUNCHCTL_BOOTSTRAP_FAIL_TIMES="2",
+                          FACTORY_RUNNER_BOOTSTRAP_BACKOFF="0")
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual([a[0] for a in self.launchctl_calls()].count("bootstrap"), 3)
 
     def test_bootstrap_gives_up_after_three_tries(self):
-        res = self.runner("install", FAKE_LAUNCHCTL_BOOTSTRAP_FAIL_TIMES="9")
+        res = self.runner("install", FAKE_LAUNCHCTL_BOOTSTRAP_FAIL_TIMES="9",
+                          FACTORY_RUNNER_BOOTSTRAP_BACKOFF="0")
         self.assertEqual(res.returncode, 1)
         self.assertIn("launchctl bootstrap failed", res.stderr)
         self.assertEqual([a[0] for a in self.launchctl_calls()].count("bootstrap"), 3)
+
+
+class DefaultsTest(RunnerCase):
+    def test_production_defaults_without_overrides(self):
+        runner = load_script(f"runner_defaults_{id(self)}", self.p.root / "factory/bin/runner")
+        names = ("FACTORY_RUNNER_STOP_SECONDS", "FACTORY_RUNNER_BOOTSTRAP_BACKOFF", "FACTORY_RUNNER_MAX_SECONDS")
+        self.assertEqual(runner.STOP_SECONDS, 30)
+        for env in ({}, {name: "" for name in names}):
+            with mock.patch.dict(os.environ, env):
+                if not env:
+                    for name in names:
+                        os.environ.pop(name, None)
+                self.assertEqual(runner.stop_seconds(), 30)
+                self.assertEqual(runner.bootstrap_backoff(), 0.5)
+                self.assertEqual(runner.max_run_seconds({"max_minutes": 45}), 45 * 60)
+
+    def test_overrides_are_read_as_floats(self):
+        runner = load_script(f"runner_overrides_{id(self)}", self.p.root / "factory/bin/runner")
+        with mock.patch.dict(os.environ, {"FACTORY_RUNNER_STOP_SECONDS": "0.2",
+                                          "FACTORY_RUNNER_BOOTSTRAP_BACKOFF": "0",
+                                          "FACTORY_RUNNER_MAX_SECONDS": "0.3"}):
+            self.assertEqual(runner.stop_seconds(), 0.2)
+            self.assertEqual(runner.bootstrap_backoff(), 0)
+            self.assertEqual(runner.max_run_seconds({"max_minutes": 45}), 0.3)
 
 
 class MissingToolTest(RunnerCase):
