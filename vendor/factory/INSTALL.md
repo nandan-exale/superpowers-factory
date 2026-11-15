@@ -54,6 +54,8 @@ factory/lib/orchestrator/prompts.py
 factory/lib/orchestrator/readonly.py
 factory/lib/orchestrator/pipeline.py
 factory/lib/orchestrator/loop.py
+factory/lib/secretscan.py
+factory/lib/reporting.py
 factory/dashboard.html
 ```
 
