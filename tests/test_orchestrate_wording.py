@@ -8,6 +8,11 @@ class SkillWordingTest(unittest.TestCase):
     def test_run_goes_through_the_script(self):
         self.assertIn("factory/bin/orchestrate run", SKILL)
 
+    def test_busy_exit_is_not_retried(self):
+        self.assertRegex(SKILL, r"exits `75`[^\n]*\n?[^\n]*another factory run\n?\s*is active")
+        self.assertIn("don't retry", SKILL)
+        self.assertIn("don't start agents", SKILL)
+
     def test_no_claude_code_spawning_left(self):
         for word in ("subagent_type", "SendMessage", "Agent tool", "WAIT FOR ALL"):
             self.assertNotIn(word, SKILL, word)

@@ -54,6 +54,8 @@ factory/lib/orchestrator/prompts.py
 factory/lib/orchestrator/readonly.py
 factory/lib/orchestrator/pipeline.py
 factory/lib/orchestrator/loop.py
+factory/lib/secretscan.py
+factory/lib/reporting.py
 factory/dashboard.html
 ```
 
@@ -77,7 +79,12 @@ typecheck, tests and build, whichever the project has. Find them in
 and CI config. The script runs with a job's worktree as its working directory.
 It must be non-interactive, must not rewrite files (no `--fix`, no
 `--update-snapshots`), and must exit non-zero on any failure. Keep
-`set -euo pipefail`.
+`set -euo pipefail`. Optionally, let it skip slow checks when only docs
+changed: the Stop hook (and only the Stop hook, never the gate) sets
+`FACTORY_CHECKS_CONTEXT=stop-hook` and `FACTORY_CHANGED_PATHS`, the changed
+paths one per line. An empty or unset `FACTORY_CHANGED_PATHS` means "run
+everything" (a deletion, an odd path or an earlier failure empties it). A
+`checks.sh` that ignores both variables behaves exactly as before.
 
 **`factory/config.json`.**
 

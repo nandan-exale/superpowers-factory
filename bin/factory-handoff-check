@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""The factory-handoff skill's checks, run before it files an issue. Read-only.
+
+Usage (from the project root):
+  factory-handoff-check <spec> <plan>
+
+Prints one PASS, FAIL or SKIP line per check, then sha:, base:, branch:,
+tasks:, max_tasks_per_part: and risky: lines. Exits 0 only when every check
+passed, 1 otherwise, 2 on a usage error. Its one side effect is
+`git fetch origin <base>`.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+
+PATH_RULE = re.compile(r"docs/superpowers/[A-Za-z0-9._/-]+\.md")
+TASK_HEADING = re.compile(r"### Task \d+")
+RISKY_ALWAYS = r"git tag|git push|--force|git merge"
+DEFAULT_QUEUE, DEFAULT_PLANNED, DEFAULT_MAX_TASKS = "factory", "factory:planned", 8
+NEEDS_PATHS = ("committed", "clean", "on-origin-base", "no-open-handoff")
+
+
+def run(*argv):
+    """(exit code, stdout, stderr); exit code 127 when the program can't start."""
+    try:
+        res = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return 127, "", f"can't run {argv[0]}: {exc}"
+    return res.returncode, res.stdout, res.stderr.strip()
+
+
+def one_line(text):
+    return " ".join(text.split())
+
+
+def load_config():
+    try:
+        with open(os.path.join("factory", "config.json"), encoding="utf-8") as f:
+            config = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return config if isinstance(config, dict) else {}
+
+
+def section(config, key):
+    value = config.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def label_name(config, key, default):
+    value = section(config, "labels").get(key)
+    return value if isinstance(value, str) and value else default
+
+
+def max_tasks(config):
+    value = section(config, "handoff").get("max_tasks_per_part")
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return DEFAULT_MAX_TASKS
+
+
+def base_branch(config):
+    base = config.get("base_branch")
+    # A leading dash would read as a git option.
+    if isinstance(base, str) and base and not base.startswith("-"):
+        return base
+    return None
+
+
+def check_factory_installed():
+    if os.path.isfile("factory/bin/job") and os.access("factory/bin/job", os.X_OK):
+        return None
+    return "factory/bin/job is missing or not executable; run /factory-install in this project"
+
+
+def check_gh_auth():
+    code, _, err = run("gh", "auth", "status")
+    return None if code == 0 else f"gh isn't logged in; run `gh auth login` ({one_line(err)})"
+
+
+def check_labels(config):
+    code, out, err = run("gh", "api", "--paginate", "repos/{owner}/{repo}/labels", "--jq", ".[].name")
+    if code != 0:
+        return f"couldn't list the repo's labels: {one_line(err)}"
+    existing = set(out.split("\n"))
+    missing = [name for name in (label_name(config, "queue", DEFAULT_QUEUE),
+                                 label_name(config, "planned", DEFAULT_PLANNED)) if name not in existing]
+    return f"missing labels {', '.join(missing)}; re-run /factory-install" if missing else None
+
+
+def check_paths(paths):
+    for path in paths:
+        if not PATH_RULE.fullmatch(path) or ".." in path.split("/"):
+            return (f"{path} isn't a .md file under docs/superpowers/ without a `..` segment; "
+                    "move the file under docs/superpowers/")
+    return None
+
+
+def check_committed(paths):
+    for path in paths:
+        code, _, err = run("git", "cat-file", "-e", f"HEAD:{path}")
+        if code != 0:
+            return f"{path} isn't committed at HEAD (it may be gitignored or uncommitted); commit it"
+    return None
+
+
+def check_clean(paths):
+    code, out, err = run("git", "status", "--porcelain", "--", *paths)
+    if code != 0:
+        return f"git status failed: {one_line(err)}"
+    if out.strip():
+        return "the spec or plan has uncommitted changes; commit or discard them"
+    return None
+
+
+def check_on_origin_base(base):
+    if base is None:
+        return "factory/config.json has no usable base_branch"
+    code, _, err = run("git", "fetch", "origin", base)
+    if code != 0:
+        return f"git fetch origin {base} failed: {one_line(err)}"
+    code, _, err = run("git", "merge-base", "--is-ancestor", "HEAD", f"origin/{base}")
+    if code == 0:
+        return None
+    if code == 1:
+        return f"HEAD isn't on origin/{base} yet; push or merge the spec and plan to {base} first"
+    return f"git merge-base failed: {one_line(err)}"
+
+
+def check_no_open_handoff(config, plan):
+    code, out, err = run("gh", "issue", "list", "--label", label_name(config, "planned", DEFAULT_PLANNED),
+                         "--state", "open", "--search", f'"{plan}" in:body', "--json", "number,url")
+    if code != 0:
+        return f"couldn't search open issues: {one_line(err)}"
+    try:
+        issues = json.loads(out)
+        urls = [issue["url"] for issue in issues]
+    except (ValueError, TypeError, KeyError):
+        return "couldn't read gh's issue list"
+    if urls:
+        return f"an open issue already hands off this plan: {', '.join(urls)}"
+    return None
+
+
+def risky_lines(plan_text, base):
+    names = ["main", "master", r"\$BASE"] + ([re.escape(base)] if base else [])
+    pattern = re.compile(rf"{RISKY_ALWAYS}|git checkout\s+[\"']?(?:{'|'.join(names)})")
+    return [f"risky: {n}:{line}" for n, line in enumerate(plan_text.splitlines(), 1) if pattern.search(line)]
+
+
+def facts(plan, base, config):
+    lines = []
+    code, out, _ = run("git", "rev-parse", "HEAD")
+    if code == 0:
+        lines.append(f"sha: {out.strip()}")
+    if base:
+        lines.append(f"base: {base}")
+    code, out, _ = run("git", "branch", "--show-current")
+    if code == 0:
+        lines.append(f"branch: {out.strip()}")
+    code, text, _ = run("git", "show", f"HEAD:{plan}")
+    if code == 0:
+        lines.append(f"tasks: {sum(1 for line in text.splitlines() if TASK_HEADING.match(line))}")
+    lines.append(f"max_tasks_per_part: {max_tasks(config)}")
+    if code == 0:
+        lines.extend(risky_lines(text, base))
+    return lines
+
+
+def main(argv):
+    if len(argv) != 2:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    spec, plan = argv
+    config = load_config()
+    base = base_branch(config)
+    paths_error = check_paths((spec, plan))
+    checks = [
+        ("factory-installed", check_factory_installed),
+        ("gh-auth", check_gh_auth),
+        ("labels", lambda: check_labels(config)),
+        ("paths", lambda: paths_error),
+        ("committed", lambda: check_committed((spec, plan))),
+        ("clean", lambda: check_clean((spec, plan))),
+        ("on-origin-base", lambda: check_on_origin_base(base)),
+        ("no-open-handoff", lambda: check_no_open_handoff(config, plan)),
+    ]
+    passed = True
+    for name, check in checks:
+        if paths_error and name in NEEDS_PATHS:
+            print(f"SKIP {name}: fix paths first")
+            passed = False
+            continue
+        error = check()
+        print(f"PASS {name}" if error is None else f"FAIL {name}: {error}")
+        passed = passed and error is None
+    if paths_error is None:
+        print("\n".join(facts(plan, base, config)))
+    return 0 if passed else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

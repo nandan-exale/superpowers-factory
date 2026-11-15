@@ -569,9 +569,13 @@ file say so, and are yours to make.
   issue and run `/factory run` again, or merge it yourself. The label covers
   the commit you reviewed: if the branch changes again, it stops again.
 - **Secrets.** The builder pushes with `factory/bin/job push`, which refuses
-  to push added lines that look like private keys or tokens. The gate scans
-  again; a hit there stops the job and asks you to rotate the secret. This is a
-  backstop, not a replacement for GitHub secret scanning.
+  to push added lines that look like private keys or tokens. Merge commits are
+  scanned against their first parent. Private keys and AWS, GitHub, Anthropic
+  and Slack tokens are flagged on every path; `secret_scan.allow` (default
+  `**/*.test.*`, `**/fixtures/**`) exempts paths only from the "assigned
+  secret" heuristic. The gate scans again; a hit there stops the job and asks
+  you to rotate the secret. This is a backstop, not a replacement for GitHub
+  secret scanning.
 
 Good to know:
 

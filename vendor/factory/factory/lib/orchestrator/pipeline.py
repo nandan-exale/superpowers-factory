@@ -180,12 +180,37 @@ class Pipeline:
         files = [p for p in folder.glob("feedback-*.md") if p.stat().st_mtime_ns > since]
         return [p.name for p in sorted(files, key=lambda p: int(re.sub(r"\D", "", p.name) or 0))]
 
+    def sync_base(self, job_id):
+        """Merge the base into the branch outside the agent sandbox, which can't write protected files the
+        base changed. The builder's prompt text for the result; None when the job went to needs-human."""
+        out = self.run("update-branch", job_id)
+        for line in out.splitlines():
+            if line.startswith("NOTE:"):
+                self.say(f"{job_id}: {line}")
+        line = next((l for l in out.splitlines() if l.startswith("UPDATE-BRANCH:")), None)
+        if line is None:
+            self.say(out.strip())
+            return None
+        result = line.split(" ", 2)[2] if line.count(" ") >= 2 else ""
+        if result.startswith("merged "):
+            return prompts.merged_base(self.base)
+        if result.startswith("conflicts:"):
+            return prompts.finish_merge(self.base, result.removeprefix("conflicts:").split())
+        if result == "merge in progress":
+            return prompts.finish_merge(self.base, [])
+        return ""
+
     def builder(self, job_id, why="", resuming=False):
         job = self.cli.state(job_id)
         n, port = job["round"], prompts.port(self.cfg, job_id, "builder")
         files = self.unread_feedback(job_id) if resuming and not why else []
         if files:
             why = prompts.feedback(files, n)
+        if n > 1:
+            synced = self.sync_base(job_id)
+            if synced is None:
+                return []
+            why = " ".join(w for w in (synced, why) if w)
         session = (job.get("sessions") or {}).get("builder")
         same_agent = prompts.build(self.head(job), n, port, why)
         # A fresh builder after round 1, or on a resume, must first find out how far the last one got.

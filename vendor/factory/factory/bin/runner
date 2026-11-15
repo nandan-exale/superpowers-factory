@@ -54,6 +54,18 @@ KEEP_RUNS = 50
 ORCHESTRATE = FACTORY / "bin" / "orchestrate"
 CHILD = None  # the running orchestrate process, for the SIGTERM handler
 STOP_SECONDS = 30  # how long orchestrate gets to stop its agents after SIGTERM
+BOOTSTRAP_BACKOFF_SECONDS = 0.5  # sleep between `launchctl bootstrap` attempts
+BUSY_EXIT = 75  # orchestrate's exit code when another run holds its lock
+
+
+def env_seconds(name, default):
+    """Seconds from the environment variable `name`; unset or empty gives `default`."""
+    return float(os.environ.get(name) or default)
+
+
+def max_seconds_for(runner):
+    # FACTORY_RUNNER_MAX_SECONDS is for tests: a timeout can't be shown in whole minutes without a long wait.
+    return env_seconds("FACTORY_RUNNER_MAX_SECONDS", runner["max_minutes"] * 60)
 
 
 def die(message):
@@ -259,7 +271,8 @@ def stop(proc):
     """SIGTERM first: orchestrate starts each agent in its own session, so only it can stop them."""
     proc.terminate()
     try:
-        proc.wait(timeout=STOP_SECONDS)
+        # FACTORY_RUNNER_STOP_SECONDS is for tests: a real 30 s grace would make the kill path slow to test.
+        proc.wait(timeout=env_seconds("FACTORY_RUNNER_STOP_SECONDS", STOP_SECONDS))
     except subprocess.TimeoutExpired:
         pass
     kill_group(proc)
@@ -585,7 +598,7 @@ def tick_body(base, runner, ci_token_value):
     if not shutil.which(rt.BINARY):
         log(f"error: {rt.BINARY} not found on PATH")
         return 1
-    max_seconds = int(os.environ.get("FACTORY_RUNNER_MAX_SECONDS") or runner["max_minutes"] * 60)
+    max_seconds = max_seconds_for(runner)
     RUNS.mkdir(parents=True, exist_ok=True)
     out_path = RUNS / f"{stamp().replace(':', '')}.out"
     err_path = out_path.with_name(out_path.name.removesuffix(".out") + ".stderr.log")
@@ -598,6 +611,9 @@ def tick_body(base, runner, ci_token_value):
     if code is None:
         log(f"timeout after {seconds}s")
         return 1
+    if code == BUSY_EXIT:
+        log("busy")
+        return 0
     log(f"ran exit={code} {seconds}s cost={cost_of(out_path)}")
     return 0 if code == 0 else 1
 
@@ -711,7 +727,8 @@ def install_launchd(runner, dry_run):
             break
         if attempt == 2:
             die(f"launchctl bootstrap failed: {first_line(res.stderr)}")
-        time.sleep(0.5)
+        # FACTORY_RUNNER_BOOTSTRAP_BACKOFF_SECONDS is for tests: the retry paths shouldn't each wait real time.
+        time.sleep(env_seconds("FACTORY_RUNNER_BOOTSTRAP_BACKOFF_SECONDS", BOOTSTRAP_BACKOFF_SECONDS))
     print(f"installed {path}; runs every {runner['interval_minutes']} min")
     return 0
 

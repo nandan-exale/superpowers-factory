@@ -11,13 +11,18 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
   `factory/bin/orchestrate` (with `factory/lib/orchestrator/`) is the
   orchestrator and `.claude/skills/factory` its entry point;
   `factory/lib/runtimes/` holds the agent CLI adapters (`claude`, `codex`,
-  `opencode`, `copilot`, `cursor`); `factory/agents/` the agents.
+  `opencode`, `copilot`, `cursor`); `factory/agents/` the agents;
+  `factory/lib/secretscan.py` holds the secret rules and scanner, and
+  `factory/lib/reporting.py` the report and digest, which `bin/job` calls with
+  its helpers passed in.
 - `tests/fixtures/runtimes/`: each CLI's output, recorded by hand from the real
   CLI (6b plan, Task 1); the adapter tests replay it.
 - `tests/`: stdlib `unittest`. `tests/factory_project.py` builds a throwaway
   project with a bare origin.
 - `scripts/check`: every repo rule. The Stop hook is the installed factory's
   `factory/bin/stop-hook`, which runs `factory/checks.sh` (= `scripts/check`).
+  `scripts/check` skips the unit tests for docs-only Stop-hook runs (the hook
+  sets `FACTORY_CHECKS_CONTEXT` and `FACTORY_CHANGED_PATHS`); the gate never does.
 - `factory/`, `factory/agents/`, `.claude/skills/factory/`: the factory
   **installed** in this repo to build it (see "Software factory" below). Not the
   source: change `vendor/factory/` instead. The installed copy changes only
@@ -30,6 +35,8 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
   hand and never in CI. `scripts/e2e` runs the scenarios in `tests/e2e/` on a
   sandbox repo; `scripts/eval` runs agent prompts against `tests/evals/` and
   compares with `tests/evals/baseline.json`. Their unit tests fake `claude` and `gh`.
+- `bin/factory-handoff-check`: the handoff skill's read-only pre-filing checks
+  (`<spec> <plan>`); tested by `tests/test_handoff_check.py`.
 - `bin/factory-uninstall-settings`: removes only the factory's Stop hook from a
   project's `.claude/settings.json`; `skills/factory-uninstall/` is the
   `/factory-uninstall` skill that uses it.
