@@ -164,8 +164,8 @@ class DoctorLinuxTest(LinuxCase):
         (self.bin / "socat").unlink()
         problems = self.runner_check(FAKE_SECRET_TOOL_OUT="t\n", FAKE_LOGINCTL_OUT="Linger=yes\n",
                                      FAKE_SYSTEMCTL_OUT="active\n")
-        self.assertIn(("FAIL", "socat not found; Claude Code's Linux sandbox needs bubblewrap and socat "
-                               "(apt install bubblewrap socat)"), problems)
+        self.assertIn(("FAIL", "socat not found; Claude Code's Linux sandbox needs the bubblewrap and socat "
+                               "packages from your distribution"), problems)
 
     def test_linger_token_and_timer_warn(self):
         problems = self.runner_check(FAKE_SECRET_TOOL_EXIT="1", FAKE_LOGINCTL_OUT="Linger=no\n",
