@@ -3,6 +3,19 @@
 All notable changes to superpowers-factory. Newest first. `scripts/release`
 adds each new section.
 
+## [0.7.1] - 2026-11-15
+
+### Fixed
+
+- `INSTALL.md` reads the repo's merge settings with
+  `gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed`
+  instead of a quoted `jq` filter.
+- `doctor` names the bubblewrap and socat packages instead of printing an
+  `apt install` command.
+- The README names the GitHub CLI without a link beside the token steps.
+
+These clear three of the directory validator's policy holds.
+
 ## [0.7.0] - 2026-11-15
 
 ### Fixed
