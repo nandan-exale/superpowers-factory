@@ -50,10 +50,55 @@ class SecretScanTest(ScanCase):
             self.assertNotIn(value, hit)
             self.assertIn("chars)", hit)
 
-    def test_allow_globs_and_removed_lines_are_skipped(self):
-        self.commit({"tests/fixtures/keys.txt": SAMPLES["aws access key"] + "\n",
-                     "app.test.js": SAMPLES["github token"] + "\n"})
+    def test_allow_globs_skip_only_the_assigned_secret_rule_and_removed_lines_are_ignored(self):
+        self.commit({"tests/fixtures/keys.txt": SAMPLES["assigned secret"] + "\n",
+                     "app.test.js": SAMPLES["assigned secret"] + "\n",
+                     "old.test.js": SAMPLES["assigned secret"] + "\nx = 1\n"})
+        self.commit({"old.test.js": "x = 1\n"})
         self.assertEqual(self.job.secret_hits(self.wt), [])
+        self.commit({"conf.py": SAMPLES["assigned secret"] + "\n"})
+        self.assertEqual([h.split(": ")[0] for h in self.job.secret_hits(self.wt)], ["conf.py:1 assigned secret"])
+
+    def test_token_formats_are_flagged_on_allowed_paths(self):
+        self.commit({"tests/fixtures/keys.txt": SAMPLES["github token"] + "\n" + SAMPLES["aws access key"] + "\n",
+                     "app.test.js": SAMPLES["github token"] + "\n"})
+        hits = self.job.secret_hits(self.wt)
+        self.assertEqual([h.split(": ")[0] for h in hits], ["app.test.js:1 github token",
+                                                              "tests/fixtures/keys.txt:1 github token",
+                                                              "tests/fixtures/keys.txt:2 aws access key"])
+        self.assertIn("github token: ghp_… (", hits[0])
+
+    def merge_with_conflict_resolved_as(self, text):
+        """Job branch and a side branch both change conf.py; the merge commit resolves the conflict as `text`."""
+        self.commit({"conf.py": "base\n"})
+        git(self.wt, "branch", "side")
+        self.commit({"conf.py": "job\n"})
+        git(self.wt, "checkout", "-q", "side")
+        self.commit({"conf.py": "side\n"})
+        git(self.wt, "checkout", "-q", "factory/001-x")
+        merged = subprocess.run(["git", "merge", "-q", "side"], cwd=self.wt, capture_output=True)
+        self.assertEqual(merged.returncode, 1)
+        (self.wt / "conf.py").write_text(text)
+        git(self.wt, "add", "conf.py")
+        git(self.wt, "commit", "-q", "-m", "merge side")
+
+    def test_a_secret_added_only_by_a_merge_commit_is_found(self):
+        self.merge_with_conflict_resolved_as(SAMPLES["aws access key"] + "\n")
+        self.assertEqual([h.split(": ")[0] for h in self.job.secret_hits(self.wt)], ["conf.py:1 aws access key"])
+
+    def test_a_merge_commit_without_a_new_secret_is_clean(self):
+        self.merge_with_conflict_resolved_as("both\n")
+        self.assertEqual(self.job.secret_hits(self.wt), [])
+
+    def test_a_secret_on_a_merged_side_branch_is_reported_once(self):
+        self.commit({"conf.py": "base\n"})
+        git(self.wt, "branch", "side")
+        self.commit({"other.py": "y = 2\n"})
+        git(self.wt, "checkout", "-q", "side")
+        self.commit({"keys.py": SAMPLES["aws access key"] + "\n"})
+        git(self.wt, "checkout", "-q", "factory/001-x")
+        git(self.wt, "merge", "-q", "--no-ff", "-m", "merge side", "side")
+        self.assertEqual([h.split(": ")[0] for h in self.job.secret_hits(self.wt)], ["keys.py:1 aws access key"])
 
     def test_a_secret_added_then_deleted_is_still_in_history(self):
         self.commit({"conf.py": "x = 1\n" + SAMPLES["aws access key"] + "\n"})
@@ -93,6 +138,15 @@ class SecretScanTest(ScanCase):
             self.job.cmd_push(job)
         self.assertIn("PUSHED: factory/001-x", out.getvalue())
         self.assertNotEqual(git(self.project.repo, "ls-remote", "origin", "factory/001-x"), "")
+
+    def test_push_refuses_a_secret_that_only_a_merge_commit_adds(self):
+        job = {"id": "001-x", "stage": "build", "worktree": str(self.wt), "branch": "factory/001-x"}
+        self.merge_with_conflict_resolved_as(SAMPLES["aws access key"] + "\n")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+            self.job.cmd_push(job)
+        self.assertIn("SECRET: conf.py:1 aws access key", out.getvalue())
+        self.assertEqual(git(self.project.repo, "ls-remote", "origin", "factory/001-x"), "")
 
     def test_gate_found_secrets_reads_checks_md(self):
         d = self.job.job_dir("001-x")
