@@ -36,11 +36,26 @@ def copy_repo(dest):
     return dest
 
 
+TEMPLATE_DIR = None
+TEMPLATE = None
+
+
+def setUpModule():
+    global TEMPLATE_DIR, TEMPLATE
+    TEMPLATE_DIR = tempfile.TemporaryDirectory()
+    TEMPLATE = copy_repo(Path(TEMPLATE_DIR.name))
+
+
+def tearDownModule():
+    TEMPLATE_DIR.cleanup()
+
+
 class RepoCopyTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.root = copy_repo(Path(tmp.name))
+        self.root = Path(tmp.name)
+        git(self.root, "clone", "--local", "--no-hardlinks", "-q", str(TEMPLATE), ".")
 
     def edit(self, rel, change):
         path = self.root / rel
