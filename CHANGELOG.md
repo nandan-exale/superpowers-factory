@@ -3,6 +3,13 @@
 All notable changes to superpowers-factory. Newest first. `scripts/release`
 adds each new section.
 
+## [0.7.2] - 2026-11-15
+
+### Changed
+
+- Exale (https://exale.ai/) is the plugin's author in `plugin.json` and the
+  marketplace owner in `marketplace.json`.
+
 ## [0.7.1] - 2026-11-15
 
 ### Fixed
