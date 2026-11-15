@@ -5,10 +5,14 @@ SKILL = (Path(__file__).resolve().parents[1] / "skills/factory-handoff/SKILL.md"
 
 
 class HandoffSkillTest(unittest.TestCase):
-    def test_checks_for_steps_outside_the_job_branch(self):
-        for needle in ("git tag", "--force", "git checkout", "git merge"):
+    def test_runs_the_check_script(self):
+        for needle in ("factory-handoff-check", "on-origin-base", "risky:", "the factory will skip them"):
             self.assertIn(needle, SKILL)
-        self.assertIn("the factory will skip them", SKILL)
+
+    def test_no_longer_lists_the_individual_checks(self):
+        for needle in ("gh label list", "--limit 200", "git cat-file", "git merge-base",
+                       "git status --porcelain", "gh auth status"):
+            self.assertNotIn(needle, SKILL)
 
     def test_warns_when_the_approver_will_escalate(self):
         self.assertIn("factory/agents/approver.md", SKILL)
