@@ -3,8 +3,8 @@
   "description": "Hand Superpowers-approved specs and plans to an unattended software factory that builds each plan as one PR",
   "version": "0.7.1",
   "author": {
-    "name": "Nandan Thakur",
-    "url": "https://github.com/nandan-exale"
+    "name": "Exale",
+    "url": "https://exale.ai/"
   },
   "homepage": "https://github.com/nandan-exale/superpowers-factory#readme",
   "repository": "https://github.com/nandan-exale/superpowers-factory",
