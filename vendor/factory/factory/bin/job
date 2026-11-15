@@ -166,18 +166,44 @@ def job_dir(job_id):
     return JOBS / job_id
 
 
+# A process holds at most one job's lock, plus the slot lock, which is a leaf:
+# no command asks for a job lock while holding it. So the only lock order is
+# job lock -> slot lock, and two `job` processes can't wait on each other.
 _locks = {}
+_slot_lock = None
 
 
 def load(job_id):
-    """Read a job, holding its lock until this process exits."""
+    """Read a job without locking it."""
     path = job_dir(job_id) / "job.json"
     if not path.exists():
         die(f"no job {job_id}")
+    return json.loads(path.read_text())
+
+
+def lock_job(job_id):
+    """Take a job's lock, held until this process exits or `unlock_job`, and read the job fresh under it."""
     if job_id not in _locks:
+        if _locks:
+            die(f"bug: asked for job {job_id}'s lock while holding {', '.join(_locks)}")
+        if not (job_dir(job_id) / "job.json").exists():
+            die(f"no job {job_id}")
         _locks[job_id] = open(job_dir(job_id) / ".lock", "w")
         fcntl.flock(_locks[job_id], fcntl.LOCK_EX)
-    return json.loads(path.read_text())
+    return load(job_id)
+
+
+def unlock_job(job_id):
+    _locks.pop(job_id).close()
+
+
+def lock_slots():
+    """Take the lock that makes counting running jobs and moving into a slot one step, held until exit."""
+    global _slot_lock
+    if _slot_lock is None:
+        JOBS.mkdir(parents=True, exist_ok=True)
+        _slot_lock = open(JOBS / ".slots.lock", "w")
+        fcntl.flock(_slot_lock, fcntl.LOCK_EX)
 
 
 def save(job):
@@ -200,18 +226,22 @@ def running(jobs):
 
 
 def require_slot(job_id):
+    lock_slots()
     busy = [j["id"] for j in running(all_jobs()) if j["id"] != job_id]
     require(len(busy) < CONCURRENCY,
             f"concurrency {CONCURRENCY} reached; running: {', '.join(busy)}")
 
 
-def resolve(arg):
+def resolve(arg, lock=False):
+    """The job for an id or an issue number. `lock` is for a command that saves it."""
     if arg.isdigit():
         matches = [j for j in all_jobs() if j["issue"] == int(arg)]
         if not matches:
             die(f"no job for issue #{arg}")
-        return matches[0]
-    return load(arg)
+        job = matches[0]
+    else:
+        job = load(arg)
+    return lock_job(job["id"]) if lock else job
 
 
 def first_line(path):
@@ -577,12 +607,17 @@ def cmd_watch():
         state, failed = watch_verdict(runs, cfg, w["since"])
         if state == "watching":
             continue
+        job = lock_job(job["id"])
+        if job.get("watch") != w:  # changed since the listing; the verdict was for the old watch
+            unlock_job(job["id"])
+            continue
         if state == "red":
             revert_for(job, failed)
-            continue
-        job["watch"] = {**w, "state": state}
-        save(job)
-        print(f"WATCH: {job['id']} {state}" + (f"; no CI runs on {BASE} within {cfg['max_minutes']} min" if state == "no-ci" else ""))
+        else:
+            job["watch"] = {**w, "state": state}
+            save(job)
+            print(f"WATCH: {job['id']} {state}" + (f"; no CI runs on {BASE} within {cfg['max_minutes']} min" if state == "no-ci" else ""))
+        unlock_job(job["id"])
 
 
 def revert_label():
@@ -2062,6 +2097,7 @@ def slugify(title):
 
 
 def cmd_create(number):
+    lock_slots()  # before reading the jobs, so job numbers are allocated one at a time too
     existing = [j for j in all_jobs() if j["issue"] == int(number)]
     if existing:
         die(f"issue #{number} already has job {existing[0]['id']} ({existing[0]['stage']})")
@@ -2074,7 +2110,6 @@ def cmd_create(number):
         die(f"issue #{number} is {issue['state'].lower()}")
     if LABELS["queue"] not in {l["name"] for l in issue["labels"]}:
         die(f"issue #{number} isn't labeled {LABELS['queue']}")
-    JOBS.mkdir(parents=True, exist_ok=True)
     numbers = [int(p.name.split("-")[0]) for p in JOBS.iterdir() if p.name[:3].isdigit()]
     job_id = f"{max(numbers, default=0) + 1:03d}-{slugify(issue['title'])}"
     job_dir(job_id).mkdir()
@@ -2126,9 +2161,13 @@ def cmd_queue():
     daily = daily_problem()
     jobs = {j["issue"]: j for j in all_jobs()}
     # A job is done once its PR is merged on GitHub, which also closes the issue.
-    for j in jobs.values():
+    for j in list(jobs.values()):
         if j["stage"] not in TERMINAL and j["pr"] and pr_state(j) == "MERGED":
-            save(advance(sync(j), "merged"))
+            j = lock_job(j["id"])  # the listing may be stale by now
+            if j["stage"] not in TERMINAL:
+                save(advance(sync(j), "merged"))
+            jobs[j["issue"]] = j
+            unlock_job(j["id"])
     issues = gh_json("issue", "list", "--label", LABELS["queue"], "--state", "open",
                      "--limit", "200", "--json", "number,title,body,labels")
     open_numbers = {i["number"] for i in issues}
@@ -2468,50 +2507,50 @@ def main(argv):
         elif cmd == "create" and len(args) == 1 and args[0].isdigit():
             cmd_create(args[0])
         elif cmd == "advance" and len(args) == 2:
-            job = advance(sync(resolve(args[0])), args[1])
+            job = advance(sync(resolve(args[0], lock=True)), args[1])
             save(sync(job))
             if job["stage"] != args[1] and job.get("budget_stopped"):
                 print(f"BUDGET: {job['id']} → needs-human ({job['budget_stopped']})")
             else:
                 print(f"{job['id']}: {job['stage']} (round {job['round']})")
         elif cmd == "merge" and len(args) == 1:
-            cmd_merge(resolve(args[0]))
+            cmd_merge(resolve(args[0], lock=True))
         elif cmd == "escalate" and len(args) == 1:
-            cmd_escalate(sync(resolve(args[0])), sys.stdin.read())
+            cmd_escalate(sync(resolve(args[0], lock=True)), sys.stdin.read())
         elif cmd == "record-run" and len(args) == 2 and args[1] == "learner":
             if not TAG_NAME.fullmatch(args[0]):
                 die(f"not a learning tag: {args[0]!r}")
             print(record_run(tag_dir(args[0]), "learner", sys.stdin.read()).relative_to(REPO))
         elif cmd == "record-run" and len(args) == 2:
-            job = resolve(args[0])
+            job = resolve(args[0], lock=True)
             path = record_run(job_dir(job["id"]), args[1], sys.stdin.read())
             save(sync(job))
             print(path.relative_to(REPO))
         elif cmd == "set-session" and len(args) == 3:
-            job = resolve(args[0])
+            job = resolve(args[0], lock=True)
             save({**job, "sessions": {**(job.get("sessions") or {}), args[1]: args[2]}})
             print(f"{job['id']}: {args[1]} session {args[2]}")
         elif cmd == "feedback" and len(args) == 1:
-            cmd_feedback(resolve(args[0]), sys.stdin.read())
+            cmd_feedback(resolve(args[0], lock=True), sys.stdin.read())
         elif cmd == "pr-feedback" and len(args) == 1:
-            cmd_pr_feedback(sync(resolve(args[0])))
+            cmd_pr_feedback(sync(resolve(args[0], lock=True)))
         elif cmd == "reject" and len(args) == 1:
-            cmd_reject(resolve(args[0]), sys.stdin.read())
+            cmd_reject(resolve(args[0], lock=True), sys.stdin.read())
         elif cmd == "route" and len(args) == 1:
-            cmd_route(sync(resolve(args[0])))
+            cmd_route(sync(resolve(args[0], lock=True)))
         elif cmd == "agent" and len(args) == 2 and args[1] == "learner":
             cmd_agent_learner(args[0])
         elif cmd == "agent" and len(args) == 2:
             cmd_agent(sync(resolve(args[0])), args[1])
         elif cmd == "planned" and len(args) == 1:
-            cmd_planned(sync(resolve(args[0])))
+            cmd_planned(sync(resolve(args[0], lock=True)))
         elif cmd == "sync" and len(args) == 1:
-            job = sync(resolve(args[0]))
+            job = sync(resolve(args[0], lock=True))
             save(job)
             reviews = " ".join(f"{k}:{v}" for k, v in job["reviews"].items())
             print(f"{job['id']}: {job['stage']} round {job['round']} gate {job['gate'] or '-'} {reviews}".rstrip())
         elif cmd == "evidence" and len(args) == 1:
-            job = sync(resolve(args[0]))
+            job = sync(resolve(args[0], lock=True))
             print(publish_evidence(job))
             save(job)
         elif cmd == "learn-file" and len(args) == 1:
@@ -2541,7 +2580,7 @@ def main(argv):
         elif cmd == "watch" and not args:
             cmd_watch()
         elif cmd == "ensure-worktree" and len(args) == 1:
-            cmd_ensure_worktree(resolve(args[0]))
+            cmd_ensure_worktree(resolve(args[0], lock=True))
         else:
             die(f"bad arguments: {' '.join(argv)}\n\n{__doc__.strip()}")
     except Refused as e:
