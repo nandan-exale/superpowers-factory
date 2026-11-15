@@ -702,9 +702,12 @@ class DefaultsTest(RunnerCase):
             self.assertEqual(runner.env_seconds("FACTORY_RUNNER_STOP_SECONDS", runner.STOP_SECONDS), 30)
             self.assertEqual(runner.env_seconds("FACTORY_RUNNER_BOOTSTRAP_BACKOFF_SECONDS",
                                                 runner.BOOTSTRAP_BACKOFF_SECONDS), 0.5)
-            self.assertEqual(runner.env_seconds("FACTORY_RUNNER_MAX_SECONDS", max_minutes * 60), max_minutes * 60)
+            cfg = {"max_minutes": max_minutes}
+            self.assertEqual(runner.max_seconds_for(cfg), max_minutes * 60)
             os.environ["FACTORY_RUNNER_MAX_SECONDS"] = ""
-            self.assertEqual(runner.env_seconds("FACTORY_RUNNER_MAX_SECONDS", max_minutes * 60), max_minutes * 60)
+            self.assertEqual(runner.max_seconds_for(cfg), max_minutes * 60)
+            os.environ["FACTORY_RUNNER_MAX_SECONDS"] = "0.5"
+            self.assertEqual(runner.max_seconds_for(cfg), 0.5)
 
 
 class MissingToolTest(RunnerCase):
