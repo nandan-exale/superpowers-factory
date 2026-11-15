@@ -37,11 +37,14 @@ Usage:
   job push <job>                 the builder's push: scan, then push the job branch (nothing is pushed on a hit)
   job watch                      check base-branch CI for merged jobs; red → revert PR and pause
   job ensure-worktree <job>      recreate a missing worktree (fresh CI machines) from the job branch or the base
+  job update-branch <job>        merge origin/<base> into the job worktree outside the agent sandbox; a conflict
+                                 is left for the builder, one in a protected file escalates
 
 <job> is a job id (004-dark-mode) or an issue number (12).
 """
 
 import fcntl
+import fnmatch
 import json
 import os
 import re
@@ -1785,6 +1788,39 @@ def cmd_ensure_worktree(job):
         stop_for_human(job, f"The job's worktree couldn't be recreated on this machine:\n\n```\n{e}\n```")
 
 
+def update_branch(job):
+    """Merge origin/<base> into the job worktree. Runs here, outside the agent sandbox, because the
+    sandbox can't write protected factory files that the base may have changed."""
+    git(job, "fetch", "origin", BASE)
+    if (Path(git(job, "rev-parse", "--absolute-git-dir").stdout.strip()) / "MERGE_HEAD").exists():
+        return "merge in progress"
+    if git(job, "status", "--porcelain").stdout.strip():
+        print("NOTE: the worktree has uncommitted changes; not merging over them")
+        return "skipped"
+    if git(job, "merge-base", "--is-ancestor", f"origin/{BASE}", "HEAD", check=False).returncode == 0:
+        return "up to date"
+    merged = git(job, "merge", "--no-edit", f"origin/{BASE}", check=False)
+    if merged.returncode == 0:
+        return f"merged origin/{BASE} ({git(job, 'rev-parse', '--short', 'HEAD').stdout.strip()})"
+    conflicts = git(job, "diff", "--name-only", "--diff-filter=U").stdout.split()
+    patterns = CONFIG["protected_paths"] + list(job.get("plan_paths") or [])
+    protected = [p for p in conflicts if any(fnmatch.fnmatch(p, pat) for pat in patterns)]
+    if conflicts and not protected:
+        return f"conflicts: {' '.join(conflicts)}"
+    git(job, "merge", "--abort", check=False)
+    if protected:
+        raise Refused(f"Merging origin/{BASE} conflicts in protected files, which no agent may resolve: "
+                      f"{', '.join(protected)}")
+    raise Refused(f"`git merge origin/{BASE}` failed:\n\n```\n{(merged.stdout + merged.stderr).strip()}\n```")
+
+
+def cmd_update_branch(job):
+    try:
+        print(f"UPDATE-BRANCH: {job['id']} {update_branch(job)}")
+    except Refused as e:
+        stop_for_human(job, f"The job branch couldn't be synced with {BASE}:\n\n{e}")
+
+
 # ---- Report and digest -----------------------------------------------------
 
 WAITING_REASON = {"needs-human": ("decision.md", "Why"), "needs-info": ("intake.md", "Questions")}
@@ -2312,6 +2348,8 @@ def main(argv):
             cmd_watch()
         elif cmd == "ensure-worktree" and len(args) == 1:
             cmd_ensure_worktree(resolve(args[0], lock=True))
+        elif cmd == "update-branch" and len(args) == 1:
+            cmd_update_branch(resolve(args[0], lock=True))
         else:
             die(f"bad arguments: {' '.join(argv)}\n\n{__doc__.strip()}")
     except Refused as e:

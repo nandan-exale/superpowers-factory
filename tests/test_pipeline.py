@@ -74,6 +74,7 @@ class PipelineCase(unittest.TestCase):
                                   "worktree": str(self.repo / ".worktrees/004-x"), "branch": "factory/004-x",
                                   "pr": None, "agents": None, "reviews": {}}
         self.cli.answer("job", "ensure-worktree", "004-x", out="WORKTREE: 004-x present\n")
+        self.cli.answer("job", "update-branch", "004-x", out="UPDATE-BRANCH: 004-x up to date\n")
 
     def set(self, **fields):
         self.cli.jobs["004-x"] = {**self.cli.jobs["004-x"], **fields}
@@ -307,6 +308,50 @@ class AfterTest(PipelineCase):
         with self.assertRaises(pipeline.Stop):
             self.p.after("004-x", [self.done(self.spawn("spec-writer"))])
         self.assertTrue(self.p.daily)
+
+
+class SyncBaseTest(PipelineCase):
+    """Builders after round 1 start from a branch the factory synced with the base, outside the sandbox."""
+
+    def resume_build(self, out, **fields):
+        self.set(stage="build", round=2, **fields)
+        self.cli.answer("job", "update-branch", "004-x", out=out)
+        return self.p.begin(("resume", "12", "004-x", "build", "round 2"))[1]
+
+    def test_sync_runs_before_the_builder_is_set_up(self):
+        self.resume_build("UPDATE-BRANCH: 004-x up to date\n")
+        jobs = self.cli.called("job")
+        self.assertLess(jobs.index(("job", "update-branch", "004-x")),
+                        jobs.index(("job", "agent", "004-x", "builder")))
+
+    def test_up_to_date_adds_nothing_to_the_prompt(self):
+        s = self.only(self.resume_build("UPDATE-BRANCH: 004-x up to date\n"))
+        self.assertNotIn("origin/main into the branch", s.prompt)
+
+    def test_clean_merge_is_pushed_with_the_rounds_work(self):
+        s = self.only(self.resume_build("UPDATE-BRANCH: 004-x merged origin/main (abc1234)\n",
+                                        sessions={"builder": "sess-1"}))
+        self.assertIn(pipeline.prompts.merged_base("main"), s.prompt)
+        self.assertIn(pipeline.prompts.merged_base("main"), s.fresh_prompt)
+
+    def test_conflicts_are_handed_to_the_builder(self):
+        s = self.only(self.resume_build("UPDATE-BRANCH: 004-x conflicts: app.txt lib/x.py\n"))
+        self.assertIn(pipeline.prompts.finish_merge("main", ["app.txt", "lib/x.py"]), s.prompt)
+        self.assertIn("git commit --no-edit", s.prompt)
+
+    def test_a_merge_in_progress_is_handed_to_the_builder(self):
+        s = self.only(self.resume_build("UPDATE-BRANCH: 004-x merge in progress\n"))
+        self.assertIn(pipeline.prompts.finish_merge("main", []), s.prompt)
+
+    def test_needs_human_spawns_no_builder(self):
+        out = "004-x: needs-human: The job branch couldn't be synced with main:\n"
+        self.assertEqual(self.resume_build(out), [])
+        self.assertIn(out.strip(), self.lines)
+
+    def test_round_one_is_not_synced(self):
+        self.set(stage="build", round=1)
+        self.p.begin(("resume", "12", "004-x", "build", "round 1"))
+        self.assertEqual(self.cli.called("job", "update-branch"), [])
 
 
 class LearnTest(PipelineCase):
