@@ -1,3 +1,4 @@
+import atexit
 import contextlib
 import io
 import json
@@ -86,33 +87,47 @@ sys.exit(0)
 """
 
 
+_FIXTURE = []
+
+
+def _fixture():
+    """A project with the fakes committed and an origin, built once per process and copied by each test."""
+    if not _FIXTURE:
+        tmp = tempfile.TemporaryDirectory(prefix="runner-fixture-")
+        atexit.register(tmp.cleanup)
+        root = Path(tmp.name).resolve()
+        p = InstalledProject(root)
+        for name, text in (("claude", FAKE_CLAUDE), ("gh", FAKE_GH_QUEUE), ("launchctl", FAKE_LAUNCHCTL)):
+            path = p.fakebin / name
+            path.write_text(text.format(python=sys.executable))
+            path.chmod(0o755)
+        p.write("factory/bin/orchestrate", FAKE_ORCHESTRATE.format(python=sys.executable), executable=True)
+        p.commit_all("fake orchestrate")
+        origin = root / "origin.git"
+        git(root, "init", "-q", "--bare", "-b", "main", str(origin))
+        git(origin, "config", "receive.autogc", "false")
+        git(p.root, "branch", "-M", "main")
+        git(p.root, "remote", "add", "origin", str(origin))
+        git(p.root, "push", "-q", "-u", "origin", "main")
+        _FIXTURE.append(root)
+    return _FIXTURE[0]
+
+
 class RunnerCase(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.tmp = Path(tmp.name)
-        self.p = InstalledProject(self.tmp)
+        self.tmp = Path(tmp.name).resolve()
+        shutil.copytree(_fixture(), self.tmp, symlinks=True, dirs_exist_ok=True)
+        self.p = InstalledProject.__new__(InstalledProject)
+        self.p._paths(self.tmp)
+        git(self.p.root, "remote", "set-url", "origin", str(self.tmp / "origin.git"))
         self.record = self.tmp / "record.jsonl"
         self.issues = self.tmp / "issues.json"
         self.home = self.tmp / "home"
         self.home.mkdir()
         self.set_issues([])
         (self.tmp / "lc").mkdir()
-        for name, text in (("claude", FAKE_CLAUDE), ("gh", FAKE_GH_QUEUE), ("launchctl", FAKE_LAUNCHCTL)):
-            path = self.p.fakebin / name
-            path.write_text(text.format(python=sys.executable))
-            path.chmod(0o755)
-        self.p.write("factory/bin/orchestrate", FAKE_ORCHESTRATE.format(python=sys.executable), executable=True)
-        self.p.commit_all("fake orchestrate")
-        self.add_origin()
-
-    def add_origin(self):
-        origin = self.tmp / "origin.git"
-        git(self.tmp, "init", "-q", "--bare", "-b", "main", str(origin))
-        git(origin, "config", "receive.autogc", "false")
-        git(self.p.root, "branch", "-M", "main")
-        git(self.p.root, "remote", "add", "origin", str(origin))
-        git(self.p.root, "push", "-q", "-u", "origin", "main")
 
     def set_issues(self, issues):
         self.issues.write_text(json.dumps(issues))
@@ -288,8 +303,7 @@ class TickTest(RunnerCase):
     def test_timeout_stops_orchestrate_with_sigterm(self):
         # SIGTERM first, so orchestrate stops the agents it started in their own sessions.
         self.set_issues(self.WORK)
-        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="0.5", FACTORY_RUNNER_STOP_SECONDS="2",
-                          FAKE_ORCHESTRATE_SLEEP="10")
+        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="0.5", FAKE_ORCHESTRATE_SLEEP="10")
         self.assertEqual(res.returncode, 1)
         self.assertRegex(self.log_lines()[-1], r" timeout after \d+s$")
         self.assertTrue(Path(str(self.record) + ".sigterm").exists())
@@ -658,21 +672,31 @@ class InstallRaceTest(RunnerCase):
 
 
 class DefaultsTest(RunnerCase):
-    def test_production_defaults_without_overrides(self):
-        runner = load_script(f"runner_defaults_{id(self)}", self.p.root / "factory/bin/runner")
-        names = ("FACTORY_RUNNER_STOP_SECONDS", "FACTORY_RUNNER_BOOTSTRAP_BACKOFF", "FACTORY_RUNNER_MAX_SECONDS")
+    NAMES = ("FACTORY_RUNNER_STOP_SECONDS", "FACTORY_RUNNER_BOOTSTRAP_BACKOFF", "FACTORY_RUNNER_MAX_SECONDS")
+
+    def load_runner(self):
+        return load_script(f"runner_defaults_{id(self)}", self.p.root / "factory/bin/runner")
+
+    def assert_production_defaults(self):
+        runner = self.load_runner()
+        _, config = runner.load_config()
         self.assertEqual(runner.STOP_SECONDS, 30)
-        for env in ({}, {name: "" for name in names}):
-            with mock.patch.dict(os.environ, env):
-                if not env:
-                    for name in names:
-                        os.environ.pop(name, None)
-                self.assertEqual(runner.stop_seconds(), 30)
-                self.assertEqual(runner.bootstrap_backoff(), 0.5)
-                self.assertEqual(runner.max_run_seconds({"max_minutes": 45}), 45 * 60)
+        self.assertEqual(runner.stop_seconds(), 30)
+        self.assertEqual(runner.bootstrap_backoff(), 0.5)
+        self.assertEqual(runner.max_run_seconds(config), config["max_minutes"] * 60)
+
+    def test_defaults_when_overrides_are_unset(self):
+        with mock.patch.dict(os.environ):
+            for name in self.NAMES:
+                os.environ.pop(name, None)
+            self.assert_production_defaults()
+
+    def test_defaults_when_overrides_are_empty(self):
+        with mock.patch.dict(os.environ, {name: "" for name in self.NAMES}):
+            self.assert_production_defaults()
 
     def test_overrides_are_read_as_floats(self):
-        runner = load_script(f"runner_overrides_{id(self)}", self.p.root / "factory/bin/runner")
+        runner = self.load_runner()
         with mock.patch.dict(os.environ, {"FACTORY_RUNNER_STOP_SECONDS": "0.2",
                                           "FACTORY_RUNNER_BOOTSTRAP_BACKOFF": "0",
                                           "FACTORY_RUNNER_MAX_SECONDS": "0.3"}):
