@@ -11,7 +11,10 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
   `factory/bin/orchestrate` (with `factory/lib/orchestrator/`) is the
   orchestrator and `.claude/skills/factory` its entry point;
   `factory/lib/runtimes/` holds the agent CLI adapters (`claude`, `codex`,
-  `opencode`, `copilot`, `cursor`); `factory/agents/` the agents.
+  `opencode`, `copilot`, `cursor`); `factory/agents/` the agents;
+  `factory/lib/secretscan.py` holds the secret rules and scanner, and
+  `factory/lib/reporting.py` the report and digest, which `bin/job` calls with
+  its helpers passed in.
 - `tests/fixtures/runtimes/`: each CLI's output, recorded by hand from the real
   CLI (6b plan, Task 1); the adapter tests replay it.
 - `tests/`: stdlib `unittest`. `tests/factory_project.py` builds a throwaway

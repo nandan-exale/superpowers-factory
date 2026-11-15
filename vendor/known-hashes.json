@@ -191,6 +191,7 @@
     "a6f9bab27fd22ed27447c7fb20aea81614ab3ba39e975f8c3addde05b418412c",
     "a98234ec4298f53ed3fca7ec7c911d1196f3aaf8bd9f931a195771ceeb222f64",
     "aab17cddebcbfaff479f1ca8f94a645bd55c84d732a305465fa35a5634348c58",
+    "b0655a07795cb03bf62216876dd573ce308f362e63370d23179ad9d03f285571",
     "b939977091bf5a38d2851138afb2c78e7abd15e20386676a3074749cb23a9041",
     "ba03e361c941e2b7a2c249d39bfadad279a33545a32af64f4033e586ab84a579",
     "c456213cca11798dd04ce373333c1eabe662bcd1bb529dbf1bda743ac1168dbc",
@@ -309,6 +310,9 @@
   "factory/lib/orchestrator/readonly.py": [
     "37354b7917ad57163af41efef6d8f6a08137f5bb87c8a1eb0889595bad71c40f"
   ],
+  "factory/lib/reporting.py": [
+    "5dfb57f57173a852f6e768dcb484419ccfc7151ec15f35611e8bc47d314f2095"
+  ],
   "factory/lib/runtimes/__init__.py": [
     "1d2f88f80c3b7af056280bcc25c3669ac8780fb4dcb2e0e5031356a8f6adfdf4",
     "1f5df883110344a45673aa8bb781c86af7907374e30ac27de9ff99a6cd220c89",
@@ -342,6 +346,9 @@
   "factory/lib/runtimes/opencode.py": [
     "4f89ce2e24e5dc648aa082dfa920ff52b359b052072ddf4b49f73ef3da9a2fe9",
     "91fd20a115a158411a6070bb14736ec37566e76cfba272a909b6bc7b0a4a1481"
+  ],
+  "factory/lib/secretscan.py": [
+    "0727833300eb7c80a1519e155b30b3a5a086404fae299ef31d9f0127e0945e25"
   ],
   "factory/runner-settings.json": [
     "5bfc84a77f69a125af2fd7148660b5d6ae060871d7b2c8f5bba190400ccc0b7e",
