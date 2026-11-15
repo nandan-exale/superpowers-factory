@@ -130,7 +130,7 @@ intake. The plan-based route is better for anything larger than a small fix.
 - **The Superpowers plugin**, installed in Claude Code. The factory's builder
   uses its test-driven-development, debugging and verification skills.
 - **GitHub**: a project with an `origin` on GitHub, and the
-  [`gh` CLI](https://cli.github.com) logged in with an account that can push
+  GitHub CLI (`gh`) logged in with an account that can push
   and manage labels.
 - **Python 3.10+** (the factory's scripts use only the standard library).
 - macOS or Linux, only if you want the [scheduled runner](#hands-off-running).
