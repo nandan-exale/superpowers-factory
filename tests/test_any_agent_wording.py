@@ -32,7 +32,8 @@ class AnyAgentWordingTest(unittest.TestCase):
         self.assertNotIn("If a skill can't be loaded, write `STATUS: BLOCKED`", BUILDER)
 
     def test_learner_uses_agents_best_practices_when_available(self):
-        self.assertIn("is available, use it", LEARNER)
+        self.assertIn("If the `agents-best-practices` skill is available, read one file", LEARNER)
+        self.assertIn("references/agent-legibility-feedback-loops.md", LEARNER)
 
 
 if __name__ == "__main__":
