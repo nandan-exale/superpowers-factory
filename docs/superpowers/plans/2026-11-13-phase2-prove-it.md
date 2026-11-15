@@ -2078,7 +2078,7 @@ Job: eval. Job folder: {root}/factory/jobs/eval/. Main checkout: {root}. Worktre
 7. `tests/evals/reviewer-security/hardcoded-key/`: as `clean`, plus `change/client.py`:
 
 ```python
-API_KEY = "sk-test-51Hx9fakefakefakefakefake0000"
+API_KEY = "<a fake sk-test- key; the fixture holds the literal>"
 
 
 def headers():

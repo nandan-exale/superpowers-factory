@@ -12,7 +12,7 @@ sys.path.insert(0, str(REPO / "bin"))
 
 import factory_files as ff  # noqa: E402
 
-HOOK = REPO / "hooks/factory-session"
+HOOK = REPO / "hooks/factory-session.py"
 STATE = REPO / "bin/factory-state"
 
 

@@ -45,7 +45,7 @@ class UpdatePlanTest(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "FACTORY_", "CLAUDE_"))}
         env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1", CLAUDE_PROJECT_DIR=str(self.project),
                    FACTORY_VENDOR_DIR=str(self.vendor))
-        res = subprocess.run([sys.executable, str(REPO / "hooks/factory-session")], input="{}",
+        res = subprocess.run([sys.executable, str(REPO / "hooks/factory-session.py")], input="{}",
                              capture_output=True, text=True, env=env)
         return json.loads(res.stdout)["hookSpecificOutput"]["additionalContext"] if res.stdout else ""
 

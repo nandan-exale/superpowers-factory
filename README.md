@@ -36,7 +36,9 @@ evidence), so that unattended work is work you can trust.
 - [Using another agent](#using-another-agent)
 - [The learning loop](#the-learning-loop)
 - [Safety: what stays with you](#safety-what-stays-with-you)
+- [What the plugin runs, writes and sends](#what-the-plugin-runs-writes-and-sends)
 - [Troubleshooting](#troubleshooting)
+- [Support and security](#support-and-security)
 - [Contributing and license](#contributing-and-license)
 
 ---
@@ -124,7 +126,8 @@ intake. The plan-based route is better for anything larger than a small fix.
 
 ## Requirements
 
-- **Claude Code** 2.1.257 or later.
+- **Claude Code** 2.1.257 or later. The plugin needs a terminal, git and a
+  local checkout, so it does nothing useful in Claude chat or Cowork.
 - **The Superpowers plugin**, installed in Claude Code. The factory's builder
   uses its test-driven-development, debugging and verification skills.
 - **GitHub**: a project with an `origin` on GitHub, and the
@@ -210,6 +213,16 @@ install again:
    `factory/bin/orchestrate run` from a terminal. Watch the PR appear on GitHub. Start with `concurrency: 1` and read every PR until you
    trust it.
 
+### Things to ask
+
+- "Set up the software factory in this project." Runs `/factory-install`.
+- "Let's add CSV export to the reports page." Superpowers brainstorms and
+  writes the plan; then choose **"3. Factory"** to file it as an issue.
+- "Hand this plan to the factory." Runs `/factory-handoff` on the plan you
+  just approved.
+- `/factory run`. Builds every open issue labeled `factory`.
+- `/factory what needs me?` Lists the jobs waiting on your decision.
+
 ---
 
 ## Everyday use
@@ -268,8 +281,8 @@ comments. So set up a notification, or check two places instead:
   "notify": {"command": ["osascript", "-e", "display notification (system attribute \"FACTORY_NOTIFY_MESSAGE\") with title (system attribute \"FACTORY_NOTIFY_TITLE\")"]}
   ```
 
-  For your phone, point it at a small script that sends the same variables to
-  ntfy.sh: `curl -H "Title: $FACTORY_NOTIFY_TITLE" -H "Click: $FACTORY_NOTIFY_URL" -d "$FACTORY_NOTIFY_MESSAGE" ntfy.sh/<your-topic>`.
+  For your phone, point it at a small script of your own that forwards the
+  same variables to a push service such as ntfy.sh.
   The command runs where the factory runs, so a desktop notification works for
   `/factory run` and the macOS runner, not on GitHub Actions. If it fails, the
   factory prints a `NOTE:` and carries on.
@@ -575,6 +588,70 @@ Good to know:
 
 ---
 
+## What the plugin runs, writes and sends
+
+Everything below happens on your machine or in your GitHub project. The plugin
+has no server of its own, and no telemetry.
+
+**At session start.** A hook runs `hooks/factory-session.py`. It runs
+`git` to read the project's `origin` and checks whether `factory/` exists, then
+tells Claude one of three things: offer `/factory-install`, offer
+`/factory-update`, or offer the factory as a third way to execute a Superpowers
+plan. It writes nothing and makes no network calls. If you decline the install
+offer, `bin/factory-state decline` writes a `factory-declined` marker in the
+clone's `.git` folder; `bin/factory-state reset` removes it.
+
+**When you run `/factory-install`.** After you say yes, it writes into the
+project, and leaves the commit to you:
+
+- `factory/`, `factory/agents/` and `.claude/skills/factory/`: the factory;
+- a Stop hook in `.claude/settings.json` that runs `factory/checks.sh` before
+  an interactive session ends;
+- `.github/workflows/factory-checks.yml`, and `factory-runner.yml` only if you
+  choose the GitHub Actions runner;
+- a section in `AGENTS.md` (and an `@AGENTS.md` line in `CLAUDE.md`), and
+  entries in `.gitignore`;
+- GitHub labels, created with your `gh` login.
+
+`/factory-uninstall` removes these, except the labels, the `.gitignore`
+entries and your job history.
+
+**When the factory runs a job.** `factory/bin/orchestrate` starts your agent
+CLI headless, once per agent. With Claude Code that is `claude -p
+--permission-mode dontAsk`: nothing is asked, so anything outside the allow
+list in `factory/runner-settings.json` is refused. Commands run in Claude
+Code's sandbox, with the network limited to GitHub and the hosts you add.
+Agents edit files in the job's worktree, run `git` and `gh`, push the job's
+branch, open a pull request and comment on it, and the approver merges it when
+the checks pass and the reviewers agree. The same file denies reading `.env`
+and `~/.ssh`, force pushes, and edits to the factory's own scripts, config and
+checks. Other runtimes are looser: Copilot CLI runs with `--allow-all-tools`
+and Cursor CLI with `--force`, and
+[the deny rules bind only Claude Code](#using-another-agent).
+
+**When you install the scheduled runner.** `factory/bin/runner install` adds a
+LaunchAgent (macOS) or a systemd user unit (Linux) that starts the orchestrator
+on a schedule. It reads a login token that you stored yourself in the Keychain,
+`secret-tool` or `~/.config/factory/`; the plugin never asks for it and agents
+can't read it. `factory/bin/runner uninstall` removes the schedule.
+
+**What leaves your machine.**
+
+- To GitHub, through your own `git` and `gh`: branches, pull requests, issues,
+  comments and labels in your project.
+- To your model provider, through the agent CLI you already use: the same
+  prompts and code any session with that agent sends.
+- An agent that got only the skill folders (`npx skills add`) downloads a
+  tagged release of this repository from GitHub during `/factory-install`,
+  after asking you.
+
+Nothing is sent to the plugin's author. Job state, costs and review findings
+stay in `factory/jobs/` in your clone (gitignored); the learning loop reads
+only those files. The plugin stores no personal data and is not aimed at
+children.
+
+---
+
 ## Troubleshooting
 
 | Problem | Try |
@@ -585,6 +662,14 @@ Good to know:
 | A job is stuck or escalated | `factory/bin/job summary`, then read the PR's evidence block and the latest `factory/jobs/<job>/decision.md`. |
 | The runner isn't running | `factory/bin/runner status` shows the last runs and why it skipped. |
 | Nothing starts, `wait … daily budget` | The daily spend limit is reached; it clears as the last 24 hours roll over, or raise `budgets.daily_usd`. |
+
+---
+
+## Support and security
+
+- **Questions and bugs:** open an issue at
+  <https://github.com/nandan-exale/superpowers-factory/issues>.
+- **Security problems:** report them privately; see `SECURITY.md`.
 
 ---
 
