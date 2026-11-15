@@ -16,7 +16,7 @@
 
 - Work interactively, not as a factory job: the installed factory's files
   (`factory/`, `.claude/`) are protected and this change leaves some of them
-  stale (Task 6 is the human follow-up).
+  stale (Task 8 is the human follow-up).
 - The working tree must be clean. The publishing fixes (`SECURITY.md`,
   `.claude-plugin/icon.png`, the `plugin.json` links, README sections) must be
   committed first; this plan moves those files.
@@ -35,17 +35,19 @@ cat /tmp/vendor-hash-before
 |---|---|
 | `.claude-plugin/plugin.json`, `.claude-plugin/icon.png` | move to `plugin/.claude-plugin/` |
 | `skills/`, `hooks/`, `bin/`, `vendor/` | move to `plugin/` |
-| `assets/` | move to `plugin/assets/` (Task 4, with the README) |
+| `assets/` | move to `plugin/assets/` (Task 6, with the README) |
 | `LICENSE` | stays; copied to `plugin/LICENSE` |
 | `.claude-plugin/marketplace.json` | stays; `source` becomes `./plugin` |
-| `scripts/check` | `plugin/` paths (Task 1); new `plugin-folder` check (Task 3) |
+| `scripts/check` | `plugin/` paths (Task 1); `tools/` (Task 4); new `plugin-folder` check (Task 5) |
 | `scripts/known-hashes` | `plugin/` paths and `git log --follow` (Task 1) |
 | `scripts/release`, `scripts/e2e`, `scripts/eval` | `plugin/` paths (Task 1) |
-| `tests/*.py` | `plugin/` paths (Task 1); new tests (Tasks 1, 3) |
-| `plugin/skills/factory-{install,update,uninstall}/SKILL.md` | clone fallback (Task 2) |
+| `tests/*.py` | `plugin/` paths (Task 1); new tests (Tasks 1, 3, 5) |
+| `plugin/skills/factory-{install,update,uninstall}/SKILL.md` | no GitHub download (Task 3); `tools/` paths (Task 4) |
+| `plugin/bin/` | renamed `plugin/tools/` (Task 4) |
+| `plugin/hooks/factory-session.py` | `tools/` path (Task 4) |
 | `plugin/vendor/factory/NOTICE` | name the import commit (Task 2) |
-| `README.md` → `plugin/README.md`; new short `README.md` | Task 4 |
-| `AGENTS.md` | `plugin/` paths (Task 4) |
+| `README.md` | install and disclosure lines (Task 3), `tools/` (Task 4); moves to `plugin/README.md` with a new short root `README.md` (Task 6) |
+| `AGENTS.md` | `plugin/` paths (Task 6) |
 
 ---
 
@@ -339,60 +341,12 @@ git commit -m "refactor: move the plugin into plugin/"
 
 ---
 
-### Task 2: Clone fallback and NOTICE
+### Task 2: Name the import commit in NOTICE
 
 **Files:**
-- Modify: `plugin/skills/factory-install/SKILL.md`, `plugin/skills/factory-update/SKILL.md`, `plugin/skills/factory-uninstall/SKILL.md`, `plugin/vendor/factory/NOTICE`, `plugin/vendor/known-hashes.json`
-- Test: `tests/test_any_agent_wording.py`
+- Modify: `plugin/vendor/factory/NOTICE`, `plugin/vendor/known-hashes.json`
 
-- [ ] **Step 1: Write the failing test**
-
-Add to the test class in `tests/test_any_agent_wording.py`:
-
-```python
-    def test_clone_fallback_handles_both_layouts(self):
-        for text in (INSTALL, UPDATE, UNINSTALL):
-            self.assertIn('if [ -d "$CLONE/plugin" ]; then PLUGIN="$CLONE/plugin"; else PLUGIN="$CLONE"; fi',
-                          text)
-```
-
-- [ ] **Step 2: Run it to verify it fails**
-
-Run: `python3 -m unittest tests.test_any_agent_wording -v`
-Expected: FAIL in `test_clone_fallback_handles_both_layouts`.
-
-- [ ] **Step 3: Update the three skills**
-
-In each of the three `SKILL.md` files, replace:
-
-```bash
-  PLUGIN=$(mktemp -d)/superpowers-factory
-  git clone --depth 1 --branch "$TAG" https://github.com/nandan-exale/superpowers-factory "$PLUGIN"
-fi
-```
-
-with:
-
-```bash
-  CLONE=$(mktemp -d)/superpowers-factory
-  git clone --depth 1 --branch "$TAG" https://github.com/nandan-exale/superpowers-factory "$CLONE"
-  if [ -d "$CLONE/plugin" ]; then PLUGIN="$CLONE/plugin"; else PLUGIN="$CLONE"; fi
-fi
-```
-
-- [ ] **Step 4: Run it to verify it passes**
-
-Run: `python3 -m unittest tests.test_any_agent_wording -v`
-Expected: PASS.
-
-- [ ] **Step 5: Commit the skills**
-
-```bash
-git add plugin/skills tests/test_any_agent_wording.py
-git commit -m "fix: find the plugin in a clone of either layout"
-```
-
-- [ ] **Step 6: Update NOTICE (a vendored edit, its own commit)**
+- [ ] **Step 1: Update NOTICE (a vendored edit, its own commit)**
 
 Replace the last paragraph of `plugin/vendor/factory/NOTICE` so the file reads:
 
@@ -409,7 +363,7 @@ these files is a modification. `git log --follow` on a file shows both.
 `../../LICENSE` still resolves: from `plugin/vendor/factory/` it is
 `plugin/LICENSE`.
 
-- [ ] **Step 7: Refresh hashes, check, commit**
+- [ ] **Step 2: Refresh hashes, check, commit**
 
 Run: `scripts/known-hashes && scripts/check --fast`
 Expected: every line `PASS`.
@@ -421,7 +375,179 @@ git commit -m "chore: name the factory import commit in NOTICE"
 
 ---
 
-### Task 3: The `plugin-folder` check
+### Task 3: Stop fetching the plugin from GitHub in the skills
+
+The directory flags the skills' clone fallback as download-and-execute
+(`RUNTIME_FETCH_EXEC`). An agent installed with `npx plugins add` has the
+whole plugin, so only `npx skills add` installs needed the fallback; the
+README now points those users at `npx plugins add`.
+
+**Files:**
+- Modify: `plugin/skills/factory-install/SKILL.md`, `plugin/skills/factory-update/SKILL.md`, `plugin/skills/factory-uninstall/SKILL.md`, `README.md`
+- Test: `tests/test_any_agent_wording.py`
+
+- [ ] **Step 1: Change the test to the new behaviour**
+
+In `tests/test_any_agent_wording.py`, replace
+`test_skills_find_the_plugin_without_claude_plugin_root` with:
+
+```python
+    def test_skills_find_the_plugin_without_claude_plugin_root(self):
+        for text in (INSTALL, UPDATE, UNINSTALL):
+            self.assertIn("## Find the plugin", text)
+            self.assertIn('PLUGIN="<skill base>/../.."', text)
+            self.assertNotIn("<skill base>/../../bin", text)
+            self.assertNotIn("<skill base>/../../vendor/factory", text)
+
+    def test_skills_never_download_the_plugin(self):
+        for text in (INSTALL, UPDATE, UNINSTALL):
+            self.assertNotIn("git clone", text)
+            self.assertNotIn("git ls-remote", text)
+            self.assertIn("npx plugins add nandan-exale/superpowers-factory", text)
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `python3 -m unittest tests.test_any_agent_wording -v`
+Expected: FAIL in `test_skills_never_download_the_plugin` (`git clone` found).
+
+- [ ] **Step 3: Replace the "Find the plugin" section in each of the three skills**
+
+In each of the three `SKILL.md` files, replace everything from the line
+after `## Find the plugin` up to (not including) the next `## ` heading with:
+
+~~~markdown
+The plugin's files are two levels above this skill's base directory:
+
+```bash
+PLUGIN="<skill base>/../.."
+VENDOR="$PLUGIN/vendor/factory"; BIN="$PLUGIN/bin"
+```
+
+If `$VENDOR` doesn't exist, this agent has the skill folders without the rest
+of the plugin. Stop, and tell your human partner to install the whole plugin:
+`npx plugins add nandan-exale/superpowers-factory` for Codex, Cursor or
+GitHub Copilot CLI, or `/plugin install superpowers-factory@superpowers-factory`
+in Claude Code. Don't download it yourself.
+~~~
+
+(The removed text is the tag lookup, the `git clone` into a temporary
+folder, and the "Ask your human partner before the clone" paragraph.)
+
+- [ ] **Step 4: Update the README**
+
+In `README.md`, section "Using another agent", replace:
+
+```markdown
+- **Install the skills** in any of these agents with
+  `npx skills add nandan-exale/superpowers-factory`. An agent that got only
+  the skill folders fetches the rest of the plugin (a tagged release) when
+  `/factory-install` runs, after asking you.
+```
+
+with:
+
+```markdown
+- **Install the plugin** in any of these agents with
+  `npx plugins add nandan-exale/superpowers-factory` (see
+  [Other agents](#other-agents)). The skills need the plugin's other files,
+  so installing the skill folders alone (`npx skills add`) isn't enough.
+```
+
+In section "What the plugin runs, writes and sends", delete this bullet:
+
+```markdown
+- An agent that got only the skill folders (`npx skills add`) downloads a
+  tagged release of this repository from GitHub during `/factory-install`,
+  after asking you.
+```
+
+Run: `git grep -n 'skills add' -- README.md plugin`
+Expected: only the "isn't enough" line above.
+
+- [ ] **Step 5: Run the tests, commit**
+
+Run: `python3 -m unittest tests.test_any_agent_wording -v && scripts/check --fast`
+Expected: PASS; every line `PASS`.
+
+```bash
+git add plugin/skills README.md tests/test_any_agent_wording.py
+git commit -m "fix: stop fetching the plugin from GitHub in the skills"
+```
+
+---
+
+### Task 4: Rename the plugin's `bin/` to `tools/`
+
+Claude Code puts a plugin's `bin/` on `PATH`; claude.ai and Cowork refuse a
+plugin that has one, and the directory will later accept it only from
+Verified organizations. Nothing uses `PATH`: every caller names the script
+by path, so only those paths change.
+
+**Files:**
+- Move: `plugin/bin/` → `plugin/tools/`
+- Modify: `plugin/hooks/factory-session.py`, `plugin/skills/*/SKILL.md`, `scripts/check`, `scripts/known-hashes`, `tests/*.py`, `README.md`
+
+- [ ] **Step 1: Move the folder**
+
+```bash
+git mv plugin/bin plugin/tools
+```
+
+- [ ] **Step 2: Rewrite every path to it**
+
+```bash
+python3 - <<'EOF'
+import re
+from pathlib import Path
+
+RULES = [
+    (re.compile(r'PLUGIN / "bin"'), 'PLUGIN / "tools"'),        # the hook
+    (re.compile(r'\$PLUGIN/bin\b'), '$PLUGIN/tools'),           # skills
+    (re.compile(r'"plugin" / "bin"'), '"plugin" / "tools"'),    # tests, known-hashes
+    (re.compile(r'plugin/bin/'), 'plugin/tools/'),              # scripts/check, tests
+    (re.compile(r'(?<![\w/])bin/factory-state'), 'tools/factory-state'),  # README
+]
+paths = [Path("plugin/hooks/factory-session.py"), Path("scripts/check"),
+         Path("scripts/known-hashes"), Path("README.md"),
+         *Path("plugin/skills").glob("*/SKILL.md"), *Path("tests").glob("*.py")]
+for path in paths:
+    text = path.read_text(encoding="utf-8")
+    new = text
+    for pattern, repl in RULES:
+        new = pattern.sub(repl, new)
+    if new != text:
+        path.write_text(new, encoding="utf-8")
+        print("rewrote", path)
+EOF
+```
+
+Expected: `rewrote` for the hook, `scripts/check`, `scripts/known-hashes`,
+`README.md`, the skills that use `$PLUGIN/bin`, and the tests that use
+`plugin/bin`.
+
+The hook's `(top / "factory" / "bin" / "job")` is the installed project's
+`factory/bin/`, not the plugin's, and must stay: the rules above don't match it.
+
+Run: `git grep -nE 'plugin/bin|"plugin" / "bin"|\$PLUGIN/bin|PLUGIN / "bin"|[^/]bin/factory-state' -- plugin scripts tests README.md`
+Expected: no output.
+
+- [ ] **Step 3: Check and commit**
+
+Run: `scripts/check`
+Expected: every line `PASS`.
+
+Run: `claude plugin validate plugin`
+Expected: `✔ Validation passed`.
+
+```bash
+git add -A
+git commit -m "refactor: rename the plugin's bin/ to tools/"
+```
+
+---
+
+### Task 5: The `plugin-folder` check
 
 **Files:**
 - Modify: `scripts/check`
@@ -472,6 +598,10 @@ Add to `CheckTest` in `tests/test_check.py`:
         self.add("plugin/tests/test_x.py", b"\n")
         self.assertFails("plugin-folder", "plugin/tests: development file")
 
+    def test_bin_folder_in_plugin_fails(self):
+        self.add("plugin/bin/tool", b"#!/bin/sh\n")
+        self.assertFails("plugin-folder", "plugin/bin: development file")
+
     def test_key_shaped_string_fails(self):
         self.add("plugin/skills/factory-install/example.md", b'KEY = "sk-' + b"a1" * 10 + b'"\n')
         self.assertFails("plugin-folder", "example.md: looks like an API key")
@@ -496,7 +626,7 @@ MAX_PLUGIN_FILES = 400  # the directory holds a plugin over 512 files for review
 MAX_TEXT_BYTES = 256 * 1024  # and any file over 256 KiB that isn't an image or font
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"})
 OS_JUNK = frozenset({".DS_Store", "Thumbs.db", "desktop.ini", "__MACOSX"})
-DEV_ONLY = ("CLAUDE.md", "tests", "docs", "scripts")
+DEV_ONLY = ("CLAUDE.md", "tests", "docs", "scripts", "bin")
 KEY_SHAPED = re.compile(rb"sk-[A-Za-z0-9-]{16,}")
 
 
@@ -554,7 +684,7 @@ git commit -m "test: check the plugin folder stays installable"
 
 ---
 
-### Task 4: Split the README; update AGENTS.md
+### Task 6: Split the README; update AGENTS.md
 
 **Files:**
 - Move: `README.md` → `plugin/README.md`; `assets/` → `plugin/assets/`
@@ -636,7 +766,7 @@ calling a change done; CI runs the same script.
   `factory-handoff`, `factory-uninstall`, and the bundled
   `agents-best-practices`, MIT-licensed, vendored with the modifications
   listed in its `SOURCE`).
-- `plugin/bin/`, `plugin/hooks/`: the plugin's session hook and update scripts.
+- `plugin/tools/`, `plugin/hooks/`: the plugin's session hook and update scripts.
 - `plugin/vendor/factory/`: the factory copied into projects. Commit 3a0b6bd is
   the unmodified import; every later commit is a modification (see
   `plugin/vendor/factory/NOTICE`).
@@ -661,7 +791,7 @@ In `## Map` and `## Workflow`, give every plugin path the `plugin/` prefix:
 - `vendor/factory/` → `plugin/vendor/factory/` (every occurrence, including
   the Software factory section)
 - `vendor/known-hashes.json` → `plugin/vendor/known-hashes.json`
-- `bin/factory-uninstall-settings` → `plugin/bin/factory-uninstall-settings`
+- `bin/factory-uninstall-settings` → `plugin/tools/factory-uninstall-settings`
 - `skills/factory-uninstall/` → `plugin/skills/factory-uninstall/`
 
 Add one line at the top of `## Map`:
@@ -692,7 +822,7 @@ git commit -m "docs: split the README for the plugin folder"
 
 ---
 
-### Task 5: Final verification
+### Task 7: Final verification
 
 - [ ] **Step 1: Count and validate**
 
@@ -721,7 +851,7 @@ Expected: Claude offers `/factory-install` (the session hook ran from
 
 ---
 
-### Task 6: After merge (human only)
+### Task 8: After merge (human only)
 
 These touch protected files or need a release; a factory job can't do them.
 
@@ -737,6 +867,6 @@ These touch protected files or need a release; a factory job can't do them.
   **Submit new** with plugin path `plugin`. The new submission also reads
   `plugin/.claude-plugin/icon.png`; the old draft was saved before the icon
   existed, and the directory takes the icon only at a submission's first save.
-- [ ] Check `npx skills add nandan-exale/superpowers-factory` finds the four
-  skills under `plugin/skills/`. If it doesn't, change that command in
-  `plugin/README.md` to `npx skills add nandan-exale/superpowers-factory/plugin`.
+- [ ] Check `npx plugins add nandan-exale/superpowers-factory -t codex` installs
+  from `plugin/` (it follows the marketplace's `source`) and that
+  `/factory-install` there finds `vendor/factory/`.

@@ -17,8 +17,18 @@ read. Development files stay at the repo root. Users who already installed the
 plugin get the new layout through a normal `/plugin marketplace update`, with no
 spurious `/factory-update` offer.
 
-Out of scope: the plugin's name, the session hook's behaviour, and the
-top-level `bin/` that keeps claude.ai and Cowork from installing the plugin.
+Two changes ride along, because the directory's validation flagged them and
+both touch the same paths:
+
+- `bin/` becomes `tools/`. Claude Code puts a plugin's `bin/` on `PATH`; the
+  directory will later accept `bin/` only from Verified organizations, and
+  claude.ai and Cowork refuse to install a plugin that has one. Nothing
+  relies on `PATH`: the skills and the hook call these scripts by path.
+- The three skills stop cloning a release from GitHub when they find no
+  plugin files beside them. The directory flags that as download-and-execute
+  (`RUNTIME_FETCH_EXEC`): code that runs but was never reviewed.
+
+Out of scope: the plugin's name and the session hook's behaviour.
 
 ## Layout
 
@@ -26,7 +36,7 @@ top-level `bin/` that keeps claude.ai and Cowork from installing the plugin.
 plugin/                          ← submitted to the directory, installed by users
   .claude-plugin/plugin.json
   .claude-plugin/icon.png
-  skills/  hooks/  bin/
+  skills/  hooks/  tools/          (was bin/)
   vendor/factory/  vendor/known-hashes.json
   assets/banner.svg
   README.md                      the full user README (moved from the root)
@@ -47,9 +57,13 @@ tests/  scripts/  docs/  factory/  .claude/  .github/
 
 ## What changes
 
-**Runtime code: nothing.** `hooks/factory-session.py` and `bin/factory_files.py`
-locate the plugin with `Path(__file__).resolve().parents[1]`, and move together
-with `vendor/`, `bin/` and `skills/`.
+**Runtime code: only the `bin/` → `tools/` rename.** `hooks/factory-session.py`
+and `tools/factory_files.py` locate the plugin with
+`Path(__file__).resolve().parents[1]`, and move together with `vendor/` and
+`skills/`, so the move itself changes no runtime path. The rename changes
+`PLUGIN / "bin"` to `PLUGIN / "tools"` in the hook, `$PLUGIN/bin` to
+`$PLUGIN/tools` in the skills, and `bin/factory-state` to
+`tools/factory-state` in the README.
 
 **Hashes: nothing.** `vendor_hash()` and `vendor/known-hashes.json` are keyed by
 paths relative to `vendor/factory/`. The implementer records `vendor_hash()`
@@ -75,20 +89,15 @@ test regenerates the list and compares it with the committed file.
 - `tests/factory_project.py` and `tests/installed_project.py`, which copy the
   vendored factory into throwaway projects.
 
-**The three skills' clone fallback** (`factory-install`, `factory-update`,
-`factory-uninstall`). An agent that installed only the skill folders clones the
-latest `v*` tag. Until a release ships the new layout, that tag has the old
-one, so the fallback picks whichever exists:
-
-```bash
-PLUGIN="<skill base>/../.."
-if [ ! -d "$PLUGIN/vendor/factory" ]; then
-  TAG=...   # unchanged
-  CLONE=$(mktemp -d)/superpowers-factory
-  git clone --depth 1 --branch "$TAG" https://github.com/nandan-exale/superpowers-factory "$CLONE"
-  if [ -d "$CLONE/plugin" ]; then PLUGIN="$CLONE/plugin"; else PLUGIN="$CLONE"; fi
-fi
-```
+**The three skills find the plugin, or stop** (`factory-install`,
+`factory-update`, `factory-uninstall`). Their "Find the plugin" section sets
+`PLUGIN="<skill base>/../.."`. If `$PLUGIN/vendor/factory` doesn't exist, the
+agent got the skill folders without the rest of the plugin; the skill stops
+and tells the user to install the whole plugin with
+`npx plugins add nandan-exale/superpowers-factory` (other agents) or
+`/plugin install` (Claude Code). No `git clone`, no tag lookup. The README's
+"Using another agent" section drops `npx skills add` for `npx plugins add`,
+and "What leaves your machine" drops the release download.
 
 **`vendor/factory/NOTICE`** says "the first commit in `git log --
 vendor/factory` is the unmodified import". After the move, that log starts at
@@ -105,7 +114,7 @@ vendored edit: its own commit, with `scripts/known-hashes` rerun.
 - holds more than 400 files (the directory holds a plugin at 512);
 - has a file over 256 KiB that isn't a PNG, JPEG, GIF, WebP or SVG;
 - has `.DS_Store`, `Thumbs.db`, `desktop.ini` or `__MACOSX`;
-- has a top-level `CLAUDE.md`, `tests/`, `docs/` or `scripts/`;
+- has a top-level `CLAUDE.md`, `tests/`, `docs/`, `scripts/` or `bin/`;
 - has a string matching `sk-[A-Za-z0-9-]{16,}`;
 - has a `LICENSE` that differs from the root `LICENSE`.
 
@@ -121,9 +130,13 @@ not change the installed copy that the move leaves stale (see "After merge").
    needed for `scripts/check` to pass. No content changes beyond paths.
 2. `chore: name the factory import commit in NOTICE`: the NOTICE edit and the
    refreshed `plugin/vendor/known-hashes.json`.
-3. `test: check the plugin folder stays installable`: the `plugin-folder`
+3. `fix: stop fetching the plugin from GitHub in the skills`: the "Find the
+   plugin" sections and their README lines.
+4. `refactor: rename the plugin's bin/ to tools/`: the rename and every path
+   to it.
+5. `test: check the plugin folder stays installable`: the `plugin-folder`
    check and its tests.
-4. `docs: split the README for the plugin folder`: README move and the short
+6. `docs: split the README for the plugin folder`: README move and the short
    root README, `AGENTS.md` paths.
 
 ## After merge (done by a human)
@@ -132,9 +145,8 @@ not change the installed copy that the move leaves stale (see "After merge").
   `factory/agents/intake.md`, `factory/agents/approver.md` and
   `factory/agents/reviewer-security.md`. They're protected, so a human edits
   them to `plugin/vendor/factory/`.
-- Check that `npx skills add nandan-exale/superpowers-factory` still finds the
-  skills under `plugin/skills/`. If it doesn't, the README command becomes
-  `npx skills add nandan-exale/superpowers-factory/plugin`.
+- Check that `npx plugins add nandan-exale/superpowers-factory` installs from
+  `plugin/` (it reads the marketplace's `source`).
 - Delete the portal's existing draft (saved for the repo root, before the
   icon existed) and submit again with plugin path `plugin`.
 - Run `/plugin marketplace update superpowers-factory` once, and confirm the
