@@ -1,5 +1,6 @@
 import os
 import signal
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -32,9 +33,12 @@ class OrchestrateEnvTest(unittest.TestCase):
             def stop(self):
                 pass
 
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
         cli = types.SimpleNamespace(repo=PLUGIN, config=lambda: CONFIG)
         runtime = types.SimpleNamespace(NAME="codex", BINARY="true", CAPS={"stop_hook": False})
-        for target, name, value in ((self.orch, "Loop", RecordingLoop), (self.orch, "JobCli", lambda repo: cli),
+        for target, name, value in ((self.orch, "lock_path", lambda: Path(tmp.name) / "factory-orchestrate.lock"),
+                                    (self.orch, "Loop", RecordingLoop), (self.orch, "JobCli", lambda repo: cli),
                                     (self.orch.runtimes, "load", lambda name: runtime)):
             patcher = mock.patch.object(target, name, value)
             patcher.start()
