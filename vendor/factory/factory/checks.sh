@@ -5,6 +5,11 @@
 # the working directory. Keep it fast, deterministic and non-interactive: no
 # watch modes, no prompts, nothing that rewrites files.
 #
+# Only the Stop hook sets two variables, so a project can skip slow checks for a
+# small change: FACTORY_CHECKS_CONTEXT=stop-hook, and FACTORY_CHANGED_PATHS, the
+# changed paths one per line. An empty or unset list means "run everything", and
+# the gate never sets either variable. Ignoring both is fine.
+#
 # INSTALL.md replaces the line below with this project's real commands, e.g.:
 #
 #   npm ci --prefer-offline
