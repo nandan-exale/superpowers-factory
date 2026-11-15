@@ -47,7 +47,7 @@ tests/  scripts/  docs/  factory/  .claude/  .github/
 
 ## What changes
 
-**Runtime code: nothing.** `hooks/factory-session` and `bin/factory_files.py`
+**Runtime code: nothing.** `hooks/factory-session.py` and `bin/factory_files.py`
 locate the plugin with `Path(__file__).resolve().parents[1]`, and move together
 with `vendor/`, `bin/` and `skills/`.
 
@@ -135,6 +135,8 @@ not change the installed copy that the move leaves stale (see "After merge").
 - Check that `npx skills add nandan-exale/superpowers-factory` still finds the
   skills under `plugin/skills/`. If it doesn't, the README command becomes
   `npx skills add nandan-exale/superpowers-factory/plugin`.
+- Delete the portal's existing draft (saved for the repo root, before the
+  icon existed) and submit again with plugin path `plugin`.
 - Run `/plugin marketplace update superpowers-factory` once, and confirm the
   session hook still fires.
 

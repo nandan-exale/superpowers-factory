@@ -259,7 +259,7 @@ In `check_compile`:
 ```python
     for rel in ("plugin/bin/factory_files.py", "plugin/bin/factory-manifest", "plugin/bin/factory-state",
                 "plugin/bin/factory-update-plan", "plugin/bin/factory-uninstall-settings",
-                "plugin/hooks/factory-session",
+                "plugin/hooks/factory-session.py",
                 "scripts/known-hashes", "scripts/release", "scripts/e2e", "scripts/eval"):
 ```
 
@@ -732,6 +732,11 @@ These touch protected files or need a release; a factory job can't do them.
 - [ ] Release (`scripts/release X.Y.Z`), push, then run
   `/plugin marketplace update superpowers-factory` in your own Claude Code and
   confirm the session hook still fires.
+- [ ] In the developer portal, delete the existing draft submission (it is for
+  the repo root, and a submission's repository and folder can't change), then
+  **Submit new** with plugin path `plugin`. The new submission also reads
+  `plugin/.claude-plugin/icon.png`; the old draft was saved before the icon
+  existed, and the directory takes the icon only at a submission's first save.
 - [ ] Check `npx skills add nandan-exale/superpowers-factory` finds the four
   skills under `plugin/skills/`. If it doesn't, change that command in
   `plugin/README.md` to `npx skills add nandan-exale/superpowers-factory/plugin`.
