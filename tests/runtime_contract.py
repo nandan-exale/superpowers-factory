@@ -6,9 +6,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-PLUGIN = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[1]
+PLUGIN = REPO / "plugin"
 sys.path.insert(0, str(PLUGIN / "vendor" / "factory" / "factory" / "lib"))
-FIXTURES = PLUGIN / "tests" / "fixtures" / "runtimes"
+FIXTURES = REPO / "tests" / "fixtures" / "runtimes"
 
 
 class RuntimeContract:

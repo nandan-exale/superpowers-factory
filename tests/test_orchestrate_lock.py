@@ -13,7 +13,7 @@ from unittest import mock
 
 from script_loader import load_script
 
-PLUGIN = Path(__file__).resolve().parents[1]
+PLUGIN = Path(__file__).resolve().parents[1] / "plugin"
 ORCHESTRATE = PLUGIN / "vendor" / "factory" / "factory" / "bin" / "orchestrate"
 BUSY_LINE = "orchestrate: another factory run is active in this clone\n"
 CONFIG = {"base_branch": "main", "runtime": "codex", "runtimes": {"codex": {"credential_env": "OPENAI_API_KEY"}}}

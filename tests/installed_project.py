@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-PLUGIN = Path(__file__).resolve().parents[1]
+PLUGIN = Path(__file__).resolve().parents[1] / "plugin"
 VENDOR = PLUGIN / "vendor" / "factory"
 sys.path.insert(0, str(PLUGIN / "bin"))
 

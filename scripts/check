@@ -14,20 +14,20 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 TEST_WORKERS = 8  # more gains little: the tests contend for process spawning, not CPU
-FACTORY = Path("vendor/factory/factory")
+FACTORY = Path("plugin/vendor/factory/factory")
 JSON_FILES = (
     ".claude/settings.json",
-    ".claude-plugin/plugin.json",
+    "plugin/.claude-plugin/plugin.json",
     ".claude-plugin/marketplace.json",
-    "vendor/factory/factory/config.json",
-    "hooks/hooks.json",
+    "plugin/vendor/factory/factory/config.json",
+    "plugin/hooks/hooks.json",
 )
 
 
 def check_license(root, opts):
     problems = []
-    for rel in ("LICENSE", "vendor/factory/NOTICE", "skills/agents-best-practices/LICENSE",
-                "skills/agents-best-practices/SOURCE"):
+    for rel in ("LICENSE", "plugin/LICENSE", "plugin/vendor/factory/NOTICE",
+                "plugin/skills/agents-best-practices/LICENSE", "plugin/skills/agents-best-practices/SOURCE"):
         path = root / rel
         if not path.is_file() or not path.read_text(encoding="utf-8").strip():
             problems.append(f"{rel} is missing or empty")
@@ -43,7 +43,7 @@ def check_json(root, opts):
             problems.append(f"{rel}: {exc}")
     if problems:
         return problems
-    plugin = json.loads((root / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+    plugin = json.loads((root / "plugin/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
     market = json.loads((root / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
     for entry in market.get("plugins", []):
         if entry.get("name") == plugin.get("name") and entry.get("version") != plugin.get("version"):
@@ -93,9 +93,9 @@ def check_config(root, opts):
 
 
 FRONTMATTER_GLOBS = (
-    "skills/*/SKILL.md",
-    "vendor/factory/.claude/skills/*/SKILL.md",
-    "vendor/factory/factory/agents/*.md",
+    "plugin/skills/*/SKILL.md",
+    "plugin/vendor/factory/.claude/skills/*/SKILL.md",
+    "plugin/vendor/factory/factory/agents/*.md",
 )
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):(.*)$")
 
@@ -146,8 +146,9 @@ def check_compile(root, opts):
             compile(path.read_text(encoding="utf-8"), str(path), "exec")
         except (OSError, SyntaxError) as exc:
             problems.append(f"bin/{name}: {exc}")
-    for rel in ("bin/factory_files.py", "bin/factory-handoff-check", "bin/factory-manifest", "bin/factory-state",
-                "bin/factory-update-plan", "bin/factory-uninstall-settings", "hooks/factory-session.py",
+    for rel in ("plugin/bin/factory_files.py", "plugin/bin/factory-handoff-check", "plugin/bin/factory-manifest",
+                "plugin/bin/factory-state", "plugin/bin/factory-update-plan", "plugin/bin/factory-uninstall-settings",
+                "plugin/hooks/factory-session.py",
                 "scripts/known-hashes", "scripts/release", "scripts/e2e", "scripts/eval"):
         path = root / rel
         if not path.exists():
@@ -298,8 +299,9 @@ CHECKS = [
 
 
 # Markdown that tests read (agent, skill and install wording), so it never takes the fast path.
-WORDING_TESTED = ("vendor/factory/factory/agents/", "vendor/factory/.claude/skills/", "skills/", ".claude/skills/")
-WORDING_TESTED_FILES = ("vendor/factory/INSTALL.md",)
+WORDING_TESTED = ("plugin/vendor/factory/factory/agents/", "plugin/vendor/factory/.claude/skills/",
+                  "plugin/skills/", ".claude/skills/")
+WORDING_TESTED_FILES = ("plugin/vendor/factory/INSTALL.md",)
 
 
 def is_docs_path(path):

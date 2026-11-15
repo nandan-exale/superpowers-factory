@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-PLUGIN = Path(__file__).resolve().parents[1]
+PLUGIN = Path(__file__).resolve().parents[1] / "plugin"
 VENDOR = PLUGIN / "vendor" / "factory"
 SPEC_PATH = "docs/superpowers/specs/2026-11-12-widget-design.md"
 PLAN_PATH = "docs/superpowers/plans/2026-11-12-widget.md"

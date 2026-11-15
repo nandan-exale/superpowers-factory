@@ -8,13 +8,13 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "bin"))
+sys.path.insert(0, str(REPO / "plugin" / "bin"))
 sys.path.insert(0, str(REPO / "tests"))
 
 import factory_files as ff  # noqa: E402
 from installed_project import InstalledProject  # noqa: E402
 
-PLAN = REPO / "bin/factory-update-plan"
+PLAN = REPO / "plugin/bin/factory-update-plan"
 GATE = "factory/bin/gate"
 OLD = "# an old upstream gate\n"
 

@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-SKILL = (Path(__file__).resolve().parents[1] / "vendor/factory/.claude/skills/factory/SKILL.md").read_text()
+SKILL = (Path(__file__).resolve().parents[1] / "plugin/vendor/factory/.claude/skills/factory/SKILL.md").read_text()
 
 
 class SkillWordingTest(unittest.TestCase):

@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-VENDOR = Path(__file__).resolve().parents[1] / "vendor/factory"
+VENDOR = Path(__file__).resolve().parents[1] / "plugin/vendor/factory"
 BUILDER = (VENDOR / "factory/agents/builder.md").read_text()
 SKILL = (VENDOR / ".claude/skills/factory/SKILL.md").read_text()
 

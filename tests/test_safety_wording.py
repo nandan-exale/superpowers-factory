@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-VENDOR = Path(__file__).resolve().parents[1] / "vendor/factory"
+VENDOR = Path(__file__).resolve().parents[1] / "plugin/vendor/factory"
 
 
 class SafetyWordingTest(unittest.TestCase):
@@ -19,7 +19,7 @@ class SafetyWordingTest(unittest.TestCase):
         self.assertIn("jobs/paused.json", (VENDOR / "factory/dashboard.html").read_text())
 
     def test_install_and_uninstall_handle_the_labels(self):
-        root = Path(__file__).resolve().parents[1] / "skills"
+        root = Path(__file__).resolve().parents[1] / "plugin/skills"
         install = (root / "factory-install/SKILL.md").read_text()
         uninstall = (root / "factory-uninstall/SKILL.md").read_text()
         for name in ("factory:revert", "factory:risk-ok"):

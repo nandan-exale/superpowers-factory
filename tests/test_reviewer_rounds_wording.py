@@ -8,7 +8,7 @@ on overflow that was already on main. Each extra round costs a rebuild, a gate a
 import unittest
 from pathlib import Path
 
-AGENTS = Path(__file__).resolve().parents[1] / "vendor/factory/factory/agents"
+AGENTS = Path(__file__).resolve().parents[1] / "plugin/vendor/factory/factory/agents"
 REVIEWERS = ("reviewer-code", "reviewer-security", "reviewer-ui", "reviewer-ux")
 
 

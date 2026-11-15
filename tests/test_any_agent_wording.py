@@ -2,12 +2,12 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-INSTALL = (ROOT / "skills/factory-install/SKILL.md").read_text()
-UPDATE = (ROOT / "skills/factory-update/SKILL.md").read_text()
-UNINSTALL = (ROOT / "skills/factory-uninstall/SKILL.md").read_text()
-BUILDER = (ROOT / "vendor/factory/factory/agents/builder.md").read_text()
-LEARNER = (ROOT / "vendor/factory/factory/agents/learner.md").read_text()
-UPSTREAM_INSTALL = (ROOT / "vendor/factory/INSTALL.md").read_text()
+INSTALL = (ROOT / "plugin/skills/factory-install/SKILL.md").read_text()
+UPDATE = (ROOT / "plugin/skills/factory-update/SKILL.md").read_text()
+UNINSTALL = (ROOT / "plugin/skills/factory-uninstall/SKILL.md").read_text()
+BUILDER = (ROOT / "plugin/vendor/factory/factory/agents/builder.md").read_text()
+LEARNER = (ROOT / "plugin/vendor/factory/factory/agents/learner.md").read_text()
+UPSTREAM_INSTALL = (ROOT / "plugin/vendor/factory/INSTALL.md").read_text()
 
 
 class AnyAgentWordingTest(unittest.TestCase):

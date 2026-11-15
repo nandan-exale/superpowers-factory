@@ -10,10 +10,10 @@ REPO = Path(__file__).resolve().parents[1]
 RELEASE = REPO / "scripts/release"
 
 PLUGIN = '{\n  "name": "p",\n  "version": "0.2.0",\n  "keywords": ["a", "b"]\n}\n'
-MARKET = '{\n  "name": "p",\n  "plugins": [ { "name": "p", "version": "0.2.0", "source": "./" } ]\n}\n'
+MARKET = '{\n  "name": "p",\n  "plugins": [ { "name": "p", "version": "0.2.0", "source": "./plugin" } ]\n}\n'
 CHANGELOG = "# Changelog\n\nIntro.\n\n## [0.2.0] - 2026-11-12\n\n### Added\n\n- old thing\n"
-HASHES_STUB = ("import pathlib\npathlib.Path('vendor').mkdir(exist_ok=True)\n"
-               "pathlib.Path('vendor/known-hashes.json').write_text('{}\\n')\n")
+HASHES_STUB = ("import pathlib\npathlib.Path('plugin/vendor').mkdir(parents=True, exist_ok=True)\n"
+               "pathlib.Path('plugin/vendor/known-hashes.json').write_text('{}\\n')\n")
 
 
 def git(cwd, *args):
@@ -29,8 +29,9 @@ class ReleaseTest(unittest.TestCase):
         git(base, "init", "-q", "--bare", "-b", "main", str(self.origin))
         self.root = base / "r"
         (self.root / ".claude-plugin").mkdir(parents=True)
+        (self.root / "plugin/.claude-plugin").mkdir(parents=True)
         (self.root / "scripts").mkdir()
-        (self.root / ".claude-plugin/plugin.json").write_text(PLUGIN)
+        (self.root / "plugin/.claude-plugin/plugin.json").write_text(PLUGIN)
         (self.root / ".claude-plugin/marketplace.json").write_text(MARKET)
         (self.root / "CHANGELOG.md").write_text(CHANGELOG)
         (self.root / "scripts/known-hashes").write_text(HASHES_STUB)
@@ -61,7 +62,7 @@ class ReleaseTest(unittest.TestCase):
     def test_release_bumps_both_versions_without_reformatting(self):
         res = self.release("0.3.0")
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
-        plugin = (self.root / ".claude-plugin/plugin.json").read_text()
+        plugin = (self.root / "plugin/.claude-plugin/plugin.json").read_text()
         self.assertEqual(plugin, PLUGIN.replace("0.2.0", "0.3.0"))
         market = json.loads((self.root / ".claude-plugin/marketplace.json").read_text())
         self.assertEqual(market["plugins"][0]["version"], "0.3.0")
@@ -107,7 +108,7 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("scripts/check failed", res.stderr)
         self.assertEqual(git(self.root, "rev-parse", "HEAD"), head)
         self.assertEqual(git(self.root, "tag", "--list", "v0.3.0"), "")
-        self.assertIn("0.3.0", (self.root / ".claude-plugin/plugin.json").read_text())
+        self.assertIn("0.3.0", (self.root / "plugin/.claude-plugin/plugin.json").read_text())
 
 
 if __name__ == "__main__":

@@ -23,7 +23,8 @@ import tempfile
 from fnmatch import fnmatch
 from pathlib import Path
 
-PLUGIN = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[1]
+PLUGIN = REPO / "plugin"
 VENDOR = PLUGIN / "vendor" / "factory"
 sys.path.insert(0, str(VENDOR / "factory" / "lib"))
 import runtimes  # noqa: E402
@@ -34,7 +35,7 @@ CONFIG = VENDOR / "factory" / "config.json"
 SETTINGS = VENDOR / "factory" / "runner-settings.json"
 TIERS = ("fast", "balanced", "strong", "frontier")
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
-EVALS = PLUGIN / "tests" / "evals"
+EVALS = REPO / "tests" / "evals"
 BASELINE = EVALS / "baseline.json"
 CHECK_KEYS = {"first_line", "verdict", "tags_any", "regex"}
 EXPECT_KEYS = CHECK_KEYS | {"output"}
@@ -51,7 +52,7 @@ def agent_prompt(agent):
     """(the agent's prompt without its frontmatter, its access) from the vendored agent file."""
     path = AGENTS / f"{agent}.md"
     if not path.is_file():
-        raise Stop(f"no agent {agent!r} in {AGENTS.relative_to(PLUGIN)}")
+        raise Stop(f"no agent {agent!r} in {AGENTS.relative_to(REPO)}")
     try:
         agent_file = agents.load(VENDOR, agent)
     except ValueError as exc:

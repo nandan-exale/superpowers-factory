@@ -8,13 +8,14 @@ from pathlib import Path
 from factory_project import FactoryProject
 from script_loader import load_script
 
-PLUGIN = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[1]
+PLUGIN = REPO / "plugin"
 
 
 class ShippedScenariosTest(unittest.TestCase):
     def test_every_shipped_scenario_is_valid(self):
-        e2e = load_script(PLUGIN / "scripts" / "e2e", "e2e_shipped")
-        names = [n for n, _ in e2e.load_scenarios(PLUGIN / "tests" / "e2e")]
+        e2e = load_script(REPO / "scripts" / "e2e", "e2e_shipped")
+        names = [n for n, _ in e2e.load_scenarios(REPO / "tests" / "e2e")]
         self.assertEqual(names, ["budget-stop", "happy-path", "learning", "needs-info", "report",
                                  "risky-change", "runner-tick", "tagged-finding"])
 
@@ -26,7 +27,7 @@ class LearningSeedTest(unittest.TestCase):
             stale = project.repo / "factory" / "jobs" / "learning" / "state.json"
             stale.parent.mkdir(parents=True)
             stale.write_text(json.dumps({"convention": {"filed": "2099-01-01T00:00:00Z"}}))
-            setup = PLUGIN / "tests" / "e2e" / "learning" / "setup.py"
+            setup = REPO / "tests" / "e2e" / "learning" / "setup.py"
             subprocess.run([sys.executable, str(setup), str(project.repo)], check=True)
             self.assertFalse(stale.exists())
             res = subprocess.run([sys.executable, "factory/bin/job", "learn"], cwd=project.repo,

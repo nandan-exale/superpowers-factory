@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from factory_project import FactoryProject, git  # noqa: E402
 
-VENDOR_GATE = Path(__file__).resolve().parents[1] / "vendor/factory/factory/bin/gate"
+VENDOR_GATE = Path(__file__).resolve().parents[1] / "plugin/vendor/factory/factory/bin/gate"
 SPEC = "docs/superpowers/specs/2026-11-12-widget-design.md"
 PLAN = "docs/superpowers/plans/2026-11-12-widget.md"
 

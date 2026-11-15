@@ -11,7 +11,8 @@ from unittest import mock
 
 from script_loader import load_script
 
-PLUGIN = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[1]
+PLUGIN = REPO / "plugin"
 
 
 class EvalCase(unittest.TestCase):
@@ -19,7 +20,7 @@ class EvalCase(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
-        self.ev = load_script(PLUGIN / "scripts" / "eval", f"eval_{id(self)}")
+        self.ev = load_script(REPO / "scripts" / "eval", f"eval_{id(self)}")
         self.cfg = json.loads(self.ev.CONFIG.read_text())
 
 

@@ -5,12 +5,13 @@ from pathlib import Path
 
 from script_loader import load_script
 
-PLUGIN = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[1]
+PLUGIN = REPO / "plugin"
 
 
 class ShippedEvalsTest(unittest.TestCase):
     def setUp(self):
-        self.ev = load_script(PLUGIN / "scripts" / "eval", "eval_shipped")
+        self.ev = load_script(REPO / "scripts" / "eval", "eval_shipped")
         self.cfg = json.loads(self.ev.CONFIG.read_text())
 
     def test_every_case_is_valid_and_its_agent_resolves(self):

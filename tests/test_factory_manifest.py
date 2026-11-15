@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "bin"))
+sys.path.insert(0, str(REPO / "plugin" / "bin"))
 
 import factory_files as ff  # noqa: E402
 
@@ -24,7 +24,7 @@ class ManifestTest(unittest.TestCase):
             self.assertIn(path.relative_to(ff.VENDOR).as_posix(), ff.FILES)
 
     def test_install_skill_copies_every_listed_file(self):
-        text = (REPO / "skills/factory-install/SKILL.md").read_text()
+        text = (REPO / "plugin/skills/factory-install/SKILL.md").read_text()
         for rel in ff.FILES:
             self.assertIn(rel, text)
 
@@ -57,7 +57,7 @@ class ManifestTest(unittest.TestCase):
     def test_script_writes_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "factory").mkdir()
-            res = subprocess.run([sys.executable, str(REPO / "bin/factory-manifest"), tmp],
+            res = subprocess.run([sys.executable, str(REPO / "plugin/bin/factory-manifest"), tmp],
                                  capture_output=True, text=True)
             self.assertEqual(res.returncode, 0, res.stderr)
             written = json.loads((Path(tmp) / "factory/manifest.json").read_text())
@@ -65,7 +65,7 @@ class ManifestTest(unittest.TestCase):
 
     def test_script_refuses_without_factory_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
-            res = subprocess.run([sys.executable, str(REPO / "bin/factory-manifest"), tmp],
+            res = subprocess.run([sys.executable, str(REPO / "plugin/bin/factory-manifest"), tmp],
                                  capture_output=True, text=True)
             self.assertEqual(res.returncode, 1)
             self.assertIn("has no factory/ directory", res.stderr)

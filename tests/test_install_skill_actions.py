@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-SKILL = Path(__file__).resolve().parents[1] / "skills/factory-install/SKILL.md"
+SKILL = Path(__file__).resolve().parents[1] / "plugin/skills/factory-install/SKILL.md"
 
 
 class InstallActionsTest(unittest.TestCase):

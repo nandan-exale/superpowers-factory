@@ -13,7 +13,8 @@ from unittest import mock
 from e2e_sandbox import E2ESandbox, git
 from script_loader import load_script
 
-PLUGIN = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[1]
+PLUGIN = REPO / "plugin"
 
 
 class E2ECase(unittest.TestCase):
@@ -21,7 +22,7 @@ class E2ECase(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
-        self.e2e = load_script(PLUGIN / "scripts" / "e2e", f"e2e_{id(self)}")
+        self.e2e = load_script(REPO / "scripts" / "e2e", f"e2e_{id(self)}")
         self.sb = E2ESandbox(self.tmp / "sb")
 
     def guard(self, **env):
@@ -45,7 +46,7 @@ class GuardTest(E2ECase):
         self.assertEqual(self.guard(), "tester/factory-e2e")
 
     def test_refuses_the_plugins_own_repo(self):
-        own = git(PLUGIN, "remote", "get-url", "origin")
+        own = git(REPO, "remote", "get-url", "origin")
         if self.e2e.github_repo(own) is None:
             self.skipTest("this checkout's origin isn't on github.com")
         git(self.sb.repo, "remote", "set-url", "origin", own)
