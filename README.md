@@ -598,8 +598,8 @@ has no server of its own, and no telemetry.
 tells Claude one of three things: offer `/factory-install`, offer
 `/factory-update`, or offer the factory as a third way to execute a Superpowers
 plan. It writes nothing and makes no network calls. If you decline the install
-offer, `bin/factory-state decline` writes a `factory-declined` marker in the
-clone's `.git` folder; `bin/factory-state reset` removes it.
+offer, `tools/factory-state decline` writes a `factory-declined` marker in the
+clone's `.git` folder; `tools/factory-state reset` removes it.
 
 **When you run `/factory-install`.** After you say yes, it writes into the
 project, and leaves the commit to you:
@@ -655,7 +655,7 @@ children.
 |---|---|
 | Something seems off | `factory/bin/doctor` lists each check as PASS, WARN or FAIL with the fix. |
 | `factory/bin/orchestrate` can't find an agent | `factory/bin/doctor` names the missing file in `factory/agents/`; `/factory-update` restores it. |
-| Claude doesn't offer `/factory-install` | The project needs a GitHub `origin`. If you declined before, `bin/factory-state reset` (in the plugin) brings the offer back. |
+| Claude doesn't offer `/factory-install` | The project needs a GitHub `origin`. If you declined before, `tools/factory-state reset` (in the plugin) brings the offer back. |
 | A job is stuck or escalated | `factory/bin/job summary`, then read the PR's evidence block and the latest `factory/jobs/<job>/decision.md`. |
 | The runner isn't running | `factory/bin/runner status` shows the last runs and why it skipped. |
 | Nothing starts, `wait … daily budget` | The daily spend limit is reached; it clears as the last 24 hours roll over, or raise `budgets.daily_usd`. |

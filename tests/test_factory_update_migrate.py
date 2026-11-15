@@ -8,14 +8,14 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "plugin" / "bin"))
+sys.path.insert(0, str(REPO / "plugin" / "tools"))
 sys.path.insert(0, str(REPO / "tests"))
 
 import factory_files as ff  # noqa: E402
 from installed_project import InstalledProject  # noqa: E402
 from script_loader import load_script  # noqa: E402
 
-PLAN = REPO / "plugin/bin/factory-update-plan"
+PLAN = REPO / "plugin/tools/factory-update-plan"
 OLD_CONFIG = REPO / "tests/fixtures/config-pre-0.2.0.json"
 VENDOR_CONFIG = ff.VENDOR / "factory/config.json"
 fup = load_script(PLAN, "factory_update_plan")

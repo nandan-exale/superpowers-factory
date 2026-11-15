@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from factory_project import PLAN_PATH, SPEC_PATH, FactoryProject, git  # noqa: E402
 
-CHECK = Path(__file__).resolve().parents[1] / "plugin" / "bin" / "factory-handoff-check"
+CHECK = Path(__file__).resolve().parents[1] / "plugin" / "tools" / "factory-handoff-check"
 REAL_GIT = shutil.which("git")
 CHECKS = ("factory-installed", "gh-auth", "labels", "paths", "committed", "clean", "on-origin-base",
           "no-open-handoff")

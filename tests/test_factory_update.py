@@ -8,11 +8,11 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "plugin" / "bin"))
+sys.path.insert(0, str(REPO / "plugin" / "tools"))
 
 import factory_files as ff  # noqa: E402
 
-PLAN = REPO / "plugin/bin/factory-update-plan"
+PLAN = REPO / "plugin/tools/factory-update-plan"
 
 
 class UpdatePlanTest(unittest.TestCase):

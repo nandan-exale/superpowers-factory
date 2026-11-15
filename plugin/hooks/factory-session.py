@@ -12,9 +12,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 PLUGIN = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PLUGIN / "bin"))
+sys.path.insert(0, str(PLUGIN / "tools"))
 
-STATE = PLUGIN / "bin" / "factory-state"
+STATE = PLUGIN / "tools" / "factory-state"
 INSTALL = (
     "superpowers-factory: this GitHub project doesn't have the software factory installed. "
     "Once, early in this session and only if you haven't asked already, ask the user whether to run "

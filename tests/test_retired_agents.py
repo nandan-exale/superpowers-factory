@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "plugin" / "bin"))
+sys.path.insert(0, str(REPO / "plugin" / "tools"))
 
 import factory_files as ff  # noqa: E402
 
@@ -33,7 +33,7 @@ class RetiredAgentsTest(unittest.TestCase):
 
     def plan(self, *extra):
         env = {**os.environ, "FACTORY_KNOWN_HASHES": str(self.known)}
-        return subprocess.run([sys.executable, str(REPO / "plugin/bin/factory-update-plan"), str(self.project), *extra],
+        return subprocess.run([sys.executable, str(REPO / "plugin/tools/factory-update-plan"), str(self.project), *extra],
                               capture_output=True, text=True, env=env)
 
     def test_retired_lists_every_old_agent_path(self):

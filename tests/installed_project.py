@@ -13,7 +13,7 @@ from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1] / "plugin"
 VENDOR = PLUGIN / "vendor" / "factory"
-sys.path.insert(0, str(PLUGIN / "bin"))
+sys.path.insert(0, str(PLUGIN / "tools"))
 
 from factory_files import AGENTS, LIB  # noqa: E402
 
@@ -163,7 +163,7 @@ class InstalledProject:
             target = self.root / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(VENDOR / rel, target)
-        subprocess.run([sys.executable, str(PLUGIN / "bin" / "factory-manifest"), str(self.root)],
+        subprocess.run([sys.executable, str(PLUGIN / "tools" / "factory-manifest"), str(self.root)],
                        check=True, capture_output=True)
         self.write("factory/checks.sh", CHECKS_SH, executable=True)
         self.write(".gitignore", "/factory/jobs/\n/.worktrees/\n")

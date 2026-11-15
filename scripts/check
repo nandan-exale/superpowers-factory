@@ -146,8 +146,8 @@ def check_compile(root, opts):
             compile(path.read_text(encoding="utf-8"), str(path), "exec")
         except (OSError, SyntaxError) as exc:
             problems.append(f"bin/{name}: {exc}")
-    for rel in ("plugin/bin/factory_files.py", "plugin/bin/factory-handoff-check", "plugin/bin/factory-manifest",
-                "plugin/bin/factory-state", "plugin/bin/factory-update-plan", "plugin/bin/factory-uninstall-settings",
+    for rel in ("plugin/tools/factory_files.py", "plugin/tools/factory-handoff-check", "plugin/tools/factory-manifest",
+                "plugin/tools/factory-state", "plugin/tools/factory-update-plan", "plugin/tools/factory-uninstall-settings",
                 "plugin/hooks/factory-session.py",
                 "scripts/known-hashes", "scripts/release", "scripts/e2e", "scripts/eval"):
         path = root / rel

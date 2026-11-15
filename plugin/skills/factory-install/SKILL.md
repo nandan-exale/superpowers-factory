@@ -17,7 +17,7 @@ The plugin's files are two levels above this skill's base directory:
 
 ```bash
 PLUGIN="<skill base>/../.."
-VENDOR="$PLUGIN/vendor/factory"; BIN="$PLUGIN/bin"
+VENDOR="$PLUGIN/vendor/factory"; BIN="$PLUGIN/tools"
 ```
 
 If `$VENDOR` doesn't exist, this agent has the skill folders without the rest

@@ -14,7 +14,7 @@ The plugin's files are two levels above this skill's base directory:
 
 ```bash
 PLUGIN="<skill base>/../.."
-VENDOR="$PLUGIN/vendor/factory"; BIN="$PLUGIN/bin"
+VENDOR="$PLUGIN/vendor/factory"; BIN="$PLUGIN/tools"
 ```
 
 If `$VENDOR` doesn't exist, this agent has the skill folders without the rest
@@ -33,7 +33,7 @@ in Claude Code. Don't download it yourself.
 3. **Runner.** If `factory/bin/runner status` reports the launchd agent
    installed, run `factory/bin/runner uninstall`.
 4. **Files.** The file list is the keys of `files` in `factory/manifest.json`
-   that are also in `FILES` from `$PLUGIN/bin/factory_files.py` (the agents
+   that are also in `FILES` from `$PLUGIN/tools/factory_files.py` (the agents
    in `factory/agents`, the orchestrator in `factory/lib`, and the rest), or in
    its `RETIRED` (`.claude/agents`, if present: installs before 0.5.0); delete only
    those. A key that is absolute, has a `..` segment, or isn't in `FILES` or
@@ -44,7 +44,7 @@ in Claude Code. Don't download it yourself.
    `factory/manifest.json`. Then remove directories left empty under
    `factory/` and `.claude/`, never `factory/jobs/` or anything in it:
    `find factory .claude -type d -empty -not -path factory/jobs -not -path 'factory/jobs/*' -delete`.
-5. **Stop hook.** Run `"$PLUGIN/bin/factory-uninstall-settings" .`. If it
+5. **Stop hook.** Run `"$PLUGIN/tools/factory-uninstall-settings" .`. If it
    exits 1, show its message and stop; don't edit the file by hand.
 6. **AGENTS.md.** Remove the `## Software factory` section: from that
    heading up to (not including) the next `## ` heading or the end of the
@@ -54,7 +54,7 @@ in Claude Code. Don't download it yourself.
    more, show it and ask.
 8. **`.gitignore`.** Keep `/factory/jobs/` and `/.worktrees/`: the job
    history stays on disk and must stay out of git.
-9. **Stop the offer.** Run `"$PLUGIN/bin/factory-state" decline`, so new
+9. **Stop the offer.** Run `"$PLUGIN/tools/factory-state" decline`, so new
    sessions don't offer `/factory-install` again.
 10. **Hand over.** Show `git status` and `git diff --stat`, suggest the
     message `chore: uninstall software factory`, and let them commit. Then
@@ -72,5 +72,5 @@ in Claude Code. Don't download it yourself.
     gh label delete factory:risk-ok --yes
     ```
 
-    `/factory-install` (or `"$PLUGIN/bin/factory-state" reset` to get the
+    `/factory-install` (or `"$PLUGIN/tools/factory-state" reset` to get the
     offer back) reinstalls later.
