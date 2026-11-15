@@ -74,7 +74,8 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
     factory/lib/orchestrator/__init__.py factory/lib/orchestrator/agents.py \
     factory/lib/orchestrator/jobcli.py factory/lib/orchestrator/prompts.py \
     factory/lib/orchestrator/readonly.py factory/lib/orchestrator/pipeline.py \
-    factory/lib/orchestrator/loop.py factory/bin/orchestrate \
+    factory/lib/orchestrator/loop.py factory/lib/secretscan.py factory/lib/reporting.py \
+    factory/bin/orchestrate \
     factory/config.json factory/checks.sh factory/bin/job factory/bin/gate factory/bin/route \
     factory/bin/stop-hook factory/bin/doctor factory/bin/runner factory/runner-settings.json \
     factory/dashboard.html

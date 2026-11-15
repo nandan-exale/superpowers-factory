@@ -19,7 +19,7 @@ LIB = ("factory/lib/runtimes/__init__.py", "factory/lib/runtimes/claude.py",
        "factory/lib/orchestrator/__init__.py", "factory/lib/orchestrator/agents.py",
        "factory/lib/orchestrator/jobcli.py", "factory/lib/orchestrator/prompts.py",
        "factory/lib/orchestrator/readonly.py", "factory/lib/orchestrator/pipeline.py",
-       "factory/lib/orchestrator/loop.py")
+       "factory/lib/orchestrator/loop.py", "factory/lib/secretscan.py", "factory/lib/reporting.py")
 FILES = (
     ".claude/skills/factory/SKILL.md",
     *(f"factory/agents/{name}.md" for name in AGENTS),
