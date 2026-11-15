@@ -3,6 +3,38 @@
 All notable changes to superpowers-factory. Newest first. `scripts/release`
 adds each new section.
 
+## [0.6.0] - 2026-11-15
+
+### Added
+
+- `bin/factory-handoff-check` runs the handoff checks; the handoff skill uses it.
+- The learner reads one agents-best-practices reference when it drafts a rule.
+- Directory listing details: icon, `homepage`, `repository`, `documentationUrl`
+  and `supportUrl` in `plugin.json`; `SECURITY.md` with private vulnerability
+  reporting.
+- README: "What the plugin runs, writes and sends", example prompts, support,
+  and why the factory is harness engineering.
+
+### Changed
+
+- Only one orchestrator run per clone; the runner reports a busy clone instead
+  of starting another.
+- `bin/job` merges the base into job branches itself, outside the builder's
+  sandbox.
+- Secret scanning also scans merge commits, and keeps token rules on allowed
+  paths. Scanning and the report/digest code moved from `bin/job` into lib
+  modules.
+- The Stop hook passes its context and changed paths to `checks.sh`;
+  `scripts/check` skips unit tests for docs-only runs.
+- The bundled agents-best-practices skill has a shorter description.
+
+### Fixed
+
+- Job commands no longer deadlock on job locks.
+- The session hook is `hooks/factory-session.py`, so its command line and file
+  name agree on the interpreter.
+- `bin/job` writes GitHub URLs in its regexes without a backslash.
+
 ## [0.5.2] - 2026-11-15
 
 ### Fixed
