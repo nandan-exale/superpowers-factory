@@ -281,8 +281,8 @@ comments. So set up a notification, or check two places instead:
   "notify": {"command": ["osascript", "-e", "display notification (system attribute \"FACTORY_NOTIFY_MESSAGE\") with title (system attribute \"FACTORY_NOTIFY_TITLE\")"]}
   ```
 
-  For your phone, point it at a small script that sends the same variables to
-  ntfy.sh: `curl -H "Title: $FACTORY_NOTIFY_TITLE" -H "Click: $FACTORY_NOTIFY_URL" -d "$FACTORY_NOTIFY_MESSAGE" ntfy.sh/<your-topic>`.
+  For your phone, point it at a small script of your own that forwards the
+  same variables to a push service such as ntfy.sh.
   The command runs where the factory runs, so a desktop notification works for
   `/factory run` and the macOS runner, not on GitHub Actions. If it fails, the
   factory prints a `NOTE:` and carries on.
@@ -589,7 +589,7 @@ Good to know:
 Everything below happens on your machine or in your GitHub project. The plugin
 has no server of its own, and no telemetry.
 
-**At session start.** A hook runs `hooks/factory-session` (Python). It runs
+**At session start.** A hook runs `hooks/factory-session.py`. It runs
 `git` to read the project's `origin` and checks whether `factory/` exists, then
 tells Claude one of three things: offer `/factory-install`, offer
 `/factory-update`, or offer the factory as a third way to execute a Superpowers
