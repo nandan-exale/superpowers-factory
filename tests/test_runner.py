@@ -1,3 +1,4 @@
+import atexit
 import contextlib
 import io
 import json
@@ -86,33 +87,57 @@ sys.exit(0)
 """
 
 
+_RUNNER_TEMPLATE = None
+
+
+def _runner_template():
+    """The project with the fakes, the fake orchestrate and a pushed bare origin, built once per process."""
+    global _RUNNER_TEMPLATE
+    if _RUNNER_TEMPLATE is None:
+        tmp = tempfile.TemporaryDirectory(prefix="runner-template-")
+        atexit.register(tmp.cleanup)
+        root = Path(tmp.name).resolve()
+        p = InstalledProject(root)
+        for name, text in (("claude", FAKE_CLAUDE), ("gh", FAKE_GH_QUEUE), ("launchctl", FAKE_LAUNCHCTL)):
+            path = p.fakebin / name
+            path.write_text(text.format(python=sys.executable))
+            path.chmod(0o755)
+        p.write("factory/bin/orchestrate", FAKE_ORCHESTRATE.format(python=sys.executable), executable=True)
+        p.commit_all("fake orchestrate")
+        origin = root / "origin.git"
+        git(root, "init", "-q", "--bare", "-b", "main", str(origin))
+        git(origin, "config", "receive.autogc", "false")
+        git(p.root, "branch", "-M", "main")
+        git(p.root, "remote", "add", "origin", str(origin))
+        git(p.root, "push", "-q", "-u", "origin", "main")
+        _RUNNER_TEMPLATE = root
+    return _RUNNER_TEMPLATE
+
+
+def wait_for(condition, message, timeout=10):
+    """Poll `condition` until it is true; fail with `message` after `timeout` seconds."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError(message)
+        time.sleep(0.02)
+
+
 class RunnerCase(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
-        self.p = InstalledProject(self.tmp)
+        shutil.copytree(_runner_template(), self.tmp, symlinks=True, dirs_exist_ok=True)
+        self.p = InstalledProject.__new__(InstalledProject)
+        self.p._paths(self.tmp.resolve())
+        git(self.p.root, "remote", "set-url", "origin", str(self.tmp.resolve() / "origin.git"))
         self.record = self.tmp / "record.jsonl"
         self.issues = self.tmp / "issues.json"
         self.home = self.tmp / "home"
         self.home.mkdir()
         self.set_issues([])
         (self.tmp / "lc").mkdir()
-        for name, text in (("claude", FAKE_CLAUDE), ("gh", FAKE_GH_QUEUE), ("launchctl", FAKE_LAUNCHCTL)):
-            path = self.p.fakebin / name
-            path.write_text(text.format(python=sys.executable))
-            path.chmod(0o755)
-        self.p.write("factory/bin/orchestrate", FAKE_ORCHESTRATE.format(python=sys.executable), executable=True)
-        self.p.commit_all("fake orchestrate")
-        self.add_origin()
-
-    def add_origin(self):
-        origin = self.tmp / "origin.git"
-        git(self.tmp, "init", "-q", "--bare", "-b", "main", str(origin))
-        git(origin, "config", "receive.autogc", "false")
-        git(self.p.root, "branch", "-M", "main")
-        git(self.p.root, "remote", "add", "origin", str(origin))
-        git(self.p.root, "push", "-q", "-u", "origin", "main")
 
     def set_issues(self, issues):
         self.issues.write_text(json.dumps(issues))
@@ -288,10 +313,11 @@ class TickTest(RunnerCase):
     def test_timeout_stops_orchestrate_with_sigterm(self):
         # SIGTERM first, so orchestrate stops the agents it started in their own sessions.
         self.set_issues(self.WORK)
-        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="1", FAKE_ORCHESTRATE_SLEEP="10")
+        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="0.5", FACTORY_RUNNER_STOP_SECONDS="5",
+                          FAKE_ORCHESTRATE_SLEEP="10")
         self.assertEqual(res.returncode, 1)
         self.assertRegex(self.log_lines()[-1], r" timeout after \d+s$")
-        self.assertTrue(Path(str(self.record) + ".sigterm").exists())
+        wait_for(Path(str(self.record) + ".sigterm").exists, "orchestrate never got SIGTERM")
 
     def test_orchestrate_failure_is_logged_with_exit_code(self):
         self.set_issues(self.WORK)
@@ -590,9 +616,9 @@ class RobustnessTest(RunnerCase):
     def test_timeout_still_kills_with_output_in_files(self):
         self.set_issues(self.WORK)
         start = time.monotonic()
-        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="1", FAKE_ORCHESTRATE_SLEEP="10",
-                          FAKE_ORCHESTRATE_GRANDCHILD="1")
-        self.assertLess(time.monotonic() - start, 8)
+        res = self.runner("tick", FACTORY_RUNNER_MAX_SECONDS="0.5", FACTORY_RUNNER_STOP_SECONDS="0.5",
+                          FAKE_ORCHESTRATE_SLEEP="10", FAKE_ORCHESTRATE_GRANDCHILD="1")
+        self.assertLess(time.monotonic() - start, 5)
         self.assertEqual(res.returncode, 1)
         self.assertRegex(self.log_lines()[-1], r" timeout after \d+s$")
 
@@ -650,15 +676,38 @@ class InstallRaceTest(RunnerCase):
         self.assertEqual(cmds, ["bootout", "print", "print", "print", "print", "bootstrap"])
 
     def test_bootstrap_is_retried(self):
-        res = self.runner("install", FAKE_LAUNCHCTL_BOOTSTRAP_FAIL_TIMES="2")
+        res = self.runner("install", FAKE_LAUNCHCTL_BOOTSTRAP_FAIL_TIMES="2",
+                          FACTORY_RUNNER_BOOTSTRAP_BACKOFF_SECONDS="0.01")
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual([a[0] for a in self.launchctl_calls()].count("bootstrap"), 3)
 
     def test_bootstrap_gives_up_after_three_tries(self):
-        res = self.runner("install", FAKE_LAUNCHCTL_BOOTSTRAP_FAIL_TIMES="9")
+        res = self.runner("install", FAKE_LAUNCHCTL_BOOTSTRAP_FAIL_TIMES="9",
+                          FACTORY_RUNNER_BOOTSTRAP_BACKOFF_SECONDS="0.01")
         self.assertEqual(res.returncode, 1)
         self.assertIn("launchctl bootstrap failed", res.stderr)
         self.assertEqual([a[0] for a in self.launchctl_calls()].count("bootstrap"), 3)
+
+
+class DefaultsTest(RunnerCase):
+    def test_production_defaults_are_unchanged(self):
+        runner = load_script(f"runner_defaults_{id(self)}", self.p.root / "factory/bin/runner")
+        self.assertEqual(runner.STOP_SECONDS, 30)
+        self.assertEqual(runner.BOOTSTRAP_BACKOFF_SECONDS, 0.5)
+        max_minutes = json.loads((self.p.root / "factory/config.json").read_text())["runner"]["max_minutes"]
+        with mock.patch.dict(os.environ):
+            for name in ("FACTORY_RUNNER_STOP_SECONDS", "FACTORY_RUNNER_BOOTSTRAP_BACKOFF_SECONDS",
+                         "FACTORY_RUNNER_MAX_SECONDS"):
+                os.environ.pop(name, None)
+            self.assertEqual(runner.env_seconds("FACTORY_RUNNER_STOP_SECONDS", runner.STOP_SECONDS), 30)
+            self.assertEqual(runner.env_seconds("FACTORY_RUNNER_BOOTSTRAP_BACKOFF_SECONDS",
+                                                runner.BOOTSTRAP_BACKOFF_SECONDS), 0.5)
+            cfg = {"max_minutes": max_minutes}
+            self.assertEqual(runner.max_seconds_for(cfg), max_minutes * 60)
+            os.environ["FACTORY_RUNNER_MAX_SECONDS"] = ""
+            self.assertEqual(runner.max_seconds_for(cfg), max_minutes * 60)
+            os.environ["FACTORY_RUNNER_MAX_SECONDS"] = "0.5"
+            self.assertEqual(runner.max_seconds_for(cfg), 0.5)
 
 
 class MissingToolTest(RunnerCase):
