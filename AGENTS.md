@@ -21,6 +21,8 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
   project with a bare origin.
 - `scripts/check`: every repo rule. The Stop hook is the installed factory's
   `factory/bin/stop-hook`, which runs `factory/checks.sh` (= `scripts/check`).
+  `scripts/check` skips the unit tests for docs-only Stop-hook runs (the hook
+  sets `FACTORY_CHECKS_CONTEXT` and `FACTORY_CHANGED_PATHS`); the gate never does.
 - `factory/`, `factory/agents/`, `.claude/skills/factory/`: the factory
   **installed** in this repo to build it (see "Software factory" below). Not the
   source: change `vendor/factory/` instead. The installed copy changes only

@@ -297,10 +297,36 @@ CHECKS = [
 ]
 
 
+# Markdown that tests read (agent, skill and install wording), so it never takes the fast path.
+WORDING_TESTED = ("vendor/factory/factory/agents/", "vendor/factory/.claude/skills/", "skills/", ".claude/skills/")
+WORDING_TESTED_FILES = ("vendor/factory/INSTALL.md",)
+
+
+def is_docs_path(path):
+    parts = path.split("/")
+    if path.startswith("/") or ".." in parts:
+        return False
+    if path.startswith(WORDING_TESTED) or path in WORDING_TESTED_FILES:
+        return False
+    return path.startswith("docs/") or path.endswith(".md")
+
+
+def skip_tests_for_docs(env=os.environ):
+    """True when the Stop hook says only docs changed (FACTORY_CHECKS_CONTEXT, FACTORY_CHANGED_PATHS)."""
+    if env.get("FACTORY_CHECKS_CONTEXT") != "stop-hook":
+        return False
+    paths = [line for line in env.get("FACTORY_CHANGED_PATHS", "").splitlines() if line.strip()]
+    return bool(paths) and all(is_docs_path(path) for path in paths)
+
+
 def run(root, opts):
     failed = False
+    docs_only = skip_tests_for_docs()
     for name, check in CHECKS:
         if opts.fast and name == "tests":
+            continue
+        if docs_only and name == "tests":
+            print("SKIP tests: stop-hook context, docs-only change")
             continue
         try:
             problems = check(root, opts)

@@ -40,6 +40,18 @@ class GateEnvTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("unset unset", out)
 
+    def test_checks_never_see_the_stop_hook_variables(self):
+        gate = load_script("gate_hook_vars_under_test", VENDOR / "factory/bin/gate")
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "checks.sh"
+            script.write_text('echo "${FACTORY_CHECKS_CONTEXT-unset} ${FACTORY_CHANGED_PATHS-unset}"\n')
+            with mock.patch.object(gate, "CHECKS", script), \
+                    mock.patch.dict(os.environ, {"FACTORY_CHECKS_CONTEXT": "stop-hook",
+                                                 "FACTORY_CHANGED_PATHS": "docs/x.md"}):
+                code, out, _ = gate.run_checks(tmp)
+        self.assertEqual(code, 0)
+        self.assertIn("unset unset", out)
+
 
 class GateHookCase(unittest.TestCase):
     """gate --hook against a job whose worktree fails checks.sh."""

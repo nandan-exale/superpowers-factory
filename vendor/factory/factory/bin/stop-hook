@@ -10,6 +10,12 @@ A failure also leaves factory-stop-hook.failed in the git dir, so committing
 the broken edits can't skip the next run: with that marker present, checks run
 even on a clean tree. A pass removes the marker. Checks that run longer than
 FACTORY_STOP_HOOK_TIMEOUT seconds (default 540) are killed and don't block.
+
+checks.sh gets two variables only this hook sets: FACTORY_CHECKS_CONTEXT=stop-hook,
+and FACTORY_CHANGED_PATHS, the changed paths one per line. A project's checks.sh may
+use them to skip slow checks for a small change. The list is empty (so: run
+everything) when it can't be trusted: a deletion, a path with a newline, a failed
+`git status`, or a failed-marker still present.
 """
 
 import hashlib
@@ -80,9 +86,32 @@ def checks_timeout():
         return float(DEFAULT_TIMEOUT)
 
 
+def changed_paths():
+    """Changed paths, newline-separated, or "" when the list can't be trusted."""
+    if git_file(FAILED_NAME).exists():
+        return ""
+    res = git("status", "--porcelain", "-z", "--untracked-files=all", text=False)
+    if res.returncode != 0:
+        return ""
+    entries = iter(res.stdout.split(b"\0"))
+    paths = []
+    for entry in entries:
+        if not entry:
+            continue
+        status, path = entry[:2], os.fsdecode(entry[3:])
+        if b"D" in status or "\n" in path:
+            return ""
+        if status[:1] in (b"R", b"C") or status[1:] in (b"R", b"C"):
+            next(entries, None)  # the original path of a rename or copy
+        paths.append(path)
+    return "\n".join(paths)
+
+
 def run_checks(timeout):
     """(exit code, output), or None if the checks timed out and were killed."""
     env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
+    env["FACTORY_CHECKS_CONTEXT"] = "stop-hook"
+    env["FACTORY_CHANGED_PATHS"] = changed_paths()
     proc = subprocess.Popen(["bash", str(CHECKS)], cwd=REPO, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True, errors="replace",
                             start_new_session=True, env=env)
