@@ -3,6 +3,24 @@
 All notable changes to superpowers-factory. Newest first. `scripts/release`
 adds each new section.
 
+## [0.7.0] - 2026-11-15
+
+### Fixed
+
+- shrink the listing icon to flat colours at 512px
+- stop fetching the plugin from GitHub in the skills
+
+### Changed
+
+- refactor: move the plugin into plugin/
+- Merge pull request #65 from nandan-exale/fix/listing-icon
+- chore: name the factory import commit in NOTICE
+- refactor: rename the plugin's bin/ to tools/
+- test: check the plugin folder stays installable
+- docs: split the README for the plugin folder
+- Merge remote-tracking branch 'origin/main' into factory/024-move-the-plugin-into
+- Merge pull request #67 from nandan-exale/factory/024-move-the-plugin-into
+
 ## [0.6.0] - 2026-11-15
 
 ### Added
