@@ -484,10 +484,10 @@ The factory's agents can run under Claude Code, OpenAI Codex CLI, OpenCode,
 GitHub Copilot CLI or Cursor CLI: one per project, set by `runtime` in
 `factory/config.json` (`claude`, `codex`, `opencode`, `copilot`, `cursor`).
 
-- **Install the skills** in any of these agents with
-  `npx skills add nandan-exale/superpowers-factory`. An agent that got only
-  the skill folders fetches the rest of the plugin (a tagged release) when
-  `/factory-install` runs, after asking you.
+- **Install the plugin** in any of these agents with
+  `npx plugins add nandan-exale/superpowers-factory` (see
+  [Other agents](#other-agents)). The skills need the plugin's other files,
+  so installing the skill folders alone (`npx skills add`) isn't enough.
 - **`/factory-install` asks for the runtime** and, for anything but Claude,
   the model id for each tier routing uses (`fast`, `balanced`, `strong`,
   `frontier`), written to `runtimes.<runtime>.tiers`. Routing names tiers, so
@@ -641,9 +641,6 @@ can't read it. `factory/bin/runner uninstall` removes the schedule.
   comments and labels in your project.
 - To your model provider, through the agent CLI you already use: the same
   prompts and code any session with that agent sends.
-- An agent that got only the skill folders (`npx skills add`) downloads a
-  tagged release of this repository from GitHub during `/factory-install`,
-  after asking you.
 
 Nothing is sent to the plugin's author. Job state, costs and review findings
 stay in `factory/jobs/` in your clone (gitignored); the learning loop reads

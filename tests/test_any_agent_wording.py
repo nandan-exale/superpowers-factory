@@ -14,9 +14,15 @@ class AnyAgentWordingTest(unittest.TestCase):
     def test_skills_find_the_plugin_without_claude_plugin_root(self):
         for text in (INSTALL, UPDATE, UNINSTALL):
             self.assertIn("## Find the plugin", text)
-            self.assertIn("git clone --depth 1 --branch", text)
+            self.assertIn('PLUGIN="<skill base>/../.."', text)
             self.assertNotIn("<skill base>/../../bin", text)
             self.assertNotIn("<skill base>/../../vendor/factory", text)
+
+    def test_skills_never_download_the_plugin(self):
+        for text in (INSTALL, UPDATE, UNINSTALL):
+            self.assertNotIn("git clone", text)
+            self.assertNotIn("git ls-remote", text)
+            self.assertIn("npx plugins add nandan-exale/superpowers-factory", text)
 
     def test_install_asks_for_the_runtime_and_its_tiers(self):
         for word in ("claude, codex, opencode, copilot or cursor", "runtimes.<runtime>.tiers",

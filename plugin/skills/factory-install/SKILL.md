@@ -13,23 +13,18 @@ Announce: "I'm using factory-install to set up the software factory here."
 
 ## Find the plugin
 
-The plugin's files are two levels above this skill's base directory when the
-plugin is installed whole (Claude Code). An agent that installed only the
-skill folders (`npx skills add`) doesn't have them, so fetch them:
+The plugin's files are two levels above this skill's base directory:
 
 ```bash
 PLUGIN="<skill base>/../.."
-if [ ! -d "$PLUGIN/vendor/factory" ]; then
-  TAG=$(git ls-remote --tags --refs https://github.com/nandan-exale/superpowers-factory 'v*' \
-        | sed 's#.*refs/tags/##' | sort -V | tail -1)
-  PLUGIN=$(mktemp -d)/superpowers-factory
-  git clone --depth 1 --branch "$TAG" https://github.com/nandan-exale/superpowers-factory "$PLUGIN"
-fi
 VENDOR="$PLUGIN/vendor/factory"; BIN="$PLUGIN/bin"
 ```
 
-Ask your human partner before the clone: say it downloads the plugin's
-release `<TAG>` from GitHub into a temporary folder.
+If `$VENDOR` doesn't exist, this agent has the skill folders without the rest
+of the plugin. Stop, and tell your human partner to install the whole plugin:
+`npx plugins add nandan-exale/superpowers-factory` for Codex, Cursor or
+GitHub Copilot CLI, or `/plugin install superpowers-factory@superpowers-factory`
+in Claude Code. Don't download it yourself.
 
 ## 0. Choose the runtime
 
