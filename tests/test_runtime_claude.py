@@ -61,7 +61,33 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(env, {"CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1", "FACTORY_RUNNER": "1",
                                "FACTORY_JOB": "004-x"})
         written = json.loads((self.runs / "s.settings.json").read_text())
-        self.assertEqual(written, {"permissions": {"deny": ["Read(./.env)"]}, "sandbox": {"enabled": True}})
+        self.assertEqual(written, {"permissions": {"deny": ["Read(./.env)"]}, "sandbox": {
+            "enabled": True,
+            "filesystem": {"allowWrite": [str(self.repo), str(self.repo / ".git")]}}})
+
+    def test_sandboxed_commands_may_write_the_job_folder_and_main_git(self):
+        # Regression: jobs 014-021 escalated because the sandbox refused `job push` its lock in
+        # factory/jobs/<id>/ and its objects in the main checkout's .git. Granted through the
+        # sandbox, not --add-dir, so the Edit and Write tools get no access to .git/hooks.
+        for role in ("builder", "approver", "reviewer-code"):
+            argv, _ = claude.build(self.run_for(role))
+            sandbox = json.loads((self.runs / "s.settings.json").read_text())["sandbox"]
+            self.assertEqual(sandbox["filesystem"]["allowWrite"],
+                             [str(p) for p in runtimes.writable_dirs(self.run_for(role))], role)
+            self.assertNotIn("--add-dir", argv, role)
+
+    def test_runner_settings_keep_their_own_write_paths(self):
+        (self.repo / "factory" / "runner-settings.json").write_text(json.dumps(
+            {"sandbox": {"enabled": True, "filesystem": {"allowWrite": ["/opt/cache"], "denyWrite": ["/x"]}}}))
+        claude.build(self.run_for("builder"))
+        fs = json.loads((self.runs / "s.settings.json").read_text())["sandbox"]["filesystem"]
+        self.assertEqual(fs, {"allowWrite": ["/opt/cache", str(self.repo), str(self.repo / ".git")],
+                              "denyWrite": ["/x"]})
+
+    def test_vendored_runner_settings_let_gh_verify_tls(self):
+        # macOS's sandbox blocks the trust service Go tools use: gh failed with x509 OSStatus -26276.
+        settings = json.loads((PLUGIN / "vendor" / "factory" / "factory" / "runner-settings.json").read_text())
+        self.assertIs(settings["sandbox"]["enableWeakerNetworkIsolation"], True)
 
     def test_every_role_allows_its_own_tools(self):
         # With CLAUDE_CODE_SUBPROCESS_ENV_SCRUB set, Claude Code 2.1.322 forces the permission mode to
