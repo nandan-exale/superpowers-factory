@@ -56,6 +56,13 @@ paths relative to `vendor/factory/`. The implementer records `vendor_hash()`
 before the move and compares it after; `scripts/known-hashes --check` (already
 in `scripts/check`) catches any content change.
 
+**Hash history: follow the rename.** `scripts/known-hashes` lists every
+version of each vendored file from `git log -- <path>`, which stops at a
+rename. It switches to `git log --follow --name-only` and reads each blob at
+the path that commit had, so the regenerated `known-hashes.json` is identical
+to today's and `/factory-update` still recognises unedited old installs. A
+test regenerates the list and compares it with the committed file.
+
 **Repo-side paths** gain the `plugin/` prefix:
 
 - `scripts/check` (`JSON_FILES`, `check_license`, `FACTORY`, the version
