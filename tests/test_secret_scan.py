@@ -50,10 +50,35 @@ class SecretScanTest(ScanCase):
             self.assertNotIn(value, hit)
             self.assertIn("chars)", hit)
 
-    def test_allow_globs_and_removed_lines_are_skipped(self):
-        self.commit({"tests/fixtures/keys.txt": SAMPLES["aws access key"] + "\n",
-                     "app.test.js": SAMPLES["github token"] + "\n"})
+    def test_allow_globs_skip_only_the_assigned_secret_rule_and_removed_lines_are_skipped(self):
+        self.commit({"tests/fixtures/conf.txt": SAMPLES["assigned secret"] + "\n",
+                     "app.test.js": SAMPLES["assigned secret"] + "\n"})
         self.assertEqual(self.job.secret_hits(self.wt), [])
+        self.commit({"tests/fixtures/conf.txt": "x = 1\n"})
+        self.assertEqual(self.job.secret_hits(self.wt), [])
+
+    def test_token_formats_are_reported_on_allowed_paths(self):
+        self.commit({"tests/fixtures/keys.txt": SAMPLES["github token"] + "\n"})
+        hits = self.job.secret_hits(self.wt)
+        self.assertEqual(len(hits), 1)
+        self.assertTrue(hits[0].startswith("tests/fixtures/keys.txt:1 github token: ghp_"))
+        self.assertNotIn(SAMPLES["github token"], hits[0])
+
+    def test_a_secret_added_only_by_a_merge_commit_is_refused(self):
+        job = {"id": "001-x", "stage": "build", "worktree": str(self.wt), "branch": "factory/001-x"}
+        self.commit({"a.txt": "a\n"})
+        git(self.wt, "checkout", "-q", "-b", "side", "origin/main")
+        self.commit({"b.txt": "b\n"})
+        git(self.wt, "checkout", "-q", "factory/001-x")
+        git(self.wt, "merge", "--no-ff", "--no-commit", "side")
+        (self.wt / "conf.py").write_text(SAMPLES["aws access key"] + "\n")
+        git(self.wt, "add", "conf.py")
+        git(self.wt, "commit", "-q", "-m", "merge side")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+            self.job.cmd_push(job)
+        self.assertIn("SECRET: conf.py:1 aws access key", out.getvalue())
+        self.assertEqual(git(self.project.repo, "ls-remote", "origin", "factory/001-x"), "")
 
     def test_a_secret_added_then_deleted_is_still_in_history(self):
         self.commit({"conf.py": "x = 1\n" + SAMPLES["aws access key"] + "\n"})

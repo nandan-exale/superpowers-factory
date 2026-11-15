@@ -511,8 +511,11 @@ file say so, and are yours to make.
   the commit you reviewed: if the branch changes again, it stops again.
 - **Secrets.** The builder pushes with `factory/bin/job push`, which refuses
   to push added lines that look like private keys or tokens. The gate scans
-  again; a hit there stops the job and asks you to rotate the secret. This is a
-  backstop, not a replacement for GitHub secret scanning.
+  again; a hit there stops the job and asks you to rotate the secret. Merge
+  commits are scanned against their first parent. `secret_scan.allow` exempts
+  matching paths only from the heuristic "assigned secret" rule, not from the
+  token-format rules. This is a backstop, not a replacement for GitHub secret
+  scanning.
 
 Good to know:
 
