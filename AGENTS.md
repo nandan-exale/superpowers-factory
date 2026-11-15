@@ -30,6 +30,8 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
   hand and never in CI. `scripts/e2e` runs the scenarios in `tests/e2e/` on a
   sandbox repo; `scripts/eval` runs agent prompts against `tests/evals/` and
   compares with `tests/evals/baseline.json`. Their unit tests fake `claude` and `gh`.
+- `bin/factory-handoff-check`: the handoff skill's read-only pre-filing checks
+  (`<spec> <plan>`); tested by `tests/test_handoff_check.py`.
 - `bin/factory-uninstall-settings`: removes only the factory's Stop hook from a
   project's `.claude/settings.json`; `skills/factory-uninstall/` is the
   `/factory-uninstall` skill that uses it.
