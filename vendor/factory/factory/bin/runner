@@ -54,6 +54,24 @@ KEEP_RUNS = 50
 ORCHESTRATE = FACTORY / "bin" / "orchestrate"
 CHILD = None  # the running orchestrate process, for the SIGTERM handler
 STOP_SECONDS = 30  # how long orchestrate gets to stop its agents after SIGTERM
+BOOTSTRAP_BACKOFF = 0.5  # seconds between launchctl bootstrap retries
+
+
+def env_seconds(name, default):
+    """A float from the environment (a test hook), or the default when unset or empty."""
+    return float(os.environ.get(name) or default)
+
+
+def stop_seconds():
+    return env_seconds("FACTORY_RUNNER_STOP_SECONDS", STOP_SECONDS)
+
+
+def bootstrap_backoff():
+    return env_seconds("FACTORY_RUNNER_BOOTSTRAP_BACKOFF", BOOTSTRAP_BACKOFF)
+
+
+def max_run_seconds(runner):
+    return env_seconds("FACTORY_RUNNER_MAX_SECONDS", runner["max_minutes"] * 60)
 
 
 def die(message):
@@ -259,7 +277,7 @@ def stop(proc):
     """SIGTERM first: orchestrate starts each agent in its own session, so only it can stop them."""
     proc.terminate()
     try:
-        proc.wait(timeout=STOP_SECONDS)
+        proc.wait(timeout=stop_seconds())
     except subprocess.TimeoutExpired:
         pass
     kill_group(proc)
@@ -585,7 +603,7 @@ def tick_body(base, runner, ci_token_value):
     if not shutil.which(rt.BINARY):
         log(f"error: {rt.BINARY} not found on PATH")
         return 1
-    max_seconds = int(os.environ.get("FACTORY_RUNNER_MAX_SECONDS") or runner["max_minutes"] * 60)
+    max_seconds = max_run_seconds(runner)
     RUNS.mkdir(parents=True, exist_ok=True)
     out_path = RUNS / f"{stamp().replace(':', '')}.out"
     err_path = out_path.with_name(out_path.name.removesuffix(".out") + ".stderr.log")
@@ -711,7 +729,7 @@ def install_launchd(runner, dry_run):
             break
         if attempt == 2:
             die(f"launchctl bootstrap failed: {first_line(res.stderr)}")
-        time.sleep(0.5)
+        time.sleep(bootstrap_backoff())
     print(f"installed {path}; runs every {runner['interval_minutes']} min")
     return 0
 
