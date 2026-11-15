@@ -90,7 +90,7 @@ everything" (a deletion, an odd path or an earlier failure empties it). A
 
 - `base_branch`: the default branch.
 - `merge_method`: `merge`, `squash` or `rebase`, one the repo allows
-  (`gh api repos/{owner}/{repo} --jq '{allow_merge_commit, allow_squash_merge, allow_rebase_merge}'`).
+  (`gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed`).
 - `protected_paths`: keep the two factory entries and don't add the project's
   tests. Features legitimately change existing tests (a new required field
   changes every fixture), and a protected test blocks the job with no way
