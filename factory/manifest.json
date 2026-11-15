@@ -1,5 +1,5 @@
 {
-  "vendor_hash": "f375dbad1442a735aec988dd59488eacc592017bfadf9eeb0d68166df84e3c06",
+  "vendor_hash": "6e92d2bb333192dcbc5546f849c756aa02423fea255301a497525c195cd3e0d8",
   "files": {
     ".claude/skills/factory/SKILL.md": "b79d58bef9e56ea6b9065f087e7c26de8b5b08b9f37d5420ddf88f31334a6f9d",
     "factory/agents/intake.md": "172ba6d1caeecc562811b7df3a29091d475d68c4f0ca130657ba7ada4c898142",
@@ -12,7 +12,7 @@
     "factory/agents/approver.md": "469aab1818f9a4be230ac975f6489c53149111c31df9ca6167c39bcdca209ecd",
     "factory/agents/learner.md": "8d031c2e0a279b36931a0c21709bea454e13644cf1a91dd2ab6f5a2d7ad184b5",
     "factory/lib/runtimes/__init__.py": "e57c460c17bfc50de6c1e57d0660857e6eea233013f0f087a012e4780bd0c371",
-    "factory/lib/runtimes/claude.py": "03c304643bd9380ec90167a4feba13c53df4066f5793376de5ff219398bc29c1",
+    "factory/lib/runtimes/claude.py": "034e96ab71b0d4f369f78f35c848cc108de5ea227aff000ad83a33fa0da6138e",
     "factory/lib/runtimes/codex.py": "f3904af752a39be035dec15623d61bb56bb77dd2fdebc2f6cf2d252872ca3992",
     "factory/lib/runtimes/opencode.py": "4f89ce2e24e5dc648aa082dfa920ff52b359b052072ddf4b49f73ef3da9a2fe9",
     "factory/lib/runtimes/copilot.py": "dbd5a13fc457c254190bee8c10f5ce058d93e3516d50257e068de1fce7065cc2",
@@ -33,10 +33,10 @@
     "factory/bin/stop-hook": "acbc628031d508faadf40f6ea6d97ddd591dedbcb7df4c034d27d5b690a1a453",
     "factory/bin/doctor": "320a9074b4dd52b6ae096152dc72a12afde459bc6a85fa7505a5e188ac1b43eb",
     "factory/bin/runner": "df8ed5706e123d85824668f12cd1ae1b3063a244cfce8c0225e139a56e805a22",
-    "factory/runner-settings.json": "e470e6a6ce32f73c66dd173585f279223708e134d4092a332e6b2f67c0efb358",
+    "factory/runner-settings.json": "cf4c53fd9f8c143ee014fcaced34c5b0fe763fa8f5a5e3ee428ab1ec8e9916c3",
     "factory/dashboard.html": "d6fd22035202760bd567de879462c179fe6c8247d807ec791c2aeca2abd0b822"
   },
-  "settings_core": "883571c4c4700983d0b2ca2d6fb2fee71b93ef8ceb0457bec7a3559e5e81ed11",
+  "settings_core": "159832109aa8d29402019fb25bbaf30e8ff455f6d381aec9043085b25b8fe1b2",
   "settings_domains": [
     "github.com",
     "api.github.com",
