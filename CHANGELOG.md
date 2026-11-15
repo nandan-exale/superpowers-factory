@@ -3,6 +3,19 @@
 All notable changes to superpowers-factory. Newest first. `scripts/release`
 adds each new section.
 
+## [0.5.2] - 2026-11-15
+
+### Fixed
+
+- let sandboxed claude agents push their job branch
+
+### Changed
+
+- chore: update software factory
+- Merge pull request #49 from nandan-exale/chore/update-software-factory
+- test: cover sandbox write paths and gh TLS for claude agents
+- Merge pull request #50 from nandan-exale/fix/claude-sandbox-writes
+
 ## [0.5.1] - 2026-11-15
 
 ### Fixed
