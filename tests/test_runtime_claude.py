@@ -5,9 +5,10 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-PLUGIN = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[1]
+PLUGIN = REPO / "plugin"
 LIB = PLUGIN / "vendor" / "factory" / "factory" / "lib"
-FIXTURES = PLUGIN / "tests" / "fixtures" / "runtimes" / "claude"
+FIXTURES = REPO / "tests" / "fixtures" / "runtimes" / "claude"
 sys.path.insert(0, str(LIB))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 

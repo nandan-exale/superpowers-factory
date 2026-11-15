@@ -9,7 +9,7 @@ from pathlib import Path
 from budget_case import BudgetCase
 from factory_project import FactoryProject, git
 
-VENDOR_GATE = Path(__file__).resolve().parents[1] / "vendor/factory/factory/bin/gate"
+VENDOR_GATE = Path(__file__).resolve().parents[1] / "plugin/vendor/factory/factory/bin/gate"
 
 
 class RiskyGateTest(unittest.TestCase):

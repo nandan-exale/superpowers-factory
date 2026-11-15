@@ -24,7 +24,7 @@ directory. Run the checks from the project root:
 
 ```bash
 PLUGIN="<skill base>/../.."
-"$PLUGIN/bin/factory-handoff-check" <spec> <plan>
+"$PLUGIN/tools/factory-handoff-check" <spec> <plan>
 ```
 
 It is read-only. It prints one `PASS`, `FAIL` or `SKIP` line per check, then

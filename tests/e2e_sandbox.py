@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-PLUGIN = Path(__file__).resolve().parents[1]
+PLUGIN = Path(__file__).resolve().parents[1] / "plugin"
 VENDOR_CONFIG = PLUGIN / "vendor" / "factory" / "factory" / "config.json"
 URL = "https://github.com/tester/factory-e2e.git"
 

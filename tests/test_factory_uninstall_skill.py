@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-PLUGIN = Path(__file__).resolve().parents[1]
+PLUGIN = Path(__file__).resolve().parents[1] / "plugin"
 SKILL = PLUGIN / "skills/factory-uninstall/SKILL.md"
 
 

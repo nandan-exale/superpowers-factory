@@ -8,7 +8,8 @@ from unittest import mock
 
 from script_loader import load_script
 
-PLUGIN = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[1]
+PLUGIN = REPO / "plugin"
 ORCHESTRATE = PLUGIN / "vendor" / "factory" / "factory" / "bin" / "orchestrate"
 CONFIG = {"base_branch": "main", "runtime": "codex",
           "runtimes": {"claude": {"credential_env": "CLAUDE_CODE_OAUTH_TOKEN"},
@@ -35,7 +36,7 @@ class OrchestrateEnvTest(unittest.TestCase):
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        cli = types.SimpleNamespace(repo=PLUGIN, config=lambda: CONFIG)
+        cli = types.SimpleNamespace(repo=REPO, config=lambda: CONFIG)
         runtime = types.SimpleNamespace(NAME="codex", BINARY="true", CAPS={"stop_hook": False})
         for target, name, value in ((self.orch, "lock_path", lambda: Path(tmp.name) / "factory-orchestrate.lock"),
                                     (self.orch, "Loop", RecordingLoop), (self.orch, "JobCli", lambda repo: cli),
@@ -63,7 +64,7 @@ class OrchestrateEnvTest(unittest.TestCase):
 
     def test_claude_agents_also_get_the_anthropic_variables(self):
         claude = {**CONFIG, "runtime": "claude"}
-        cli = types.SimpleNamespace(repo=PLUGIN, config=lambda: claude)
+        cli = types.SimpleNamespace(repo=REPO, config=lambda: claude)
         env = {"CLAUDE_CODE_OAUTH_TOKEN": "tok", "ANTHROPIC_BASE_URL": "http://x", "OPENAI_API_KEY": "leak"}
         with mock.patch.object(self.orch, "JobCli", lambda repo: cli), mock.patch.dict(os.environ, env):
             self.assertEqual(self.orch.main(["run"]), 0)

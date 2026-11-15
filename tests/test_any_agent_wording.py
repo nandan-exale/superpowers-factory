@@ -2,21 +2,27 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-INSTALL = (ROOT / "skills/factory-install/SKILL.md").read_text()
-UPDATE = (ROOT / "skills/factory-update/SKILL.md").read_text()
-UNINSTALL = (ROOT / "skills/factory-uninstall/SKILL.md").read_text()
-BUILDER = (ROOT / "vendor/factory/factory/agents/builder.md").read_text()
-LEARNER = (ROOT / "vendor/factory/factory/agents/learner.md").read_text()
-UPSTREAM_INSTALL = (ROOT / "vendor/factory/INSTALL.md").read_text()
+INSTALL = (ROOT / "plugin/skills/factory-install/SKILL.md").read_text()
+UPDATE = (ROOT / "plugin/skills/factory-update/SKILL.md").read_text()
+UNINSTALL = (ROOT / "plugin/skills/factory-uninstall/SKILL.md").read_text()
+BUILDER = (ROOT / "plugin/vendor/factory/factory/agents/builder.md").read_text()
+LEARNER = (ROOT / "plugin/vendor/factory/factory/agents/learner.md").read_text()
+UPSTREAM_INSTALL = (ROOT / "plugin/vendor/factory/INSTALL.md").read_text()
 
 
 class AnyAgentWordingTest(unittest.TestCase):
     def test_skills_find_the_plugin_without_claude_plugin_root(self):
         for text in (INSTALL, UPDATE, UNINSTALL):
             self.assertIn("## Find the plugin", text)
-            self.assertIn("git clone --depth 1 --branch", text)
+            self.assertIn('PLUGIN="<skill base>/../.."', text)
             self.assertNotIn("<skill base>/../../bin", text)
             self.assertNotIn("<skill base>/../../vendor/factory", text)
+
+    def test_skills_never_download_the_plugin(self):
+        for text in (INSTALL, UPDATE, UNINSTALL):
+            self.assertNotIn("git clone", text)
+            self.assertNotIn("git ls-remote", text)
+            self.assertIn("npx plugins add nandan-exale/superpowers-factory", text)
 
     def test_install_asks_for_the_runtime_and_its_tiers(self):
         for word in ("claude, codex, opencode, copilot or cursor", "runtimes.<runtime>.tiers",

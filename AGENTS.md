@@ -5,8 +5,11 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
 
 ## Map
 
-- `skills/factory-install`, `skills/factory-handoff`: this plugin's skills.
-- `vendor/factory/`: the vendored factory, with edits. `factory/bin/job` is the
+- `plugin/`: everything users install, and the folder submitted to Anthropic's
+  directory. Development files (`tests/`, `scripts/`, `docs/`) stay outside it;
+  `scripts/check`'s `plugin-folder` check enforces that.
+- `plugin/skills/factory-install`, `plugin/skills/factory-handoff`: this plugin's skills.
+- `plugin/vendor/factory/`: the vendored factory, with edits. `factory/bin/job` is the
   job state machine; `factory/config.json` holds models, efforts and routing;
   `factory/bin/orchestrate` (with `factory/lib/orchestrator/`) is the
   orchestrator and `.claude/skills/factory` its entry point;
@@ -25,9 +28,9 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
   sets `FACTORY_CHECKS_CONTEXT` and `FACTORY_CHANGED_PATHS`); the gate never does.
 - `factory/`, `factory/agents/`, `.claude/skills/factory/`: the factory
   **installed** in this repo to build it (see "Software factory" below). Not the
-  source: change `vendor/factory/` instead. The installed copy changes only
+  source: change `plugin/vendor/factory/` instead. The installed copy changes only
   through `/factory-update`, by a human.
-- `scripts/known-hashes`: writes `vendor/known-hashes.json`, every hash each
+- `scripts/known-hashes`: writes `plugin/vendor/known-hashes.json`, every hash each
   vendored file has had, so `/factory-update` recognises unedited old copies.
   `--check` (run by `scripts/check`) fails when a current version is missing.
 - `scripts/release`: bumps the version, writes `CHANGELOG.md`, commits and tags.
@@ -35,10 +38,10 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
   hand and never in CI. `scripts/e2e` runs the scenarios in `tests/e2e/` on a
   sandbox repo; `scripts/eval` runs agent prompts against `tests/evals/` and
   compares with `tests/evals/baseline.json`. Their unit tests fake `claude` and `gh`.
-- `bin/factory-handoff-check`: the handoff skill's read-only pre-filing checks
+- `plugin/tools/factory-handoff-check`: the handoff skill's read-only pre-filing checks
   (`<spec> <plan>`); tested by `tests/test_handoff_check.py`.
-- `bin/factory-uninstall-settings`: removes only the factory's Stop hook from a
-  project's `.claude/settings.json`; `skills/factory-uninstall/` is the
+- `plugin/tools/factory-uninstall-settings`: removes only the factory's Stop hook from a
+  project's `.claude/settings.json`; `plugin/skills/factory-uninstall/` is the
   `/factory-uninstall` skill that uses it.
 - `docs/superpowers/specs`, `docs/superpowers/plans`: approved designs and plans.
 
@@ -50,7 +53,8 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
 - No agent or skill frontmatter sets `model`. Models and efforts come from
   `factory/config.json` (`model_aliases`, `effort_levels`, `agents`,
   `routing`, `surface_reviewers`).
-- Keep `LICENSE` (GPLv3) and `vendor/factory/NOTICE`. Every commit after the
+- Keep `LICENSE` (GPLv3, copied to `plugin/LICENSE`) and
+  `plugin/vendor/factory/NOTICE`. Every commit after the
   unmodified import counts as a modification, so make vendored edits in their
   own commits.
 - No upstream branding anywhere; `scripts/check` enforces it.
@@ -68,7 +72,7 @@ factory builds each approved plan as one PR. See `README.md` for what users do.
   `.worktrees/<job-id>` worktree) commit and push their job branch as their
   agent instructions say. Nobody force-pushes without a human's confirmation.
 - Edited a vendored file? Run `scripts/known-hashes` and commit
-  `vendor/known-hashes.json` with your plugin-side changes (`scripts/check`
+  `plugin/vendor/known-hashes.json` with your plugin-side changes (`scripts/check`
   fails until you do).
 - Changed an agent prompt? Say in the PR whether you ran `scripts/eval`, and
   commit a baseline change only with the run that produced it.
@@ -94,5 +98,5 @@ with `/factory-handoff`. They skip intake and the spec writer: the factory
 copies the committed spec and plan, and the builder carries out the plan.
 
 This repo is the factory's own source. A job that changes the factory edits
-`vendor/factory/`; the installed copy in `factory/` and `.claude/` is
+`plugin/vendor/factory/`; the installed copy in `factory/` and `.claude/` is
 protected (`protected_paths`) and only `/factory-update` changes it.

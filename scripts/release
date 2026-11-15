@@ -15,10 +15,10 @@ from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN_JSON = Path(".claude-plugin/plugin.json")
+PLUGIN_JSON = Path("plugin/.claude-plugin/plugin.json")
 MARKET_JSON = Path(".claude-plugin/marketplace.json")
 CHANGELOG = Path("CHANGELOG.md")
-HASHES = Path("vendor/known-hashes.json")
+HASHES = Path("plugin/vendor/known-hashes.json")
 VERSION = re.compile(r"^\d+\.\d+\.\d+$")
 VERSION_KEY = re.compile(r'("version"\s*:\s*")[^"]*(")')
 

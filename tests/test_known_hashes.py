@@ -9,11 +9,12 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "bin"))
+sys.path.insert(0, str(REPO / "plugin" / "tools"))
 
 import factory_files as ff  # noqa: E402
 
 SCRIPT = REPO / "scripts/known-hashes"
+KNOWN = REPO / "plugin/vendor/known-hashes.json"
 
 
 def sha(data):
@@ -28,14 +29,22 @@ def shallow():
 
 class KnownHashesFileTest(unittest.TestCase):
     def test_every_current_vendored_file_is_listed(self):
-        data = json.loads((REPO / "vendor/known-hashes.json").read_text())
+        data = json.loads(KNOWN.read_text())
         for rel in ff.FILES:
             self.assertIn(ff.sha256_file(ff.VENDOR / rel), data[rel], rel)
 
     @unittest.skipIf(shallow(), "needs full git history")
     def test_history_gives_job_more_than_one_version(self):
-        data = json.loads((REPO / "vendor/known-hashes.json").read_text())
+        data = json.loads(KNOWN.read_text())
         self.assertGreater(len(data["factory/bin/job"]), 1)
+
+    @unittest.skipIf(shallow(), "needs full git history")
+    def test_generated_list_matches_the_committed_one(self):
+        """Regenerating from git history gives the committed list: no version is lost to a rename."""
+        res = subprocess.run([sys.executable, str(SCRIPT), "--root", str(REPO), "--stdout"],
+                             capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(json.loads(res.stdout), json.loads(KNOWN.read_text()))
 
     def test_reader_returns_empty_for_a_missing_file(self):
         env = os.environ.get("FACTORY_KNOWN_HASHES")
@@ -64,7 +73,7 @@ class CheckModeTest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
-        shutil.copytree(REPO / "vendor", self.root / "vendor")
+        shutil.copytree(REPO / "plugin" / "vendor", self.root / "plugin" / "vendor")
 
     def check(self):
         return subprocess.run([sys.executable, str(SCRIPT), "--root", str(self.root), "--check"],
@@ -75,12 +84,12 @@ class CheckModeTest(unittest.TestCase):
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
 
     def test_check_fails_when_a_vendored_file_changed(self):
-        path = self.root / "vendor/factory/factory/bin/gate"
+        path = self.root / "plugin/vendor/factory/factory/bin/gate"
         path.write_text(path.read_text() + "# edited\n")
         res = self.check()
         self.assertEqual(res.returncode, 1)
         self.assertIn("factory/bin/gate", res.stdout)
 
     def test_check_fails_when_the_list_is_missing(self):
-        (self.root / "vendor/known-hashes.json").unlink()
+        (self.root / "plugin/vendor/known-hashes.json").unlink()
         self.assertEqual(self.check().returncode, 1)

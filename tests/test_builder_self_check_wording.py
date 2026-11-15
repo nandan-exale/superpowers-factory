@@ -8,7 +8,7 @@ and constants the change left unused.
 import unittest
 from pathlib import Path
 
-BUILDER = Path(__file__).resolve().parents[1] / "vendor/factory/factory/agents/builder.md"
+BUILDER = Path(__file__).resolve().parents[1] / "plugin/vendor/factory/factory/agents/builder.md"
 
 
 class BuilderSelfCheckWordingTest(unittest.TestCase):

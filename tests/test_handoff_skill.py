@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-SKILL = (Path(__file__).resolve().parents[1] / "skills/factory-handoff/SKILL.md").read_text()
+SKILL = (Path(__file__).resolve().parents[1] / "plugin/skills/factory-handoff/SKILL.md").read_text()
 
 
 class HandoffSkillTest(unittest.TestCase):
@@ -19,7 +19,7 @@ class HandoffSkillTest(unittest.TestCase):
         self.assertIn("will stop at needs-human for you to merge", SKILL)
 
     def test_splits_large_plans_into_parts(self):
-        text = (Path(__file__).resolve().parents[1] / "skills/factory-handoff/SKILL.md").read_text()
+        text = (Path(__file__).resolve().parents[1] / "plugin/skills/factory-handoff/SKILL.md").read_text()
         for needle in ("handoff.max_tasks_per_part", "part: <k>/<n>", "tasks: <first>-<last>",
                        "depends: #<previous part's issue>", "(part <k>/<n>)", "one issue per part, in order"):
             self.assertIn(needle, text)

@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-DASHBOARD = Path(__file__).resolve().parents[1] / "vendor/factory/factory/dashboard.html"
+DASHBOARD = Path(__file__).resolve().parents[1] / "plugin/vendor/factory/factory/dashboard.html"
 
 
 class DashboardTest(unittest.TestCase):

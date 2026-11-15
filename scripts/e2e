@@ -21,13 +21,14 @@ from fnmatch import fnmatch
 from pathlib import Path
 from urllib.parse import urlparse
 
-PLUGIN = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[1]
+PLUGIN = REPO / "plugin"
 sys.path.insert(0, str(PLUGIN / "vendor" / "factory" / "factory" / "lib"))
 import runtimes  # noqa: E402
 
 TIERS = ("fast", "balanced", "strong", "frontier")
-SCENARIOS = PLUGIN / "tests" / "e2e"
-RESULTS = PLUGIN / "e2e-results"
+SCENARIOS = REPO / "tests" / "e2e"
+RESULTS = REPO / "e2e-results"
 NUMBERED = re.compile(r"\s*\d+\.\s+(.*)")
 TAGGED = re.compile(r"\[([^\]\s]+)\]\s*(.*)", re.S)
 TAG_NAME = re.compile(r"(?:other:)?[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -76,7 +77,7 @@ def guard(sandbox):
     repo = github_repo(git(sandbox, "remote", "get-url", "origin").stdout.strip())
     if not repo:
         raise Refused("the sandbox's origin isn't on github.com")
-    if repo == github_repo(git(PLUGIN, "remote", "get-url", "origin").stdout.strip()):
+    if repo == github_repo(git(REPO, "remote", "get-url", "origin").stdout.strip()):
         raise Refused("the sandbox's origin is this plugin's repo")
     name = repo.rsplit("/", 1)[-1]
     if "e2e" not in name and "sandbox" not in name:

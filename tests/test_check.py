@@ -12,7 +12,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 CHECK = REPO / "scripts" / "check"
 HOOK = REPO / "scripts" / "check-hook"
-CONFIG = "vendor/factory/factory/config.json"
+CONFIG = "plugin/vendor/factory/factory/config.json"
 
 
 def git(cwd, *args):
@@ -102,24 +102,24 @@ class CheckTest(RepoCopyTest):
         self.assertFails("json", "marketplace.json version 9.9.9")
 
     def test_stale_known_hashes_fail(self):
-        self.edit("vendor/factory/factory/bin/gate", lambda text: text + "# edited\n")
+        self.edit("plugin/vendor/factory/factory/bin/gate", lambda text: text + "# edited\n")
         self.assertFails("hashes", "factory/bin/gate")
 
     def test_syntax_error_in_stop_hook_fails(self):
-        self.edit("vendor/factory/factory/bin/stop-hook", lambda text: text + "\ndef broken(:\n")
+        self.edit("plugin/vendor/factory/factory/bin/stop-hook", lambda text: text + "\ndef broken(:\n")
         self.assertFails("compile", "bin/stop-hook:")
 
     def test_missing_notice_fails(self):
-        (self.root / "vendor/factory/NOTICE").unlink()
-        self.assertFails("license", "vendor/factory/NOTICE is missing or empty")
+        (self.root / "plugin/vendor/factory/NOTICE").unlink()
+        self.assertFails("license", "plugin/vendor/factory/NOTICE is missing or empty")
 
     def test_missing_skill_source_fails(self):
-        (self.root / "skills/agents-best-practices/SOURCE").unlink()
-        self.assertFails("license", "skills/agents-best-practices/SOURCE is missing or empty")
+        (self.root / "plugin/skills/agents-best-practices/SOURCE").unlink()
+        self.assertFails("license", "plugin/skills/agents-best-practices/SOURCE is missing or empty")
 
     def test_unparseable_config_fails(self):
         self.edit(CONFIG, lambda text: text + "}")
-        self.assertFails("json", "vendor/factory/factory/config.json")
+        self.assertFails("json", "plugin/vendor/factory/factory/config.json")
 
     def test_unknown_tier_fails(self):
         self.edit_config(lambda cfg: cfg["routing"]["low"]["builder"].update(tier="huge"))
@@ -146,32 +146,32 @@ class CheckTest(RepoCopyTest):
         self.assertFails("config", "agents.intake: expected an object with tier and effort")
 
     def test_agent_with_model_fails(self):
-        self.edit("vendor/factory/factory/agents/builder.md",
+        self.edit("plugin/vendor/factory/factory/agents/builder.md",
                   lambda text: text.replace("name: builder\n", "name: builder\nmodel: opus\n", 1))
-        self.assertFails("frontmatter", "vendor/factory/factory/agents/builder.md: sets model")
+        self.assertFails("frontmatter", "plugin/vendor/factory/factory/agents/builder.md: sets model")
 
     def test_skill_missing_description_fails(self):
-        self.edit("skills/factory-install/SKILL.md",
+        self.edit("plugin/skills/factory-install/SKILL.md",
                   lambda text: "\n".join(l for l in text.splitlines() if not l.startswith("description:")) + "\n")
-        self.assertFails("frontmatter", "skills/factory-install/SKILL.md: missing description")
+        self.assertFails("frontmatter", "plugin/skills/factory-install/SKILL.md: missing description")
 
     def test_file_without_frontmatter_fails(self):
-        self.edit("vendor/factory/factory/agents/intake.md", lambda text: "no frontmatter\n" + text)
-        self.assertFails("frontmatter", "vendor/factory/factory/agents/intake.md: no --- frontmatter block")
+        self.edit("plugin/vendor/factory/factory/agents/intake.md", lambda text: "no frontmatter\n" + text)
+        self.assertFails("frontmatter", "plugin/vendor/factory/factory/agents/intake.md: no --- frontmatter block")
 
     def test_nested_model_key_is_ignored(self):
-        self.edit("vendor/factory/factory/agents/approver.md",
+        self.edit("plugin/vendor/factory/factory/agents/approver.md",
                   lambda text: text.replace("access:", "extra:\n  model: nested\naccess:", 1))
         self.refresh_hashes()
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
 
     def test_syntax_error_in_route_fails(self):
-        self.edit("vendor/factory/factory/bin/route", lambda text: text + "\ndef broken(:\n")
+        self.edit("plugin/vendor/factory/factory/bin/route", lambda text: text + "\ndef broken(:\n")
         self.assertFails("compile", "bin/route:")
 
     def test_bash_syntax_error_in_checks_fails(self):
-        self.edit("vendor/factory/factory/checks.sh", lambda text: text + "\nif then\n")
+        self.edit("plugin/vendor/factory/factory/checks.sh", lambda text: text + "\nif then\n")
         self.assertFails("compile", "checks.sh:")
 
     PROBE_HASH = "71bede1bb2ef6494d196e5e2be06c68e0f5352cd3018a4f44179dfbcc21dac5f"
@@ -188,6 +188,63 @@ class CheckTest(RepoCopyTest):
         code, out = self.run_check("--extra-forbidden-hash", self.PROBE_HASH)
         self.assertEqual(code, 0, out)
 
+    def write(self, rel, data):
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    def add(self, rel, data):
+        self.write(rel, data)
+        git(self.root, "add", "--", rel)
+
+    def test_clean_copy_passes_plugin_folder(self):
+        code, out = self.run_check()
+        self.assertIn("PASS plugin-folder", out)
+
+    def test_too_many_plugin_files_fail(self):
+        for i in range(400):
+            self.write(f"plugin/skills/agents-best-practices/references/pad-{i}.md", b"x\n")
+        git(self.root, "add", "-A")
+        self.assertFails("plugin-folder", "files; the directory holds a plugin over 512")
+
+    def test_large_text_file_fails(self):
+        self.add("plugin/big.md", b"x" * (256 * 1024 + 1))
+        self.assertFails("plugin-folder", "plugin/big.md: 262145 bytes")
+
+    def test_large_image_passes(self):
+        self.add("plugin/assets/big.png", b"\x89PNG" + b"x" * (256 * 1024))
+        code, out = self.run_check()
+        self.assertIn("PASS plugin-folder", out)
+
+    def test_os_junk_file_fails(self):
+        self.add("plugin/skills/.DS_Store", b"\0")
+        self.assertFails("plugin-folder", "plugin/skills/.DS_Store: OS system file")
+
+    def test_dev_file_in_plugin_fails(self):
+        self.add("plugin/CLAUDE.md", b"@AGENTS.md\n")
+        self.assertFails("plugin-folder", "plugin/CLAUDE.md: development file")
+
+    def test_dev_folder_in_plugin_fails(self):
+        self.add("plugin/tests/test_x.py", b"\n")
+        self.assertFails("plugin-folder", "plugin/tests: development file")
+
+    def test_bin_folder_in_plugin_fails(self):
+        self.add("plugin/bin/tool", b"#!/bin/sh\n")
+        self.assertFails("plugin-folder", "plugin/bin: development file")
+
+    def test_key_shaped_string_fails(self):
+        self.add("plugin/skills/factory-install/example.md", b'KEY = "sk-' + b"a1" * 10 + b'"\n')
+        self.assertFails("plugin-folder", "example.md: looks like an API key")
+
+    def test_key_shape_inside_a_longer_word_passes(self):
+        self.add("plugin/skills/factory-install/example.md", b"task-local-contrastive-refinement\n")
+        code, out = self.run_check()
+        self.assertIn("PASS plugin-folder", out)
+
+    def test_license_copy_must_match(self):
+        self.edit("plugin/LICENSE", lambda text: text + "\nextra\n")
+        self.assertFails("plugin-folder", "plugin/LICENSE differs from LICENSE")
+
     def test_not_a_git_repo_reports_git_error(self):
         shutil.rmtree(self.root / ".git")
         code, out = self.run_check()
@@ -196,14 +253,14 @@ class CheckTest(RepoCopyTest):
         self.assertIn("not a git repository", out)
 
     def test_bom_does_not_hide_frontmatter(self):
-        self.edit("vendor/factory/factory/agents/intake.md", lambda text: "\ufeff" + text)
+        self.edit("plugin/vendor/factory/factory/agents/intake.md", lambda text: "\ufeff" + text)
         self.refresh_hashes()
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
 
     def test_unreadable_file_does_not_hide_other_problems(self):
-        (self.root / "vendor/factory/factory/agents/intake.md").write_bytes(b"\xff\xfe---")
-        self.edit("vendor/factory/factory/agents/builder.md",
+        (self.root / "plugin/vendor/factory/factory/agents/intake.md").write_bytes(b"\xff\xfe---")
+        self.edit("plugin/vendor/factory/factory/agents/builder.md",
                   lambda text: text.replace("name: builder\n", "name: builder\nmodel: x\n", 1))
         code, out = self.run_check()
         self.assertEqual(code, 1, out)
@@ -215,51 +272,51 @@ class CheckTest(RepoCopyTest):
         self.refresh_hashes()
 
     def test_unguarded_systemctl_fails(self):
-        doctor = "vendor/factory/factory/bin/doctor"
+        doctor = "plugin/vendor/factory/factory/bin/doctor"
         self.edit(doctor, lambda text: text.replace('shutil.which("systemctl")', "None"))
         self.append_to(doctor, 'subprocess.run(["systemctl", "x"])\n')
         self.assertFails("external-binaries", "shutil.which('systemctl')")
 
     def test_unguarded_binary_message_names_file_line_and_remedy(self):
-        self.append_to("vendor/factory/factory/bin/doctor", 'subprocess.run(["nonexistent-tool", "x"])\n')
+        self.append_to("plugin/vendor/factory/factory/bin/doctor", 'subprocess.run(["nonexistent-tool", "x"])\n')
         code, out = self.run_check()
         self.assertEqual(code, 1, out)
-        self.assertRegex(out, r"FAIL external-binaries: vendor/factory/factory/bin/doctor:\d+: 'nonexistent-tool'")
+        self.assertRegex(out, r"FAIL external-binaries: plugin/vendor/factory/factory/bin/doctor:\d+: 'nonexistent-tool'")
         self.assertIn("shutil.which('nonexistent-tool')", out)
         self.assertIn("die(", out)
 
     def test_guarded_binary_passes(self):
-        self.append_to("vendor/factory/factory/bin/doctor",
+        self.append_to("plugin/vendor/factory/factory/bin/doctor",
                        'subprocess.run(["nonexistent-tool", "x"])\nshutil.which("nonexistent-tool")\n')
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
 
     def test_git_and_bash_are_baseline(self):
-        self.append_to("vendor/factory/factory/bin/doctor",
+        self.append_to("plugin/vendor/factory/factory/bin/doctor",
                        'subprocess.run(["git", "status"])\nsubprocess.run(["bash", "-c", "true"])\n')
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
 
     def test_variable_and_computed_heads_are_ignored(self):
-        self.append_to("vendor/factory/factory/bin/doctor",
+        self.append_to("plugin/vendor/factory/factory/bin/doctor",
                        'subprocess.run([tool, "x"])\nsubprocess.run([sys.executable, "x"])\n'
                        'subprocess.run(cmd)\nsubprocess.run([*argv])\n')
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
 
     def test_unguarded_binary_in_lib_fails(self):
-        self.append_to("vendor/factory/factory/lib/orchestrator/loop.py",
+        self.append_to("plugin/vendor/factory/factory/lib/orchestrator/loop.py",
                        'subprocess.check_output(("nonexistent-tool",))\n')
         self.assertFails("external-binaries", "shutil.which('nonexistent-tool')")
 
     def test_orchestrate_without_which_fails(self):
-        path = "vendor/factory/factory/bin/orchestrate"
+        path = "plugin/vendor/factory/factory/bin/orchestrate"
         self.edit(path, lambda text: text.replace("shutil.which", "shutil.where"))
         self.refresh_hashes()
         self.assertFails("external-binaries", "orchestrate must check shutil.which")
 
     def test_missing_orchestrate_skips_the_popen_rule(self):
-        (self.root / "vendor/factory/factory/bin/orchestrate").unlink()
+        (self.root / "plugin/vendor/factory/factory/bin/orchestrate").unlink()
         code, out = self.run_check()
         self.assertNotIn("orchestrate must check shutil.which", out)
 
@@ -274,7 +331,7 @@ class CheckHookTest(RepoCopyTest):
         return res.returncode, res.stderr
 
     def test_clean_tree_skips(self):
-        (self.root / "vendor/factory/NOTICE").write_text("")
+        (self.root / "plugin/vendor/factory/NOTICE").write_text("")
         git(self.root, "-c", "user.email=t@e.com", "-c", "user.name=t",
             "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
             "commit", "-qam", "empty notice")
@@ -288,13 +345,13 @@ class CheckHookTest(RepoCopyTest):
         self.assertEqual(code, 0, err)
 
     def test_dirty_failing_tree_blocks(self):
-        (self.root / "vendor/factory/NOTICE").unlink()
+        (self.root / "plugin/vendor/factory/NOTICE").unlink()
         code, err = self.run_hook()
         self.assertEqual(code, 2)
-        self.assertIn("FAIL license: vendor/factory/NOTICE is missing or empty", err)
+        self.assertIn("FAIL license: plugin/vendor/factory/NOTICE is missing or empty", err)
 
     def test_second_stop_does_not_block_again(self):
-        (self.root / "vendor/factory/NOTICE").unlink()
+        (self.root / "plugin/vendor/factory/NOTICE").unlink()
         code, err = self.run_hook({"stop_hook_active": True})
         self.assertEqual(code, 0)
         self.assertIn("FAIL license", err)
@@ -313,7 +370,7 @@ class CheckHookTest(RepoCopyTest):
         self.assertIn("boom", err)
 
     def test_non_dict_payload_is_ignored(self):
-        (self.root / "vendor/factory/NOTICE").unlink()
+        (self.root / "plugin/vendor/factory/NOTICE").unlink()
         code, err = self.run_hook(stdin="[]")
         self.assertEqual(code, 2, err)
         self.assertNotIn("Traceback", err)

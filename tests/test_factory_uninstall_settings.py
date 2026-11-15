@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-TOOL = REPO / "bin/factory-uninstall-settings"
+TOOL = REPO / "plugin/tools/factory-uninstall-settings"
 FACTORY_HOOK = {"type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/factory/bin/stop-hook", "timeout": 600}
 OTHER_HOOK = {"type": "command", "command": "scripts/lint"}
 

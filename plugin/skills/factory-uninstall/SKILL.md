@@ -10,23 +10,18 @@ Commit nothing. Ask before anything this list doesn't cover.
 
 ## Find the plugin
 
-The plugin's files are two levels above this skill's base directory when the
-plugin is installed whole (Claude Code). An agent that installed only the
-skill folders (`npx skills add`) doesn't have them, so fetch them:
+The plugin's files are two levels above this skill's base directory:
 
 ```bash
 PLUGIN="<skill base>/../.."
-if [ ! -d "$PLUGIN/vendor/factory" ]; then
-  TAG=$(git ls-remote --tags --refs https://github.com/nandan-exale/superpowers-factory 'v*' \
-        | sed 's#.*refs/tags/##' | sort -V | tail -1)
-  PLUGIN=$(mktemp -d)/superpowers-factory
-  git clone --depth 1 --branch "$TAG" https://github.com/nandan-exale/superpowers-factory "$PLUGIN"
-fi
-VENDOR="$PLUGIN/vendor/factory"; BIN="$PLUGIN/bin"
+VENDOR="$PLUGIN/vendor/factory"; BIN="$PLUGIN/tools"
 ```
 
-Ask your human partner before the clone: say it downloads the plugin's
-release `<TAG>` from GitHub into a temporary folder.
+If `$VENDOR` doesn't exist, this agent has the skill folders without the rest
+of the plugin. Stop, and tell your human partner to install the whole plugin:
+`npx plugins add nandan-exale/superpowers-factory` for Codex, Cursor or
+GitHub Copilot CLI, or `/plugin install superpowers-factory@superpowers-factory`
+in Claude Code. Don't download it yourself.
 
 ## Steps
 
@@ -38,7 +33,7 @@ release `<TAG>` from GitHub into a temporary folder.
 3. **Runner.** If `factory/bin/runner status` reports the launchd agent
    installed, run `factory/bin/runner uninstall`.
 4. **Files.** The file list is the keys of `files` in `factory/manifest.json`
-   that are also in `FILES` from `$PLUGIN/bin/factory_files.py` (the agents
+   that are also in `FILES` from `$PLUGIN/tools/factory_files.py` (the agents
    in `factory/agents`, the orchestrator in `factory/lib`, and the rest), or in
    its `RETIRED` (`.claude/agents`, if present: installs before 0.5.0); delete only
    those. A key that is absolute, has a `..` segment, or isn't in `FILES` or
@@ -49,7 +44,7 @@ release `<TAG>` from GitHub into a temporary folder.
    `factory/manifest.json`. Then remove directories left empty under
    `factory/` and `.claude/`, never `factory/jobs/` or anything in it:
    `find factory .claude -type d -empty -not -path factory/jobs -not -path 'factory/jobs/*' -delete`.
-5. **Stop hook.** Run `"$PLUGIN/bin/factory-uninstall-settings" .`. If it
+5. **Stop hook.** Run `"$PLUGIN/tools/factory-uninstall-settings" .`. If it
    exits 1, show its message and stop; don't edit the file by hand.
 6. **AGENTS.md.** Remove the `## Software factory` section: from that
    heading up to (not including) the next `## ` heading or the end of the
@@ -59,7 +54,7 @@ release `<TAG>` from GitHub into a temporary folder.
    more, show it and ask.
 8. **`.gitignore`.** Keep `/factory/jobs/` and `/.worktrees/`: the job
    history stays on disk and must stay out of git.
-9. **Stop the offer.** Run `"$PLUGIN/bin/factory-state" decline`, so new
+9. **Stop the offer.** Run `"$PLUGIN/tools/factory-state" decline`, so new
    sessions don't offer `/factory-install` again.
 10. **Hand over.** Show `git status` and `git diff --stat`, suggest the
     message `chore: uninstall software factory`, and let them commit. Then
@@ -77,5 +72,5 @@ release `<TAG>` from GitHub into a temporary folder.
     gh label delete factory:risk-ok --yes
     ```
 
-    `/factory-install` (or `"$PLUGIN/bin/factory-state" reset` to get the
+    `/factory-install` (or `"$PLUGIN/tools/factory-state" reset` to get the
     offer back) reinstalls later.

@@ -8,12 +8,12 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "bin"))
+sys.path.insert(0, str(REPO / "plugin" / "tools"))
 
 import factory_files as ff  # noqa: E402
 
-HOOK = REPO / "hooks/factory-session.py"
-STATE = REPO / "bin/factory-state"
+HOOK = REPO / "plugin/hooks/factory-session.py"
+STATE = REPO / "plugin/tools/factory-state"
 
 
 def clean_env(**extra):

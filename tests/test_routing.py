@@ -188,7 +188,7 @@ class RouteWrapperTest(RoutingTestCase):
 
 class DefaultAgentsTest(unittest.TestCase):
     def test_intake_runs_on_the_strong_tier(self):
-        cfg = json.loads((Path(__file__).resolve().parents[1] / "vendor/factory/factory/config.json").read_text())
+        cfg = json.loads((Path(__file__).resolve().parents[1] / "plugin/vendor/factory/factory/config.json").read_text())
         self.assertEqual(cfg["agents"]["intake"], {"tier": "strong", "effort": "high"})
 
 

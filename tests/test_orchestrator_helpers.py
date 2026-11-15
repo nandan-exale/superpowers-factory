@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-PLUGIN = Path(__file__).resolve().parents[1]
+PLUGIN = Path(__file__).resolve().parents[1] / "plugin"
 sys.path.insert(0, str(PLUGIN / "vendor" / "factory" / "factory" / "lib"))
 
 from orchestrator import agents, jobcli, prompts  # noqa: E402
