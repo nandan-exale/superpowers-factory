@@ -299,6 +299,13 @@ class TickTest(RunnerCase):
         self.assertEqual(res.returncode, 1)
         self.assertIn(" ran exit=3 ", self.log_lines()[-1])
 
+    def test_orchestrate_busy_exit_is_logged_as_busy(self):
+        self.set_issues(self.WORK)
+        res = self.runner("tick", FAKE_ORCHESTRATE_EXIT="75")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertTrue(self.log_lines()[-1].endswith(" busy"))
+        self.assertFalse(any(" ran exit=" in line for line in self.log_lines()))
+
     def test_codex_runtime_gets_its_key_and_no_other_credential(self):
         self.edit_config(lambda c: c.update(runtime="codex"))
         self.put_on_path("codex")

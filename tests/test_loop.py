@@ -230,6 +230,7 @@ print(json.dumps({"type": "result", "session_id": "s", "is_error": False, "total
         """A project with the vendored orchestrate, lib, agents and settings, a fake job and one spec job."""
         vendor = PLUGIN / "vendor" / "factory" / "factory"
         (root / "factory" / "bin").mkdir(parents=True)
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)  # orchestrate takes its lock in the git dir
         shutil.copy2(vendor / "bin" / "orchestrate", root / "factory" / "bin" / "orchestrate")
         for name in ("lib", "agents"):
             shutil.copytree(vendor / name, root / "factory" / name, ignore=shutil.ignore_patterns("__pycache__"))
