@@ -88,14 +88,17 @@ after that time resumes them. Then list what waits on a human (run
 **What needs them** below).
 
 Don't spawn agents, advance jobs or run the gate yourself while it runs: it is
-the only orchestrator. If it exits non-zero, show its last 20 lines. If
-starting it is blocked in this session, tell the user to run
+the only orchestrator. If it exits `75`, it printed that another factory run
+is active in this clone: tell the user so, and don't retry, don't start agents
+and don't touch jobs yourself. If it exits with any other non-zero code, show
+its last 20 lines. If starting it is blocked in this session, tell the user to run
 `factory/bin/orchestrate run` in a terminal from the project root.
 
 ## /factory run <n>
 
 The same, with `factory/bin/orchestrate run <n>`: one issue, resumed if it
-has a job. Finish with its summary line.
+has a job. Finish with its summary line. If it exits `75`, handle it as under
+**/factory run**.
 
 ## /factory report
 
