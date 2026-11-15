@@ -188,6 +188,63 @@ class CheckTest(RepoCopyTest):
         code, out = self.run_check("--extra-forbidden-hash", self.PROBE_HASH)
         self.assertEqual(code, 0, out)
 
+    def write(self, rel, data):
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    def add(self, rel, data):
+        self.write(rel, data)
+        git(self.root, "add", "--", rel)
+
+    def test_clean_copy_passes_plugin_folder(self):
+        code, out = self.run_check()
+        self.assertIn("PASS plugin-folder", out)
+
+    def test_too_many_plugin_files_fail(self):
+        for i in range(400):
+            self.write(f"plugin/skills/agents-best-practices/references/pad-{i}.md", b"x\n")
+        git(self.root, "add", "-A")
+        self.assertFails("plugin-folder", "files; the directory holds a plugin over 512")
+
+    def test_large_text_file_fails(self):
+        self.add("plugin/big.md", b"x" * (256 * 1024 + 1))
+        self.assertFails("plugin-folder", "plugin/big.md: 262145 bytes")
+
+    def test_large_image_passes(self):
+        self.add("plugin/assets/big.png", b"\x89PNG" + b"x" * (256 * 1024))
+        code, out = self.run_check()
+        self.assertIn("PASS plugin-folder", out)
+
+    def test_os_junk_file_fails(self):
+        self.add("plugin/skills/.DS_Store", b"\0")
+        self.assertFails("plugin-folder", "plugin/skills/.DS_Store: OS system file")
+
+    def test_dev_file_in_plugin_fails(self):
+        self.add("plugin/CLAUDE.md", b"@AGENTS.md\n")
+        self.assertFails("plugin-folder", "plugin/CLAUDE.md: development file")
+
+    def test_dev_folder_in_plugin_fails(self):
+        self.add("plugin/tests/test_x.py", b"\n")
+        self.assertFails("plugin-folder", "plugin/tests: development file")
+
+    def test_bin_folder_in_plugin_fails(self):
+        self.add("plugin/bin/tool", b"#!/bin/sh\n")
+        self.assertFails("plugin-folder", "plugin/bin: development file")
+
+    def test_key_shaped_string_fails(self):
+        self.add("plugin/skills/factory-install/example.md", b'KEY = "sk-' + b"a1" * 10 + b'"\n')
+        self.assertFails("plugin-folder", "example.md: looks like an API key")
+
+    def test_key_shape_inside_a_longer_word_passes(self):
+        self.add("plugin/skills/factory-install/example.md", b"task-local-contrastive-refinement\n")
+        code, out = self.run_check()
+        self.assertIn("PASS plugin-folder", out)
+
+    def test_license_copy_must_match(self):
+        self.edit("plugin/LICENSE", lambda text: text + "\nextra\n")
+        self.assertFails("plugin-folder", "plugin/LICENSE differs from LICENSE")
+
     def test_not_a_git_repo_reports_git_error(self):
         shutil.rmtree(self.root / ".git")
         code, out = self.run_check()

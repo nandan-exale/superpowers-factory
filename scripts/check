@@ -200,6 +200,44 @@ def check_branding(root, opts):
     return problems
 
 
+PLUGIN_DIR = "plugin"
+MAX_PLUGIN_FILES = 400  # the directory holds a plugin over 512 files for review
+MAX_TEXT_BYTES = 256 * 1024  # and any file over 256 KiB that isn't an image
+IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"})
+OS_JUNK = frozenset({".DS_Store", "Thumbs.db", "desktop.ini", "__MACOSX"})
+DEV_ONLY = ("CLAUDE.md", "tests", "docs", "scripts", "bin")
+KEY_SHAPED = re.compile(rb"(?<![A-Za-z0-9])sk-[A-Za-z0-9-]{16,}")  # not the tail of a word such as task-local-...
+
+
+def check_plugin_folder(root, opts):
+    """What the directory installs: keep it small, readable and free of dev files."""
+    files = [rel for rel in tracked_files(root) if rel.startswith(f"{PLUGIN_DIR}/")]
+    problems = []
+    if len(files) > MAX_PLUGIN_FILES:
+        problems.append(f"{PLUGIN_DIR}/ holds {len(files)} files; the directory holds a plugin over 512 "
+                        f"for review (this check stops at {MAX_PLUGIN_FILES})")
+    for name in DEV_ONLY:
+        top = f"{PLUGIN_DIR}/{name}"
+        if any(rel == top or rel.startswith(f"{top}/") for rel in files):
+            problems.append(f"{top}: development file in the installed folder; keep it at the repo root")
+    for rel in files:
+        path = root / rel
+        if not path.is_file():
+            continue
+        if OS_JUNK & set(Path(rel).parts):
+            problems.append(f"{rel}: OS system file; the directory refuses it")
+            continue
+        data = path.read_bytes()
+        if path.suffix.lower() not in IMAGE_SUFFIXES and len(data) > MAX_TEXT_BYTES:
+            problems.append(f"{rel}: {len(data)} bytes; the directory holds files over 256 KiB for review")
+        if KEY_SHAPED.search(data):
+            problems.append(f"{rel}: looks like an API key (sk-...); the directory's secret scan blocks it")
+    copy, original = root / PLUGIN_DIR / "LICENSE", root / "LICENSE"
+    if copy.is_file() and original.is_file() and copy.read_bytes() != original.read_bytes():
+        problems.append(f"{PLUGIN_DIR}/LICENSE differs from LICENSE; copy it again")
+    return problems
+
+
 # Tools every machine running the factory has; any other tool the factory spawns needs a which() guard.
 BASELINE_BINARIES = frozenset({"git", "bash", "python3"})
 SPAWNERS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
@@ -294,6 +332,7 @@ CHECKS = [
     ("hashes", check_hashes),
     ("branding", check_branding),
     ("external-binaries", check_external_binaries),
+    ("plugin-folder", check_plugin_folder),
     ("tests", check_tests),
 ]
 
