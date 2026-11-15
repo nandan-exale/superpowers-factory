@@ -19,53 +19,36 @@ Show both paths and ask your human partner to confirm before going on.
 
 ## 2. Check, and stop with the reason if anything fails
 
-Run each check. On the first failure, say which one failed and what fixes it,
+`$PLUGIN` is the plugin's folder, two levels above this skill's base
+directory. Run the checks from the project root:
+
+```bash
+PLUGIN="<skill base>/../.."
+"$PLUGIN/bin/factory-handoff-check" <spec> <plan>
+```
+
+It is read-only. It prints one `PASS`, `FAIL` or `SKIP` line per check, then
+`sha:`, `base:`, `branch:`, `tasks:`, `max_tasks_per_part:` and `risky:`
+lines, and exits 0 only when every check passed.
+
+On any `FAIL` or `SKIP`, say which check failed and the fix its line gives,
 then stop.
 
-```bash
-test -x factory/bin/job                       # else: run /factory-install in this project
-gh auth status                                # else: gh auth login
-gh label list --limit 200 --json name --jq '.[].name' | grep -qx factory
-gh label list --limit 200 --json name --jq '.[].name' | grep -qx factory:planned
-                                              # either missing: re-run /factory-install
-BASE=$(python3 -c 'import json; print(json.load(open("factory/config.json"))["base_branch"])')
-git status --porcelain -- <spec> <plan>       # must print nothing: commit them first
-git cat-file -e HEAD:<spec>                   # each must succeed, else the file is
-git cat-file -e HEAD:<plan>                   # gitignored or uncommitted: commit it
-git fetch origin "$BASE"
-git merge-base --is-ancestor HEAD "origin/$BASE"
-```
-
-If the last check fails, the spec and plan aren't on `origin/$BASE` yet. If
-the current branch is `$BASE`, ask: "Push `$BASE` to origin so the factory
-can see the plan?" Run `git push origin "$BASE"` only on an explicit yes. On
-any other branch, say the plan must reach `$BASE` first (merge it or open a
-PR) and stop.
-
-Both paths must match `^docs/superpowers/[A-Za-z0-9._/-]+\.md$` and contain
-no `..` segment. The factory refuses anything else, so move the files there
-first.
-
-Check that no open issue already hands off this plan:
-
-```bash
-gh issue list --label factory:planned --state open --search "\"<plan path>\" in:body" --json number,url
-```
-
-If it prints any issue, link it and stop.
+Exception: when the only failure is `on-origin-base`, the spec and plan
+aren't on `origin/<base>` yet. If the `branch:` line equals the `base:` line,
+ask: "Push `<base>` to origin so the factory can see the plan?" Run
+`git push origin "<base>"` only on an explicit yes, then run the script
+again. On any other branch, say the plan must reach the base first (merge it
+or open a PR) and stop.
 
 Check the plan for steps a factory job can't do: it works only on its own
-branch in its own worktree.
+branch in its own worktree. The `risky:` lines are the plan lines that tag,
+push, force, merge or check out the base. If any of them is anything other
+than pushing the plan's own feature branch, show them and say
+"the factory will skip them". List them for the human under `## Deviations`.
+Ask whether to file anyway or fix the plan first.
 
-```bash
-grep -nE 'git tag|git push|--force|git checkout (main|master|"?\$BASE)|git merge' <plan>
-```
-
-If anything matches other than pushing the plan's own feature branch, show
-the lines and say the factory will skip them and list them for the human
-under `## Deviations`. Ask whether to file anyway or fix the plan first.
-
-Then record the commit: `SHA=$(git rev-parse HEAD)`.
+The `sha:` line is the commit for the issue's `factory-plan` block.
 
 ## 3. Propose risk and surfaces
 
@@ -89,9 +72,9 @@ information only; it doesn't stop the handoff.
 
 ## 4. Split a large plan into parts
 
-Count the plan's tasks (`### Task <n>` headings). Read
-`handoff.max_tasks_per_part` from `factory/config.json` (8 when it's
-missing). If the plan has more tasks than that, or your human partner asks
+Take the plan's task count and the cap (`handoff.max_tasks_per_part` in
+`factory/config.json`) from the `tasks:` and `max_tasks_per_part:` lines.
+If the plan has more tasks than the cap, or your human partner asks
 for parts, propose a split: consecutive task ranges, each ending where the
 tests pass and the change can be reviewed on its own, none over the cap.
 Show each part's range and one line on what it delivers, and ask them to
@@ -141,7 +124,7 @@ Leave `depends` out of part 1. Title each `<title> (part <k>/<n>)`. Label
 every part `factory` and `factory:planned`: the factory holds a part until
 the part it depends on has merged.
 
-File the issue as yourself (the account `gh auth status` shows): `factory/bin/job planned` refuses planned issues whose author isn't the account running the factory.
+File the issue as yourself (the account `gh` is logged in as): `factory/bin/job planned` refuses planned issues whose author isn't the account running the factory.
 
 ## 6. Report
 
