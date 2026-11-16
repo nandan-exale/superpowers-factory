@@ -3,6 +3,18 @@
 All notable changes to superpowers-factory. Newest first. `scripts/release`
 adds each new section.
 
+## [0.7.3] - 2026-11-16
+
+### Added
+
+- accept a planned issue's spec and plan at any repo path
+- hand off specs and plans from any planning tool
+
+### Changed
+
+- chore: update software factory
+- Merge pull request #70 from nandan-exale/chore/exale-publisher
+
 ## [0.7.2] - 2026-11-15
 
 ### Changed
