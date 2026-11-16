@@ -37,6 +37,8 @@ Usage:
   job push <job>                 the builder's push: scan, then push the job branch (nothing is pushed on a hit)
   job watch                      check base-branch CI for merged jobs; red → revert PR and pause
   job ensure-worktree <job>      recreate a missing worktree (fresh CI machines) from the job branch or the base
+  job update-branch <job>        merge origin/<base> into the job worktree outside the agent sandbox; a conflict
+                                 is left for the builder, one in a protected file escalates
 
 <job> is a job id (004-dark-mode) or an issue number (12).
 """
@@ -49,6 +51,7 @@ import re
 import subprocess
 import sys
 import time
+import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -62,7 +65,9 @@ BASE = CONFIG["base_branch"]
 MARKER = "<!-- factory -->"
 
 sys.path.insert(0, str(FACTORY / "lib"))
+import reporting  # noqa: E402  (factory/lib/reporting.py: report and digest)
 import runtimes  # noqa: E402  (factory/lib/runtimes: each CLI's CAPS)
+import secretscan  # noqa: E402  (factory/lib/secretscan.py: secret rules)
 
 TRANSITIONS = {
     "intake": {"needs-info", "rejected", "spec", "needs-human"},
@@ -166,18 +171,44 @@ def job_dir(job_id):
     return JOBS / job_id
 
 
+# A process holds at most one job's lock, plus the slot lock, which is a leaf:
+# no command asks for a job lock while holding it. So the only lock order is
+# job lock -> slot lock, and two `job` processes can't wait on each other.
 _locks = {}
+_slot_lock = None
 
 
 def load(job_id):
-    """Read a job, holding its lock until this process exits."""
+    """Read a job without locking it."""
     path = job_dir(job_id) / "job.json"
     if not path.exists():
         die(f"no job {job_id}")
+    return json.loads(path.read_text())
+
+
+def lock_job(job_id):
+    """Take a job's lock, held until this process exits or `unlock_job`, and read the job fresh under it."""
     if job_id not in _locks:
+        if _locks:
+            die(f"bug: asked for job {job_id}'s lock while holding {', '.join(_locks)}")
+        if not (job_dir(job_id) / "job.json").exists():
+            die(f"no job {job_id}")
         _locks[job_id] = open(job_dir(job_id) / ".lock", "w")
         fcntl.flock(_locks[job_id], fcntl.LOCK_EX)
-    return json.loads(path.read_text())
+    return load(job_id)
+
+
+def unlock_job(job_id):
+    _locks.pop(job_id).close()
+
+
+def lock_slots():
+    """Take the lock that makes counting running jobs and moving into a slot one step, held until exit."""
+    global _slot_lock
+    if _slot_lock is None:
+        JOBS.mkdir(parents=True, exist_ok=True)
+        _slot_lock = open(JOBS / ".slots.lock", "w")
+        fcntl.flock(_slot_lock, fcntl.LOCK_EX)
 
 
 def save(job):
@@ -200,18 +231,22 @@ def running(jobs):
 
 
 def require_slot(job_id):
+    lock_slots()
     busy = [j["id"] for j in running(all_jobs()) if j["id"] != job_id]
     require(len(busy) < CONCURRENCY,
             f"concurrency {CONCURRENCY} reached; running: {', '.join(busy)}")
 
 
-def resolve(arg):
+def resolve(arg, lock=False):
+    """The job for an id or an issue number. `lock` is for a command that saves it."""
     if arg.isdigit():
         matches = [j for j in all_jobs() if j["issue"] == int(arg)]
         if not matches:
             die(f"no job for issue #{arg}")
-        return matches[0]
-    return load(arg)
+        job = matches[0]
+    else:
+        job = load(arg)
+    return lock_job(job["id"]) if lock else job
 
 
 def first_line(path):
@@ -432,67 +467,13 @@ def risk_approved(job):
 
 # ---- Secret scan -------------------------------------------------------------
 
-SECRET_RULES = (
-    ("private key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
-    ("aws access key", re.compile(r"AKIA[0-9A-Z]{16}")),
-    ("github token", re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,}")),
-    ("anthropic key", re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}")),
-    ("slack token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}")),
-    ("assigned secret", re.compile(r"(api[_-]?key|secret|token|password)\s*[:=]\s*[\"'][^\"']{16,}[\"']", re.I)),
-)
-HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 SECRET_WHY = ("A possible secret reached the remote branch (see `## Secrets` in this round's checks.md). "
               "Rotate it, then remove it from the branch history before giving feedback.")
 
 
-def path_matches(path, pattern):
-    """fnmatch (whose * also crosses /), plus `**/x` matching `x` at the root. Same as the gate's."""
-    return fnmatch.fnmatch(path, pattern) or (pattern.startswith("**/") and fnmatch.fnmatch(path, pattern[3:]))
-
-
-def added_lines(diff):
-    """(path, new line number, text) for every added line of a unified diff.
-    Hunk bodies are read by their line counts, so an added line that looks like a header is still scanned,
-    and a path git couldn't print plainly is kept as printed rather than skipped."""
-    path, line, old_left, new_left = "?", 0, 0, 0
-    for text in diff.split("\n"):
-        if old_left > 0 or new_left > 0:
-            if text.startswith("+"):
-                yield path, line, text[1:]
-                line, new_left = line + 1, new_left - 1
-            elif text.startswith("-"):
-                old_left -= 1
-            elif text.startswith(" "):
-                line, old_left, new_left = line + 1, old_left - 1, new_left - 1
-            continue
-        if text.startswith("+++ "):
-            path = text[6:] if text.startswith("+++ b/") else text[4:]
-            continue
-        m = HUNK.match(text)
-        if m:
-            old_left, line, new_left = int(m.group(1) or 1), int(m.group(2)), int(m.group(3) or 1)
-
-
-def mask(value):
-    return f"{value[:4]}… ({len(value)} chars)"
-
-
 def secret_hits(worktree):
-    """`path:line rule: masked` for each line any branch commit adds that matches a secret rule.
-    Every commit is scanned, because a secret deleted in a later commit is still pushed in history."""
     allow = (CONFIG.get("secret_scan") or {}).get("allow", ["**/*.test.*", "**/fixtures/**"])
-    diff = run(["git", "-c", "core.quotePath=false", "log", "-p", "--no-merges", "--no-color", "--no-ext-diff",
-                "--format=", "--unified=0", f"origin/{BASE}..HEAD"], cwd=worktree).stdout
-    hits = {}
-    for path, n, text in added_lines(diff):
-        if any(path_matches(path, pattern) for pattern in allow):
-            continue
-        for name, rule in SECRET_RULES:
-            m = rule.search(text)
-            if m:
-                hits.setdefault((path, name, m.group(0)), f"{path}:{n} {name}: {mask(m.group(0))}")
-                break
-    return list(hits.values())
+    return secretscan.secret_hits(worktree, run, BASE, allow)
 
 
 def cmd_scan(job):
@@ -577,12 +558,17 @@ def cmd_watch():
         state, failed = watch_verdict(runs, cfg, w["since"])
         if state == "watching":
             continue
+        job = lock_job(job["id"])
+        if job.get("watch") != w:  # changed since the listing; the verdict was for the old watch
+            unlock_job(job["id"])
+            continue
         if state == "red":
             revert_for(job, failed)
-            continue
-        job["watch"] = {**w, "state": state}
-        save(job)
-        print(f"WATCH: {job['id']} {state}" + (f"; no CI runs on {BASE} within {cfg['max_minutes']} min" if state == "no-ci" else ""))
+        else:
+            job["watch"] = {**w, "state": state}
+            save(job)
+            print(f"WATCH: {job['id']} {state}" + (f"; no CI runs on {BASE} within {cfg['max_minutes']} min" if state == "no-ci" else ""))
+        unlock_job(job["id"])
 
 
 def revert_label():
@@ -1364,7 +1350,7 @@ EVIDENCE_SECTION_LIMIT = 8_000
 EVIDENCE_BLOCK_LIMIT = 60_000
 EVIDENCE_START = "<!-- factory evidence -->"
 EVIDENCE_END = "<!-- /factory evidence -->"
-CLOSING = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s*(?:https://github\.com/[\w.-]+/[\w.-]+/issues/\d+|(?:[\w.-]+/[\w.-]+)?#\d+)", re.I)
+CLOSING = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s*(?:https://github[.]com/[\w.-]+/[\w.-]+/issues/\d+|(?:[\w.-]+/[\w.-]+)?#\d+)", re.I)
 
 
 def defuse(text):
@@ -1409,7 +1395,7 @@ def closes_issue(text, issue):
     repo = repo_slug()
     forms = [rf"#{n}\b"]
     if repo:
-        forms.append(rf"https://github\.com/{re.escape(repo)}/issues/{n}\b")
+        forms.append(rf"https://github[.]com/{re.escape(repo)}/issues/{n}\b")
     return bool(re.search(rf"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s*(?:{'|'.join(forms)})", text, re.I))
 
 
@@ -1802,255 +1788,71 @@ def cmd_ensure_worktree(job):
         stop_for_human(job, f"The job's worktree couldn't be recreated on this machine:\n\n```\n{e}\n```")
 
 
+def update_branch(job):
+    """Merge origin/<base> into the job worktree. Runs here, outside the agent sandbox, because the
+    sandbox can't write protected factory files that the base may have changed."""
+    git(job, "fetch", "origin", BASE)
+    if (Path(git(job, "rev-parse", "--absolute-git-dir").stdout.strip()) / "MERGE_HEAD").exists():
+        return "merge in progress"
+    if git(job, "status", "--porcelain").stdout.strip():
+        print("NOTE: the worktree has uncommitted changes; not merging over them")
+        return "skipped"
+    if git(job, "merge-base", "--is-ancestor", f"origin/{BASE}", "HEAD", check=False).returncode == 0:
+        return "up to date"
+    merged = git(job, "merge", "--no-edit", f"origin/{BASE}", check=False)
+    if merged.returncode == 0:
+        return f"merged origin/{BASE} ({git(job, 'rev-parse', '--short', 'HEAD').stdout.strip()})"
+    conflicts = git(job, "diff", "--name-only", "--diff-filter=U").stdout.split()
+    patterns = CONFIG["protected_paths"] + list(job.get("plan_paths") or [])
+    protected = [p for p in conflicts if any(fnmatch.fnmatch(p, pat) for pat in patterns)]
+    if conflicts and not protected:
+        return f"conflicts: {' '.join(conflicts)}"
+    git(job, "merge", "--abort", check=False)
+    if protected:
+        raise Refused(f"Merging origin/{BASE} conflicts in protected files, which no agent may resolve: "
+                      f"{', '.join(protected)}")
+    raise Refused(f"`git merge origin/{BASE}` failed:\n\n```\n{(merged.stdout + merged.stderr).strip()}\n```")
+
+
+def cmd_update_branch(job):
+    try:
+        print(f"UPDATE-BRANCH: {job['id']} {update_branch(job)}")
+    except Refused as e:
+        stop_for_human(job, f"The job branch couldn't be synced with {BASE}:\n\n{e}")
+
+
 # ---- Report and digest -----------------------------------------------------
 
 WAITING_REASON = {"needs-human": ("decision.md", "Why"), "needs-info": ("intake.md", "Questions")}
 
 
-def report_jobs():
-    """(jobs, unreadable count), read without locks."""
-    jobs, unreadable = [], 0
-    for p in sorted(JOBS.iterdir()) if JOBS.exists() else []:
-        if not (p / "job.json").exists():
-            continue
-        try:
-            jobs.append(json.loads((p / "job.json").read_text()))
-        except (OSError, ValueError):
-            unreadable += 1
-    return jobs, unreadable
-
-
-def in_window(job, cutoff):
-    ended = job.get("ended")
-    return parse_time(job["started"]) >= cutoff or not ended or parse_time(ended) >= cutoff
-
-
-def first_text_line(text):
-    return next((line.strip() for line in (text or "").splitlines() if line.strip()), "-")
-
-
-def median(values):
-    values = sorted(values)
-    if not values:
-        return None
-    mid = len(values) // 2
-    return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
-
-
-def top(counts, n):
-    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:n]
-
-
-def report_spend(window, days, cutoff, today):
-    by_day = {(today - timedelta(days=k)).isoformat(): 0.0 for k in range(days - 1, -1, -1)}
-    per_job = {}
-    for j in window:
-        for e in read_log(job_dir(j["id"]) / "log.jsonl"):
-            t = parse_time(e["t"])
-            if t >= cutoff:
-                per_job[j["id"]] = per_job.get(j["id"], 0.0) + e["delta_usd"]
-                day = t.date().isoformat()
-                if day in by_day:
-                    by_day[day] += e["delta_usd"]
-    learner = sum(e["delta_usd"] for e in read_log(LEARNING / "log.jsonl") if parse_time(e["t"]) >= cutoff)
-    return {"total": round(sum(per_job.values()), 2), "by_day": {d: round(u, 2) for d, u in by_day.items()},
-            "top_jobs": [{"id": i, "usd": round(u, 2)} for i, u in top(per_job, 5)],
-            "learner": round(learner, 2), "daily_cap": budgets()["daily_usd"], "today": round(daily_spend(), 2)}
-
-
-def report_throughput(window):
-    by_stage = {"merged": 0, "rejected": 0, "needs-human": 0, "needs-info": 0, "in progress": 0}
-    for j in window:
-        by_stage[j["stage"] if j["stage"] in by_stage else "in progress"] += 1
-    merged = [j for j in window if j["stage"] == "merged" and j.get("ended")]
-    rounds = [j["round"] for j in merged]
-    hours = [(parse_time(j["ended"]) - parse_time(j["started"])).total_seconds() / 3600 for j in merged]
-    return {"by_stage": by_stage, "rounds_median": median(rounds), "rounds_max": max(rounds) if rounds else None,
-            "hours_to_merge_median": round(median(hours), 1) if hours else None}
-
-
-def report_attention(jobs, now_dt):
-    rows = []
-    for j in jobs:
-        if j["stage"] not in WAITING_REASON:
-            continue
-        name, heading = WAITING_REASON[j["stage"]]
-        path = job_dir(j["id"]) / name
-        reason = first_text_line(section(path, heading)) if path.exists() else "-"
-        since = parse_time(j.get("ended") or j["started"])
-        rows.append({"id": j["id"], "issue": j["issue"], "pr": j.get("pr"), "stage": j["stage"],
-                     "waiting_hours": round((now_dt - since).total_seconds() / 3600, 1), "reason": reason})
-    return sorted(rows, key=lambda r: -r["waiting_hours"])
-
-
-def report_escalations(window):
-    counts = {}
-    for j in window:
-        path = job_dir(j["id"]) / "decision.md"
-        if first_line(path) != "ESCALATE":
-            continue
-        why = re.sub(r"\s+", " ", re.sub(r"\d+", "", first_text_line(section(path, "Why")).lower())).strip()
-        counts[why] = counts.get(why, 0) + 1
-    return [{"why": w, "count": c} for w, c in top(counts, 5)]
-
-
-def report_findings(window):
-    counts = {}
-    for j in window:
-        for path in sorted(round_dir(j).glob("review-*.md")) if j["round"] else []:
-            for text in findings(path):
-                tag = parse_finding(text)[0] or "untagged"
-                counts[tag] = counts.get(tag, 0) + 1
-    return [{"tag": t, "count": c} for t, c in top(counts, 10)]
-
-
-def report_gate(window):
-    firsts = [first_line(round_dir(j, 1) / "checks.md") for j in window
-              if (round_dir(j, 1) / "checks.md").exists()]
-    passed = sum(1 for line in firsts if line == "GATE: PASS")
-    return {"first_try_pass": passed, "total": len(firsts),
-            "rate": round(passed / len(firsts), 2) if firsts else None}
+def report_env():
+    """The helpers the report module uses, read from this module's current globals on every call."""
+    return types.SimpleNamespace(
+        JOBS=JOBS, LEARNING=LEARNING, CONFIG=CONFIG, LABELS=LABELS, MARKER=MARKER, WAITING_REASON=WAITING_REASON,
+        job_dir=job_dir, round_dir=round_dir, section=section, first_line=first_line, parse_time=parse_time,
+        read_log=read_log, budgets=budgets, daily_spend=daily_spend, now=now, findings=findings,
+        parse_finding=parse_finding, gh=gh, gh_json=gh_json, Refused=Refused, die=die)
 
 
 def report_data(days):
-    now_dt = datetime.now(timezone.utc)
-    cutoff = now_dt - timedelta(days=days)
-    jobs, unreadable = report_jobs()
-    window = [j for j in jobs if in_window(j, cutoff)]
-    return {"days": days, "generated": now(), "unreadable": unreadable,
-            "spend": report_spend(window, days, cutoff, now_dt.date()),
-            "throughput": report_throughput(window), "attention": report_attention(jobs, now_dt),
-            "escalations": report_escalations(window), "findings": report_findings(window),
-            "gate": report_gate(window)}
-
-
-def waited(hours):
-    return f"{hours:.0f}h" if hours < 24 else f"{hours / 24:.0f}d"
+    return reporting.report_data(report_env(), days)
 
 
 def needs_you_line(data):
-    items = [f"#{a['issue']} ({a['stage']}, {waited(a['waiting_hours'])})" for a in data["attention"]]
-    return "Needs you: " + (", ".join(items) or "nothing")
-
-
-def money(usd):
-    return "-" if usd is None else f"${usd:.2f}"
-
-
-def report_md(data):
-    s, t, g = data["spend"], data["throughput"], data["gate"]
-    lines = [needs_you_line(data), "", f"Factory report, last {data['days']} days ({data['generated']})", "",
-             "## Spend", "",
-             f"- Total {money(s['total'])}, learner {money(s['learner'])}; "
-             f"last 24 h {money(s['today'])} of {money(s['daily_cap'])}",
-             "- By day: " + ", ".join(f"{d[5:]} {money(u)}" for d, u in s["by_day"].items()),
-             "- Top jobs: " + (", ".join(f"{j['id']} {money(j['usd'])}" for j in s["top_jobs"]) or "none"),
-             "", "## Throughput", "",
-             "- " + ", ".join(f"{k} {v}" for k, v in t["by_stage"].items()),
-             f"- Rounds per merged job: median {t['rounds_median'] or '-'}, max {t['rounds_max'] or '-'}",
-             f"- Hours from intake to merge (median): {t['hours_to_merge_median'] or '-'}",
-             "", "## Needs you", ""]
-    lines += [f"- #{a['issue']} ({a['stage']}, {waited(a['waiting_hours'])})"
-              + (f" PR #{a['pr']}" if a["pr"] else "") + f": {a['reason']}" for a in data["attention"]] or ["- nothing"]
-    lines += ["", "## Escalations", ""]
-    lines += [f"- {e['count']} × {e['why']}" for e in data["escalations"]] or ["- none"]
-    lines += ["", "## Findings", ""]
-    lines += [f"- {f['tag']}: {f['count']}" for f in data["findings"]] or ["- none"]
-    lines += ["", "## Gate", "",
-              f"- First-try pass: {g['first_try_pass']} of {g['total']}"
-              + (f" ({g['rate']:.0%})" if g["rate"] is not None else "")]
-    if data["unreadable"]:
-        lines += ["", f"{data['unreadable']} job folder(s) couldn't be read."]
-    return "\n".join(lines) + "\n"
-
-
-def write_report(data):
-    JOBS.mkdir(parents=True, exist_ok=True)
-    tmp = JOBS / "report.json.tmp"
-    tmp.write_text(json.dumps(data, indent=2) + "\n")
-    tmp.replace(JOBS / "report.json")
+    return reporting.needs_you_line(data)
 
 
 def cmd_report(args):
-    days, as_json, write = 7, False, False
-    rest = list(args)
-    while rest:
-        arg = rest.pop(0)
-        if arg == "--days" and rest and rest[0].isdigit() and int(rest[0]) > 0:
-            days = int(rest.pop(0))
-        elif arg == "--json":
-            as_json = True
-        elif arg == "--write":
-            write = True
-        else:
-            die(f"bad report arguments: {' '.join(args)} (use --days N with N ≥ 1, --json, --write)")
-    data = report_data(days)
-    if write:
-        write_report(data)
-    print(json.dumps(data, indent=2) if as_json else report_md(data), end="" if not as_json else "\n")
-
-
-DIGEST_DEFAULTS = {"enabled": True, "hour": 9, "days": 1}
-DIGEST_EVERY_HOURS = 20
+    reporting.cmd_report(report_env(), args)
 
 
 def digest_config():
-    return {**DIGEST_DEFAULTS, **(CONFIG.get("digest") or {})}
-
-
-def digest_label():
-    return LABELS.get("digest", "factory:digest")
-
-
-def digest_issue():
-    """The digest issue's number: an open one, else a reopened closed one, else a new pinned one."""
-    label_name = digest_label()
-    issues = sorted(gh_json("issue", "list", "--label", label_name, "--state", "all", "--limit", "20",
-                            "--json", "number,state"), key=lambda i: i["number"])
-    open_ones = [i for i in issues if i["state"] == "OPEN"]
-    if open_ones:
-        return open_ones[0]["number"]
-    if issues:
-        gh("issue", "reopen", str(issues[0]["number"]))
-        return issues[0]["number"]
-    gh("label", "create", label_name, "--color", "0E8A16", "--description", "Daily factory digest", "--force")
-    url = gh("issue", "create", "--title", "Factory digest", "--label", label_name,
-             "--body", "The factory posts a daily summary here.").strip()
-    m = re.search(r"/issues/(\d+)$", url)
-    if not m:
-        raise Refused(f"gh issue create printed {url!r}, not an issue URL")
-    number = int(m.group(1))
-    try:
-        gh("issue", "pin", str(number))
-    except Refused:
-        pass  # pinning is a convenience; the label finds the issue
-    return number
+    return reporting.digest_config(report_env())
 
 
 def cmd_digest():
-    cfg = digest_config()
-    if not cfg["enabled"]:
-        print("DIGEST: off")
-        return
-    if datetime.now().hour < cfg["hour"]:
-        print(f"DIGEST: not yet (after {cfg['hour']}:00)")
-        return
-    path = JOBS / "digest.json"
-    last = json.loads(path.read_text()) if path.exists() else {}
-    if last.get("posted") and datetime.now(timezone.utc) - parse_time(last["posted"]) < timedelta(hours=DIGEST_EVERY_HOURS):
-        print(f"DIGEST: already posted at {last['posted']}")
-        return
-    try:
-        number = digest_issue()
-        gh("issue", "comment", str(number), "--body", f"{MARKER}\n{report_md(report_data(cfg['days']))}")
-    except Refused as e:
-        print(f"NOTE: digest not posted: {str(e).splitlines()[0]}")
-        return
-    JOBS.mkdir(parents=True, exist_ok=True)
-    tmp = JOBS / "digest.json.tmp"
-    tmp.write_text(json.dumps({"posted": now(), "issue": number}) + "\n")
-    tmp.replace(path)
-    print(f"DIGEST: posted on #{number}")
+    reporting.cmd_digest(report_env())
 
 
 # ---- Commands --------------------------------------------------------------
@@ -2062,6 +1864,7 @@ def slugify(title):
 
 
 def cmd_create(number):
+    lock_slots()  # before reading the jobs, so job numbers are allocated one at a time too
     existing = [j for j in all_jobs() if j["issue"] == int(number)]
     if existing:
         die(f"issue #{number} already has job {existing[0]['id']} ({existing[0]['stage']})")
@@ -2074,7 +1877,6 @@ def cmd_create(number):
         die(f"issue #{number} is {issue['state'].lower()}")
     if LABELS["queue"] not in {l["name"] for l in issue["labels"]}:
         die(f"issue #{number} isn't labeled {LABELS['queue']}")
-    JOBS.mkdir(parents=True, exist_ok=True)
     numbers = [int(p.name.split("-")[0]) for p in JOBS.iterdir() if p.name[:3].isdigit()]
     job_id = f"{max(numbers, default=0) + 1:03d}-{slugify(issue['title'])}"
     job_dir(job_id).mkdir()
@@ -2126,9 +1928,13 @@ def cmd_queue():
     daily = daily_problem()
     jobs = {j["issue"]: j for j in all_jobs()}
     # A job is done once its PR is merged on GitHub, which also closes the issue.
-    for j in jobs.values():
+    for j in list(jobs.values()):
         if j["stage"] not in TERMINAL and j["pr"] and pr_state(j) == "MERGED":
-            save(advance(sync(j), "merged"))
+            j = lock_job(j["id"])  # the listing may be stale by now
+            if j["stage"] not in TERMINAL:
+                save(advance(sync(j), "merged"))
+            jobs[j["issue"]] = j
+            unlock_job(j["id"])
     issues = gh_json("issue", "list", "--label", LABELS["queue"], "--state", "open",
                      "--limit", "200", "--json", "number,title,body,labels")
     open_numbers = {i["number"] for i in issues}
@@ -2468,50 +2274,50 @@ def main(argv):
         elif cmd == "create" and len(args) == 1 and args[0].isdigit():
             cmd_create(args[0])
         elif cmd == "advance" and len(args) == 2:
-            job = advance(sync(resolve(args[0])), args[1])
+            job = advance(sync(resolve(args[0], lock=True)), args[1])
             save(sync(job))
             if job["stage"] != args[1] and job.get("budget_stopped"):
                 print(f"BUDGET: {job['id']} → needs-human ({job['budget_stopped']})")
             else:
                 print(f"{job['id']}: {job['stage']} (round {job['round']})")
         elif cmd == "merge" and len(args) == 1:
-            cmd_merge(resolve(args[0]))
+            cmd_merge(resolve(args[0], lock=True))
         elif cmd == "escalate" and len(args) == 1:
-            cmd_escalate(sync(resolve(args[0])), sys.stdin.read())
+            cmd_escalate(sync(resolve(args[0], lock=True)), sys.stdin.read())
         elif cmd == "record-run" and len(args) == 2 and args[1] == "learner":
             if not TAG_NAME.fullmatch(args[0]):
                 die(f"not a learning tag: {args[0]!r}")
             print(record_run(tag_dir(args[0]), "learner", sys.stdin.read()).relative_to(REPO))
         elif cmd == "record-run" and len(args) == 2:
-            job = resolve(args[0])
+            job = resolve(args[0], lock=True)
             path = record_run(job_dir(job["id"]), args[1], sys.stdin.read())
             save(sync(job))
             print(path.relative_to(REPO))
         elif cmd == "set-session" and len(args) == 3:
-            job = resolve(args[0])
+            job = resolve(args[0], lock=True)
             save({**job, "sessions": {**(job.get("sessions") or {}), args[1]: args[2]}})
             print(f"{job['id']}: {args[1]} session {args[2]}")
         elif cmd == "feedback" and len(args) == 1:
-            cmd_feedback(resolve(args[0]), sys.stdin.read())
+            cmd_feedback(resolve(args[0], lock=True), sys.stdin.read())
         elif cmd == "pr-feedback" and len(args) == 1:
-            cmd_pr_feedback(sync(resolve(args[0])))
+            cmd_pr_feedback(sync(resolve(args[0], lock=True)))
         elif cmd == "reject" and len(args) == 1:
-            cmd_reject(resolve(args[0]), sys.stdin.read())
+            cmd_reject(resolve(args[0], lock=True), sys.stdin.read())
         elif cmd == "route" and len(args) == 1:
-            cmd_route(sync(resolve(args[0])))
+            cmd_route(sync(resolve(args[0], lock=True)))
         elif cmd == "agent" and len(args) == 2 and args[1] == "learner":
             cmd_agent_learner(args[0])
         elif cmd == "agent" and len(args) == 2:
             cmd_agent(sync(resolve(args[0])), args[1])
         elif cmd == "planned" and len(args) == 1:
-            cmd_planned(sync(resolve(args[0])))
+            cmd_planned(sync(resolve(args[0], lock=True)))
         elif cmd == "sync" and len(args) == 1:
-            job = sync(resolve(args[0]))
+            job = sync(resolve(args[0], lock=True))
             save(job)
             reviews = " ".join(f"{k}:{v}" for k, v in job["reviews"].items())
             print(f"{job['id']}: {job['stage']} round {job['round']} gate {job['gate'] or '-'} {reviews}".rstrip())
         elif cmd == "evidence" and len(args) == 1:
-            job = sync(resolve(args[0]))
+            job = sync(resolve(args[0], lock=True))
             print(publish_evidence(job))
             save(job)
         elif cmd == "learn-file" and len(args) == 1:
@@ -2541,7 +2347,9 @@ def main(argv):
         elif cmd == "watch" and not args:
             cmd_watch()
         elif cmd == "ensure-worktree" and len(args) == 1:
-            cmd_ensure_worktree(resolve(args[0]))
+            cmd_ensure_worktree(resolve(args[0], lock=True))
+        elif cmd == "update-branch" and len(args) == 1:
+            cmd_update_branch(resolve(args[0], lock=True))
         else:
             die(f"bad arguments: {' '.join(argv)}\n\n{__doc__.strip()}")
     except Refused as e:

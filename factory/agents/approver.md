@@ -60,18 +60,19 @@ In this project, also ESCALATE if the change:
 
 - touches the runner, its sandbox settings, token handling or the trust rules
   for PR comments;
-- changes `LICENSE`, `vendor/factory/NOTICE` or the vendored
-  agents-best-practices skill;
+- changes `LICENSE`, `plugin/LICENSE`, `plugin/vendor/factory/NOTICE` or the
+  vendored agents-best-practices skill;
 - changes how `/factory-install`, `/factory-update` or `/factory-uninstall`
-  behave (their skills, `bin/factory-update-plan`,
-  `bin/factory-uninstall-settings`, `bin/factory_files.py`,
-  `bin/factory-manifest`), what they write outside `factory/`
+  behave (their skills, `plugin/tools/factory-update-plan`,
+  `plugin/tools/factory-uninstall-settings`, `plugin/tools/factory_files.py`,
+  `plugin/tools/factory-manifest`), what they write outside `factory/`
   (`.claude/settings.json` and hooks, GitHub labels, CI workflows), or the
-  plugin's SessionStart hook (`hooks/`). Editing a vendored factory file (an
-  agent prompt, `job`, `gate`, `doctor`, the dashboard) doesn't count by
-  itself: install and update copy every vendored file, so every change here
+  plugin's SessionStart hook (`plugin/hooks/`). Editing a vendored factory
+  file (an agent prompt, `job`, `gate`, `doctor`, the dashboard) doesn't count
+  by itself: install and update copy every vendored file, so every change here
   would;
-- bumps the plugin version or edits `.claude-plugin/`.
+- bumps the plugin version or edits `.claude-plugin/` or
+  `plugin/.claude-plugin/`.
 
 ## Write decision.md
 

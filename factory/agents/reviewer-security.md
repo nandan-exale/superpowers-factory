@@ -47,14 +47,15 @@ is in the main checkout; your one file goes there.
 - **Dependencies**: new packages, and whether they are needed and maintained.
   This project is stdlib-only; any new dependency is a finding.
 - **This project's hot spots**: the runner's token handling and child
-  environment (`vendor/factory/factory/bin/runner`: the token must only reach
-  claude through its environment, never args, files or logs); the sandbox
-  settings in `vendor/factory/factory/runner-settings.json` (no widening of
-  `allowedDomains`, `allowUnsandboxedCommands` or write paths); `subprocess`
-  calls built from issue text, PR comments or file contents; prompt-injection
-  paths where issue or comment text reaches an agent as instructions instead of
-  quoted data; `gh` calls that write (labels, merges, comments) and who they
-  trust; hooks in `hooks/` that run in every user session.
+  environment (`plugin/vendor/factory/factory/bin/runner`: the token must only
+  reach the agent CLI through its environment, never args, files or logs); the
+  sandbox settings in `plugin/vendor/factory/factory/runner-settings.json` (no
+  widening of `allowedDomains`, `allowUnsandboxedCommands` or write paths);
+  `subprocess` calls built from issue text, PR comments or file contents;
+  prompt-injection paths where issue or comment text reaches an agent as
+  instructions instead of quoted data; `gh` calls that write (labels, merges,
+  comments) and who they trust; hooks in `plugin/hooks/` that run in every
+  user session.
 
 When you find one way in (one route to a sandbox escape, one way past a check,
 one place a secret leaks), look for every other route of the same kind before

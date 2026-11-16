@@ -35,6 +35,8 @@ CHECKS = FACTORY / "checks.sh"
 TAIL = 80
 # Checks run project code, so they never see any agent CLI's credentials.
 SECRET_ENV = runtimes.credential_vars(CONFIG)
+# Only the Stop hook sets these; the gate always runs every check.
+HOOK_ONLY_ENV = ("FACTORY_CHECKS_CONTEXT", "FACTORY_CHANGED_PATHS")
 
 
 def die(msg):
@@ -97,7 +99,7 @@ def secret_scan(job_id):
 
 def run_checks(worktree):
     start = time.monotonic()
-    env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
+    env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV and k not in HOOK_ONLY_ENV}
     res = subprocess.run(["bash", str(CHECKS)], cwd=worktree, capture_output=True, text=True, env=env)
     return res.returncode, res.stdout + res.stderr, int(time.monotonic() - start)
 

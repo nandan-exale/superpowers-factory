@@ -8,11 +8,14 @@ Usage:
 
 It prints one line per step and ends with `job summary` and `SPENT: $<usd>`. SIGTERM stops every agent;
 state is in files, so the next run resumes.
+Only one run is active per clone: a second exits 75 (BUSY_EXIT) before it starts anything.
 """
 
+import fcntl
 import os
 import shutil
 import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -26,14 +29,37 @@ from orchestrator.loop import Loop  # noqa: E402
 from orchestrator.pipeline import Pipeline  # noqa: E402
 
 
+BUSY_EXIT = 75  # EX_TEMPFAIL: another run holds the lock; the runner treats it as "busy", not a failure
+
+
 def say(line):
     print(line, flush=True)
+
+
+def lock_path():
+    # The common dir, not --git-path: that is per worktree for unknown names, and every worktree must share one lock.
+    res = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=REPO, capture_output=True, text=True)
+    if res.returncode != 0:
+        raise OSError(res.stderr.strip() or "git rev-parse --git-common-dir failed")
+    return REPO / res.stdout.strip() / "factory-orchestrate.lock"
 
 
 def main(argv):
     if not argv or argv[0] != "run" or len(argv) > 2 or (len(argv) == 2 and not argv[1].isdigit()):
         print(__doc__.strip(), file=sys.stderr)
         return 2
+    try:
+        lock = open(lock_path(), "w")
+    except OSError as exc:
+        print(f"orchestrate: can't open the run lock: {exc}", file=sys.stderr)
+        return 1
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock.close()
+        print("orchestrate: another factory run is active in this clone", file=sys.stderr)
+        return BUSY_EXIT
+    # `lock` stays open, and locked, until the process ends: the OS releases it even on SIGKILL.
     cli = JobCli(REPO)
     cfg = cli.config()
     name = cfg.get("runtime", "claude")
