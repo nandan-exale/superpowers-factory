@@ -6,7 +6,7 @@
     "threshold": 3,
     "window_days": 30,
     "tags": ["missing-test", "weakened-test", "error-handling", "convention", "docs-not-updated",
-             "dead-code", "spec-gap", "input-validation", "secrets", "a11y", "ui-consistency"]
+             "dead-code", "spec-gap", "scope-creep", "input-validation", "secrets", "a11y", "ui-consistency"]
   },
   "digest": { "enabled": true, "hour": 9, "days": 1 },
   "runner": { "interval_minutes": 15, "max_minutes": 120, "keychain_service": "factory-claude-token" },
@@ -21,7 +21,8 @@
     "learning": "factory:learning",
     "digest": "factory:digest",
     "revert": "factory:revert",
-    "risk_ok": "factory:risk-ok"
+    "risk_ok": "factory:risk-ok",
+    "rejected": "factory:rejected"
   },
   "pr_feedback": {
     "allowed": []

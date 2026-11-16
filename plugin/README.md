@@ -302,7 +302,9 @@ that part is rejected or its issue is closed unmerged, the next part stops at
 - **To change it**, comment on the PR. Comments from you (and logins in
   `pr_feedback.allowed`) reach the builder automatically on the next run. You
   can also use `/factory <what to change>`.
-- **To stop** a job, close the issue or reject it with `/factory`.
+- **To stop** a job, close the issue or reject it with `/factory`. A rejection
+  labels the issue `factory:rejected`, and later intakes check new issues
+  against it; remove that label to undo it.
 
 ### What needs me?
 

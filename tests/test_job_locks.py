@@ -16,6 +16,7 @@ TIMEOUT = 30
 FAKE_GH = """#!/bin/sh
 case "$1 $2" in
   "issue view") printf '{"number": %s, "title": "Build the widget", "body": "", "author": {"login": "operator"}, "labels": [], "state": "OPEN", "url": "https://github.com/o/r/issues/%s", "comments": []}' "$3" "$3" ;;
+  "issue list") echo '[]' ;;
   "api user") echo operator ;;
 esac
 """

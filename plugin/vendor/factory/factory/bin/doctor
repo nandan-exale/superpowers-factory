@@ -32,7 +32,8 @@ EXECUTABLES = ("factory/checks.sh", "factory/bin/job", "factory/bin/gate", "fact
                "factory/bin/stop-hook", "factory/bin/doctor", "factory/bin/runner",
                "factory/bin/orchestrate")
 LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned",
-          "factory:learning", "factory:digest", "factory:revert", "factory:risk-ok")
+          "factory:learning", "factory:digest", "factory:revert", "factory:risk-ok",
+          "factory:rejected")
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):")
 CHECKS_TAIL = 20
 CI = False

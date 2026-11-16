@@ -22,6 +22,6 @@ class SafetyWordingTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1] / "plugin/skills"
         install = (root / "factory-install/SKILL.md").read_text()
         uninstall = (root / "factory-uninstall/SKILL.md").read_text()
-        for name in ("factory:revert", "factory:risk-ok"):
+        for name in ("factory:revert", "factory:risk-ok", "factory:rejected"):
             self.assertIn(f"gh label create {name}", install)
             self.assertIn(f"gh label delete {name} --yes", uninstall)

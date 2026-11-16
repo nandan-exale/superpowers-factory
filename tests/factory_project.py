@@ -67,6 +67,7 @@ class FactoryProject:
         self.sha = template.sha
         self.gh_calls = []
         self.issue = None
+        self.rejections = []
 
     def _build(self, root):
         """The ~10 git calls a project costs; done once per process, then copied."""
@@ -123,6 +124,7 @@ class FactoryProject:
 
         mod.gh = fake_gh
         mod.fetch_issue = lambda number: self.issue
+        mod.fetch_rejections = lambda: self.rejections
         mod.operator = lambda: "operator"
         return mod
 

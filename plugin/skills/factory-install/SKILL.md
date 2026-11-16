@@ -86,7 +86,7 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   changes later.
 
 - **Step 2 (Adapt), labels:** also create the planned, learning, digest,
-  revert and risk-ok labels:
+  revert, risk-ok and rejected labels:
 
   ```bash
   gh label create factory:planned --color 0E8A16 --description "Spec and plan approved before filing; the factory builds the plan as written"
@@ -94,6 +94,7 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   gh label create factory:digest --color 0E8A16 --description "Daily factory digest"
   gh label create factory:revert --color B60205 --description "Reverts a factory merge that broke the base branch"
   gh label create factory:risk-ok --color FBCA04 --description "A human reviewed this issue's risky changes; the factory may merge them"
+  gh label create factory:rejected --color BFD4F2 --description "The factory rejected this request; later intakes check new issues against it"
   ```
 
 - **Step 2 (Adapt), AGENTS.md:** add this paragraph to the Software factory

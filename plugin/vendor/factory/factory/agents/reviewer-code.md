@@ -43,6 +43,11 @@ rewrites files, such as `--fix`.
   cases, missing awaits, unhandled errors, and off-by-one or wrong-path bugs.
 - **Simplicity**: it is the smallest change that fully meets the spec, with no
   speculative options, fallbacks, hidden defaults or swallowed errors.
+- **Scope creep**: behaviour the spec (and `plan.md`, when it exists) didn't
+  ask for, such as a new option, flag, endpoint, fallback or changed default.
+  It's a CHANGES finding tagged `scope-creep`, or `other:scope-creep` when
+  `learning.tags` doesn't list it. Refactoring the change needs, and tests
+  and docs for the behaviour that was asked for, are not scope creep.
 - **Reuse**: it uses existing helpers, components and patterns instead of
   duplicating them.
 - **Conventions**: the repo's style as AGENTS.md and the neighbouring code show
@@ -61,6 +66,40 @@ rewrites files, such as `--fix`.
   and attribution (`Co-Authored-By` and the like) are the builder's, not
   yours: the builder runs on a different model than you, so never compare
   them with your own session's attribution or ask for commits to be rewritten.
+
+## Design smells
+
+Check the diff against these smells too. Each is a judgement call: put it
+under Notes as "possible <smell>", quote the hunk and give the fix, and never
+under Findings. Where AGENTS.md, a doc it lists or the neighbouring code
+endorses the pattern, don't raise it, and skip anything the repo's tooling
+already enforces.
+
+- **Unclear name**: a name that doesn't say what the thing does or holds.
+  Rename it.
+- **Duplicated logic**: the same shape of code in two hunks or files.
+  Extract it and call it from both.
+- **Feature envy**: a function that uses another object's data more than
+  its own. Move it next to that data.
+- **Data clump**: the same few values passed around together. Make them one
+  type.
+- **Primitive for a concept**: a bare string or number standing in for a
+  domain idea. Give the idea a small type.
+- **Repeated switch**: the same branching on the same kind of value in
+  several places. Share one table, or use polymorphism.
+- **Scattered change**: one logical change forces edits in many files.
+  Gather what changes together.
+- **Divergent change**: one module edited for several unrelated reasons.
+  Split it.
+- **Speculative generality**: a parameter, hook or layer no requirement
+  needs, which doesn't change behaviour (if it does, it's scope creep).
+  Inline it away.
+- **Long chain**: `a.b().c().d()` navigation the caller shouldn't depend
+  on. Hide it behind one call.
+- **Pass-through layer**: a function or class that only forwards. Call the
+  target directly.
+- **Ignored inheritance**: a subclass that overrides or ignores most of what
+  it inherits. Use composition.
 
 ## Write review-code.md
 

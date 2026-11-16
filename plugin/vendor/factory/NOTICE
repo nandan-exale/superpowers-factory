@@ -5,3 +5,8 @@ the same license.
 Modified by Nandan Thakur, starting 2026-11-12. Commit 3a0b6bd is the
 unmodified import (then at vendor/factory/); every later commit touching
 these files is a modification. `git log --follow` on a file shows both.
+
+The intake brief structure, intake's rejection memory and the code
+reviewer's scope-creep check and design-smell baseline are adapted from
+ideas in mattpocock/skills (https://github.com/mattpocock/skills,
+MIT License, Copyright (c) 2026 Matt Pocock). No text from it is included.

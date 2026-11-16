@@ -389,6 +389,10 @@ class DoctorTest(unittest.TestCase):
         self.p.set_labels([name for name in LABELS if name != "factory:planned"])
         self.assertFails("labels", "label 'factory:planned' missing")
 
+    def test_missing_rejected_label_fails(self):
+        self.p.set_labels([name for name in LABELS if name != "factory:rejected"])
+        self.assertFails("labels", "label 'factory:rejected' missing")
+
     @unittest.skipIf(shutil.which("gh", path="/usr/bin:/bin"), "a real gh is in /usr/bin or /bin")
     def test_missing_gh_warns(self):
         res = self.doctor("--fast", gh=False)
