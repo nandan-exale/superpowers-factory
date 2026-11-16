@@ -166,6 +166,7 @@ committed, so ignore only these two paths, never `.claude/` or `factory/`.
 gh label create factory --color 5319E7 --description "Build this with the software factory"
 gh label create factory:needs-info --color FBCA04 --description "The factory asked the author a question"
 gh label create factory:needs-human --color D93F0B --description "The factory needs a human decision on the PR"
+gh label create factory:rejected --color BFD4F2 --description "The factory rejected this request; later intakes check new issues against it"
 ```
 
 ## 3. Verify
