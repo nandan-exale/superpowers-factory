@@ -52,9 +52,15 @@ in Claude Code. Don't download it yourself.
    the three answers), run `"$BIN/factory-update-plan" . --resolved <path>`
    so the update stops being offered for it. Don't skip this: until every
    merge is resolved, the next session offers the update again.
-4. Run `factory/bin/doctor --fast` and report any FAIL or WARN. If it reports
-   `label 'factory:rejected' missing`, give the user this command to run
-   (creating a label is theirs to do):
-   `gh label create factory:rejected --color BFD4F2 --description "The factory rejected this request; later intakes check new issues against it"`
-5. Show `git status` and `git diff --stat`, suggest the message
+4. Create the label that rejection memory needs. `--force` makes this safe when
+   it already exists:
+
+   ```bash
+   gh label create factory:rejected --color BFD4F2 --force --description "The factory rejected this request; later intakes check new issues against it"
+   ```
+
+   If `gh` is missing or the command fails, say so and give the user this
+   command to run themselves.
+5. Run `factory/bin/doctor --fast` and report any FAIL or WARN.
+6. Show `git status` and `git diff --stat`, suggest the message
    `chore: update software factory`, and stop. Don't commit or push.

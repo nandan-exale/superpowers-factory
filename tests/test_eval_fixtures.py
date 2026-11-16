@@ -17,8 +17,8 @@ class ShippedEvalsTest(unittest.TestCase):
     def test_every_case_is_valid_and_its_agent_resolves(self):
         cases = self.ev.load_cases(self.ev.EVALS)
         self.assertEqual(sorted(f"{a}/{c}" for a, c, _ in cases), [
-            "approver/disagreeing-reviews", "intake/accept", "intake/needs-info", "intake/reject",
-            "intake/reject-already-implemented", "intake/reject-previously-rejected",
+            "approver/disagreeing-reviews", "intake/accept", "intake/needs-info",
+            "intake/needs-info-previously-rejected", "intake/reject", "intake/reject-already-implemented",
             "learner/none", "reviewer-code/clean", "reviewer-code/deleted-test", "reviewer-code/off-by-one",
             "reviewer-code/scope-creep", "reviewer-code/smell-only",
             "reviewer-security/hardcoded-key"])
