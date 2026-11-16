@@ -3,6 +3,28 @@
 All notable changes to superpowers-factory. Newest first. `scripts/release`
 adds each new section.
 
+## [0.8.0] - 2026-11-16
+
+### Added
+
+- add factory:rejected label and scope-creep tag to factory config
+- label rejected issues factory:rejected
+- write earlier rejections into the job folder before intake
+- give intake a structured brief and check existing code and rejections
+- check scope creep and note design smells in code review
+- set up the factory:rejected label from the install and update skills
+- treat earlier rejections as advice, never a reason to reject alone
+- create factory:rejected in factory-update; eval expects NEEDS-INFO for a repeat
+
+### Changed
+
+- docs: add spec and plan for sharper review and intake
+- docs: create the factory:rejected label at install and credit its sources
+- test: add evals for scope creep, smells, existing code and earlier rejections
+- test: answer issue list in the job lock tests' fake gh
+- docs: delete factory:rejected on uninstall and mention it in the README
+- Merge pull request #72 from nandan-exale/factory/025-sharpen-factory-review-and
+
 ## [0.7.3] - 2026-11-16
 
 ### Added
