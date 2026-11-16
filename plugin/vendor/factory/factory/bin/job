@@ -1120,6 +1120,15 @@ def label(kind, number, add=None, remove=None):
     gh(*args)
 
 
+def mark_rejected(job):
+    """Label the issue so later intakes see the rejection. The rejection stands even when the
+    label can't be added (say it doesn't exist on GitHub yet): bin/doctor reports that."""
+    try:
+        label("issue", job["issue"], add=LABELS["rejected"])
+    except Refused as e:
+        print(f"job: {LABELS['rejected']} not added to #{job['issue']}: {e}", file=sys.stderr)
+
+
 def pr_feedback_allowed():
     allowed = CONFIG.get("pr_feedback", {}).get("allowed", [])
     require(isinstance(allowed, list) and all(isinstance(a, str) for a in allowed),
@@ -1626,6 +1635,7 @@ def advance(job, stage):
         waiting = LABELS["needs_info"] if old == "needs-info" else LABELS["needs_human"]
         planned = [LABELS["planned"]] if job.get("planned") else []
         label("issue", job["issue"], remove=",".join([LABELS["queue"], waiting, *planned]))
+        mark_rejected(job)
         if job["pr"]:
             gh("pr", "close", str(job["pr"]))
             run(["git", "push", "origin", "--delete", job["branch"]], check=False)
@@ -1647,6 +1657,7 @@ def advance(job, stage):
             notify_waiting(job, "needs-info")
         elif stage == "rejected":
             label("issue", job["issue"], remove=LABELS["queue"])
+            mark_rejected(job)
         else:
             run_net(["git", "fetch", "origin", BASE])
             Path(job["worktree"]).parent.mkdir(parents=True, exist_ok=True)

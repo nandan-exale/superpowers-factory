@@ -52,5 +52,40 @@ class ConfigTest(RejectionTestCase):
         self.assertIn("scope-creep", self.job.learning_config()["tags"])
 
 
+class RecordTest(RejectionTestCase):
+    def setUp(self):
+        super().setUp()
+        self.create()
+
+    def test_intake_reject_adds_rejected_label(self):
+        self.decide("REJECT")
+        self.move("rejected")
+        self.assertEqual(self.load()["stage"], "rejected")
+        self.assertIn(("issue", "edit", "7", "--remove-label", "factory"), self.project.gh_calls)
+        self.assertIn(ADD_REJECTED, self.project.gh_calls)
+
+    def test_human_reject_from_needs_info_adds_rejected_label(self):
+        self.decide("NEEDS-INFO")
+        self.move("needs-info")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.job.cmd_reject(self.load(), "not for this project")
+        self.assertEqual(self.load()["stage"], "rejected")
+        self.assertIn(ADD_REJECTED, self.project.gh_calls)
+
+    def test_missing_label_keeps_rejection_and_warns(self):
+        def gh(*args):
+            if "factory:rejected" in args:
+                raise self.job.Refused("could not add label: 'factory:rejected' not found")
+            self.project.gh_calls.append(args)
+            return ""
+        self.job.gh = gh
+        self.decide("REJECT")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.move("rejected")
+        self.assertEqual(self.load()["stage"], "rejected")
+        self.assertIn("factory:rejected not added to #7", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
