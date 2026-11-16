@@ -58,11 +58,7 @@
     "allowUnsandboxedCommands": false,
     "enableWeakerNetworkIsolation": true,
     "network": {
-      "allowedDomains": [
-        "github.com",
-        "api.github.com",
-        "*.githubusercontent.com"
-      ],
+      "allowedDomains": ["github.com", "api.github.com", "*.githubusercontent.com"],
       "allowLocalBinding": true,
       "strictAllowlist": true
     }

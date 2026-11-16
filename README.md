@@ -5,7 +5,8 @@
 **You design the feature with Claude. The factory builds it.** A Claude Code
 plugin: you brainstorm and plan with the Superpowers skills, the plan becomes
 one GitHub issue, and an unattended factory of agents builds, checks, reviews
-and ships it as one pull request.
+and ships it as one pull request. Specs and plans from any other planning tool
+work too, and so does any plain issue labeled `factory`.
 
 ```text
 /plugin marketplace add nandan-exale/superpowers-factory

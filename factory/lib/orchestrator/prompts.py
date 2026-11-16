@@ -27,6 +27,16 @@ def build(head, n, port_, why=""):
     return f"{head} Build round {n}. Port: {port_}." + (f" {why}" if why else "")
 
 
+def merged_base(base):
+    return f"The factory merged origin/{base} into the branch; push that merge with your work."
+
+
+def finish_merge(base, paths):
+    where = f" and it conflicts in {' '.join(paths)}" if paths else ", and that merge isn't finished"
+    return (f"The factory started merging origin/{base} into the branch{where}. Resolve only the conflicted "
+            "files, stage them, run git commit --no-edit, then do the rest of this round.")
+
+
 def review(head, n, port_):
     return f"{head} Review round {n}." + (f" Port: {port_}." if port_ is not None else "")
 

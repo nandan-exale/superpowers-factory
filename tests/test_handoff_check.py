@@ -134,7 +134,8 @@ class HandoffCheckTest(unittest.TestCase):
         self.assertTrue(all("--limit" not in c for c in self.calls()))
 
     def test_bad_paths_fail_and_skip_the_rest(self):
-        for bad in ("docs/superpowers/../secret.md", "README.md", "docs/superpowers/plans/plan.txt"):
+        for bad in ("docs/superpowers/../secret.md", "factory/agents/builder.md", "/tmp/plan.md",
+                    "docs/superpowers/plans/plan.txt"):
             with self.subTest(bad=bad):
                 res, lines, facts = self.run_check(plan=bad)
                 self.assert_fails(res, lines, "paths")
@@ -143,8 +144,12 @@ class HandoffCheckTest(unittest.TestCase):
                 self.assertEqual(facts, {})
 
     def test_spec_path_is_checked_too(self):
-        res, lines, _ = self.run_check(spec="notes.md")
+        res, lines, _ = self.run_check(spec="notes.txt")
         self.assert_fails(res, lines, "paths")
+
+    def test_paths_outside_docs_superpowers_pass(self):
+        res, lines, _ = self.run_check(spec="specs/001-widget/spec.md")
+        self.assertIn("PASS paths", lines)
 
     def test_shell_metacharacters_reach_nothing(self):
         bad = "docs/superpowers/plans/a;touch pwned.md"

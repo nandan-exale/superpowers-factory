@@ -26,7 +26,7 @@ that, scoped so it can land as one small pull request.
 
 ## Decide
 
-This project is superpowers-factory: a Claude Code plugin that hands Superpowers-approved plans to a vendored software factory. Work here changes the plugin (`bin/`, `skills/`, `hooks/`, `scripts/`, `tests/`, docs) or the factory's source in `vendor/factory/`, never the installed copy in `factory/` and `.claude/`.
+This project is superpowers-factory: a Claude Code plugin that hands Superpowers-approved plans to a vendored software factory. Work here changes the plugin (`plugin/tools/`, `plugin/skills/`, `plugin/hooks/`), `scripts/`, `tests/`, docs, or the factory's source in `plugin/vendor/factory/`, never the installed copy in `factory/` and `.claude/`.
 
 - **ACCEPT** when the request is clear, fits the project, and can be built and
   reviewed as one pull request. If it is too big, accept a smaller first slice

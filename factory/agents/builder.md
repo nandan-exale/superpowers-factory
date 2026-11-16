@@ -55,6 +55,13 @@ other jobs.
   `factory/config.json`; the gate fails the branch if you do. If the spec
   can't be met without changing a protected file, write a BLOCKED build.md
   that says which file and why.
+- Never merge or rebase the base branch yourself: your sandbox can't write
+  protected files the base may have changed. Instead the factory merges the
+  base into the branch before each round after the first. When it committed
+  that merge, push it with your work. When the merge conflicts, the prompt
+  names the files: resolve only those, stage them and run
+  `git commit --no-edit`. When feedback asks you to merge the base, that is the
+  merge your prompt names.
 
 ## Planned jobs
 

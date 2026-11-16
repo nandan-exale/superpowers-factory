@@ -16,7 +16,8 @@ import re
 import subprocess
 import sys
 
-PATH_RULE = re.compile(r"docs/superpowers/[A-Za-z0-9._/-]+\.md")
+PATH_RULE = re.compile(r"[A-Za-z0-9._][A-Za-z0-9._/-]*\.md")
+EXCLUDED_DIRS = ("factory/", ".worktrees/")
 TASK_HEADING = re.compile(r"### Task \d+")
 RISKY_ALWAYS = r"git tag|git push|--force|git merge"
 DEFAULT_QUEUE, DEFAULT_PLANNED, DEFAULT_MAX_TASKS = "factory", "factory:planned", 8
@@ -93,9 +94,10 @@ def check_labels(config):
 
 def check_paths(paths):
     for path in paths:
-        if not PATH_RULE.fullmatch(path) or ".." in path.split("/"):
-            return (f"{path} isn't a .md file under docs/superpowers/ without a `..` segment; "
-                    "move the file under docs/superpowers/")
+        if (not PATH_RULE.fullmatch(path) or {"..", ""} & set(path.split("/"))
+                or path.startswith(EXCLUDED_DIRS)):
+            return (f"{path} isn't a repo-relative .md file without a `..` segment, outside "
+                    f"{' and '.join(EXCLUDED_DIRS)}; pass the path from the project root")
     return None
 
 
