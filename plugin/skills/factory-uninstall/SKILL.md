@@ -70,6 +70,7 @@ in Claude Code. Don't download it yourself.
     gh label delete factory:digest --yes
     gh label delete factory:revert --yes
     gh label delete factory:risk-ok --yes
+    gh label delete factory:rejected --yes
     ```
 
     `/factory-install` (or `"$PLUGIN/tools/factory-state" reset` to get the
