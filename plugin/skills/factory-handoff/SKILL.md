@@ -1,11 +1,12 @@
 ---
 name: factory-handoff
-description: Use after superpowers:writing-plans when the user wants the software factory to build the plan unattended instead of executing it in this session. Files one GitHub issue labeled factory + factory:planned that points at the committed spec and plan.
+description: Use after superpowers:writing-plans, or after any other skill or tool has produced an approved spec and plan, when the user wants the software factory to build the plan unattended instead of executing it in this session. Files one GitHub issue labeled factory + factory:planned that points at the committed spec and plan.
 ---
 
 # Factory handoff
 
-Hand one approved Superpowers spec + plan to the software factory. Your only
+Hand one approved spec + plan to the software factory. They can come from
+Superpowers or any other planning skill or tool. Your only
 output is one GitHub issue. You never write anything under `factory/`, never
 start `/factory run`, and never edit the spec or plan.
 
@@ -14,8 +15,11 @@ Announce: "I'm using factory-handoff to file this plan for the factory."
 ## 1. Find the spec and plan
 
 Use the spec and plan from this conversation. If there are none, take the
-newest file in `docs/superpowers/specs/` and in `docs/superpowers/plans/`.
-Show both paths and ask your human partner to confirm before going on.
+newest file in `docs/superpowers/specs/` and in `docs/superpowers/plans/`,
+or ask your human partner where their planning tool saved them. Any `.md`
+file in the repo works, outside `factory/` and `.worktrees/`; a tool that
+puts spec and plan in one file can pass the same path twice. Show both
+paths and ask your human partner to confirm before going on.
 
 ## 2. Check, and stop with the reason if anything fails
 
@@ -91,7 +95,7 @@ the body to a temp file, then create the issue:
 ````markdown
 <two or three sentences: what this builds and why, from the spec>
 
-Spec and plan were approved with Superpowers; the factory builds the plan as written.
+Spec and plan were approved before filing; the factory builds the plan as written.
 
 ```factory-plan
 spec: <spec path>

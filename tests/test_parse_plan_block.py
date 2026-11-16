@@ -49,8 +49,24 @@ class ParsePlanBlockTest(unittest.TestCase):
     def test_two_blocks(self):
         self.refused(plan_body(SHA) + plan_body(SHA), "found 2")
 
-    def test_path_outside_docs_superpowers(self):
-        self.refused(plan_body(SHA, spec="src/evil.md"), "under docs/superpowers/")
+    def test_any_planning_tools_paths(self):
+        for spec, plan in (("specs/001-widget/spec.md", "specs/001-widget/plan.md"),
+                           (".kiro/specs/widget/design.md", ".kiro/specs/widget/tasks.md"),
+                           ("PLAN.md", "docs/plans/widget.md")):
+            with self.subTest(plan=plan):
+                parsed = self.parse(plan_body(SHA, spec=spec, plan=plan))
+                self.assertEqual((parsed["spec"], parsed["plan"]), (spec, plan))
+
+    def test_path_not_markdown(self):
+        self.refused(plan_body(SHA, spec="src/evil.py"), ".md")
+
+    def test_path_in_the_factorys_own_folders(self):
+        for path in ("factory/agents/builder.md", ".worktrees/job-1/plan.md"):
+            with self.subTest(path=path):
+                self.refused(plan_body(SHA, plan=path), "factory/")
+
+    def test_absolute_path(self):
+        self.refused(plan_body(SHA, plan="/etc/plan.md"), "relative")
 
     def test_path_with_dotdot(self):
         self.refused(plan_body(SHA, plan="docs/superpowers/../../etc/passwd.md"), "no `..`")

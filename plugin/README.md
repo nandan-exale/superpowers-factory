@@ -7,7 +7,8 @@
 superpowers-factory is a Claude Code plugin that joins two halves of the work:
 
 - **Design, with you.** You brainstorm and write a plan interactively using the
-  [Superpowers](#requirements) skills.
+  [Superpowers](#requirements) skills, or
+  [any other planning tool](#plans-from-other-tools).
 - **Build, unattended.** The plan becomes one GitHub issue. A software factory of
   Claude agents picks it up, writes the code on its own branch, runs your
   project's checks, reviews the change, and either merges the pull request or
@@ -121,14 +122,52 @@ agents.
 Plain issues work too: label any issue `factory` and the factory takes it from
 intake. The plan-based route is better for anything larger than a small fix.
 
+### Plans from other tools
+
+Superpowers is one way to write the spec and plan, not the only one. The
+factory doesn't care which skill, plugin or tool wrote them (Spec Kit, Kiro,
+your own template, or by hand), as long as:
+
+- **They're Markdown files in the repo**, at any path relative to the root,
+  outside `factory/` and `.worktrees/`, with no `..`. For example
+  `specs/001-csv-export/plan.md` or `.kiro/specs/csv-export/tasks.md`. One
+  file can serve as both spec and plan.
+- **They're committed and pushed** to your base branch. The issue pins the
+  commit, so later edits don't reach the job.
+- **The issue says where they are.** Ask Claude to "hand this plan to the
+  factory" and `/factory-handoff` runs the checks and files the issue, or
+  write it yourself: label it `factory` and `factory:planned`, file it from
+  the account that runs the factory, and put this block in the body:
+
+  ````markdown
+  ```factory-plan
+  spec: specs/001-csv-export/spec.md
+  plan: specs/001-csv-export/plan.md
+  commit: <full 40-character sha on the base branch>
+  risk: medium
+  surfaces: [ui]
+  ```
+  ````
+
+  `risk` is `low`, `medium` or `high`. `surfaces` lists `ui`, `security`,
+  both or neither (`[]`).
+
+The builder carries out the plan in order, whatever its format. Only
+[splitting a large plan into parts](#everyday-use) needs each task to start
+with a `### Task N` heading, which is how the factory counts tasks.
+
 ---
 
 ## Requirements
 
 - **Claude Code** 2.1.257 or later. The plugin needs a terminal, git and a
   local checkout, so it does nothing useful in Claude chat or Cowork.
-- **The Superpowers plugin**, installed in Claude Code. The factory's builder
-  uses its test-driven-development, debugging and verification skills.
+- **The Superpowers plugin** (recommended), installed in Claude Code. It
+  gives you the brainstorming and writing-plans flow, and the factory's
+  builder uses its test-driven-development, debugging and verification
+  skills when they're there. Without it, plan with any tool
+  ([Plans from other tools](#plans-from-other-tools)) or file plain issues;
+  the builder then works test-first by its own instructions.
 - **GitHub**: a project with an `origin` on GitHub, and the
   GitHub CLI (`gh`) logged in with an account that can push
   and manage labels.
@@ -233,7 +272,7 @@ install again:
 | `/factory-install` | Claude Code, in a project | Sets the factory up in the current project. |
 | `/factory-update` | Claude Code, in a project | Updates an installed factory to the plugin's version. Keeps your changes, shows every diff, never commits. |
 | `/factory-uninstall` | Claude Code, in a project | Removes the factory from this project (keeps job history and labels). |
-| `/factory-handoff` | Claude Code, after a plan | Files the committed spec and plan as one `factory:planned` issue. |
+| `/factory-handoff` | Claude Code, after a plan | Files the committed spec and plan, from Superpowers or any other tool, as one `factory:planned` issue. |
 | `/factory run` | Claude Code | Builds every open `factory` issue, `concurrency` at a time. |
 | `/factory run <n>` | Claude Code | Builds only issue `#n`. |
 | `factory/bin/orchestrate run [<n>]` | terminal | The same as `/factory run [<n>]`, without a Claude Code session. |

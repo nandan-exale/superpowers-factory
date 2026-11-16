@@ -89,7 +89,7 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   revert and risk-ok labels:
 
   ```bash
-  gh label create factory:planned --color 0E8A16 --description "Planned with Superpowers; the factory builds the plan as written"
+  gh label create factory:planned --color 0E8A16 --description "Spec and plan approved before filing; the factory builds the plan as written"
   gh label create factory:learning --color C5DEF5 --description "Factory-proposed check or rule; add 'factory' to build it"
   gh label create factory:digest --color 0E8A16 --description "Daily factory digest"
   gh label create factory:revert --color B60205 --description "Reverts a factory merge that broke the base branch"
@@ -100,8 +100,9 @@ Read `$VENDOR/INSTALL.md` and follow it, with these changes:
   section:
 
   ```markdown
-  Issues labeled `factory:planned` were designed with Superpowers and filed
-  with `/factory-handoff`. They skip intake and the spec writer: the factory
+  Issues labeled `factory:planned` carry a spec and plan approved before
+  filing (with Superpowers or any other planning tool), usually filed with
+  `/factory-handoff`. They skip intake and the spec writer: the factory
   copies the committed spec and plan, and the builder carries out the plan.
   ```
 

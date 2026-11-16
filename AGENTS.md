@@ -93,8 +93,10 @@ Each job works in its own git worktree, a full checkout of the repo at
 `.worktrees/<job-id>` (gitignored). A tool run from the repo root that doesn't
 read `.gitignore` sees those copies too; exclude `.worktrees/` in its config.
 
-Issues labeled `factory:planned` were designed with Superpowers and filed
-with `/factory-handoff`. They skip intake and the spec writer: the factory
+Issues labeled `factory:planned` carry a spec and plan approved before
+filing (with Superpowers or any other planning tool), usually filed with
+`/factory-handoff`. The spec and plan may live at any repo-relative `.md`
+path outside `factory/` and `.worktrees/`. They skip intake and the spec writer: the factory
 copies the committed spec and plan, and the builder carries out the plan.
 
 This repo is the factory's own source. A job that changes the factory edits
