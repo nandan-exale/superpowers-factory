@@ -32,7 +32,8 @@ EXECUTABLES = ("factory/checks.sh", "factory/bin/job", "factory/bin/gate", "fact
                "factory/bin/stop-hook", "factory/bin/doctor", "factory/bin/runner",
                "factory/bin/orchestrate")
 LABELS = ("factory", "factory:needs-info", "factory:needs-human", "factory:planned",
-          "factory:learning", "factory:digest", "factory:revert", "factory:risk-ok")
+          "factory:learning", "factory:digest", "factory:revert", "factory:risk-ok",
+          "factory:rejected")
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_-]+):")
 CHECKS_TAIL = 20
 CI = False
@@ -364,8 +365,8 @@ def unit_name():
 def linux_runner_checks(name, service):
     """service is None when the runtime needs no stored credential (copilot)."""
     problems = [] if name != "claude" else [
-        fail(f"{tool} not found; Claude Code's Linux sandbox needs bubblewrap and socat "
-             "(apt install bubblewrap socat)") for tool in ("bwrap", "socat") if not shutil.which(tool)]
+        fail(f"{tool} not found; Claude Code's Linux sandbox needs the bubblewrap and socat "
+             "packages from your distribution") for tool in ("bwrap", "socat") if not shutil.which(tool)]
     token = service is None
     if not token and shutil.which("secret-tool"):
         res = subprocess.run(["secret-tool", "lookup", "service", service], capture_output=True, text=True)
